@@ -1,0 +1,9 @@
+api/
+src/
+test/
+test-support/
+scripts/
+.runtime-data/
+.runtime-data-backups/
+notes/
+*.md
