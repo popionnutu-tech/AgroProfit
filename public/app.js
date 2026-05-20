@@ -329,6 +329,32 @@ async function login(username, password) {
   return payload.user;
 }
 
+function getTelegramWebApp() {
+  const tg = typeof window !== "undefined" ? window.Telegram?.WebApp : null;
+  if (!tg || !tg.initData) {
+    return null;
+  }
+  return tg;
+}
+
+async function telegramLogin(initData) {
+  const response = await nativeFetch("/api/auth/telegram", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ initData })
+  });
+
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload.error || "Autentificarea Telegram a esuat.");
+  }
+
+  return payload.user;
+}
+
 async function logout() {
   await nativeFetch("/api/auth/logout", {
     method: "POST",
@@ -3249,8 +3275,28 @@ async function bootstrap() {
   togglePasswordPanel(false);
   stopAutomationRefreshLoop();
 
+  const tg = getTelegramWebApp();
+  if (tg) {
+    try {
+      tg.ready();
+      tg.expand();
+      document.body.classList.add("telegram-webapp");
+    } catch (tgError) {
+      console.error("Telegram WebApp init failed:", tgError.message);
+    }
+  }
+
   try {
-    const user = await loadSession();
+    let user = await loadSession();
+
+    if (!user && tg) {
+      try {
+        user = await telegramLogin(tg.initData);
+      } catch (telegramError) {
+        console.error("Telegram auto-login failed:", telegramError.message);
+      }
+    }
+
     if (!user) {
       showLoginScreen();
       return;

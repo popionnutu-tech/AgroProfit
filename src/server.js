@@ -12,7 +12,13 @@ const {
 const { startCloseOfDayScheduler } = require("./close-of-day");
 const { startCriticalAlertMonitor } = require("./critical-alerts");
 const { attachCurrentUser, requireAuth, requireRoles } = require("./auth");
-const { changePasswordHandler, loginHandler, logoutHandler, meHandler } = require("./auth-handlers");
+const {
+  changePasswordHandler,
+  loginHandler,
+  logoutHandler,
+  meHandler,
+  telegramLoginHandler
+} = require("./auth-handlers");
 const {
   createConfigEntryHandler,
   getConfigHandler,
@@ -78,24 +84,23 @@ app.disable("x-powered-by");
 
 app.use((req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
-  res.setHeader("X-Frame-Options", "DENY");
   res.setHeader("Referrer-Policy", "no-referrer");
   res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
-  res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
-  res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
+  res.setHeader("Cross-Origin-Opener-Policy", "same-origin-allow-popups");
+  res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
   res.setHeader(
     "Content-Security-Policy",
     [
       "default-src 'self'",
-      "script-src 'self'",
-      "style-src 'self' https://fonts.googleapis.com",
+      "script-src 'self' https://telegram.org",
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "font-src 'self' https://fonts.gstatic.com",
-      "img-src 'self' data:",
+      "img-src 'self' data: https:",
       "connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com",
       "object-src 'none'",
       "base-uri 'self'",
       "form-action 'self'",
-      "frame-ancestors 'none'"
+      "frame-ancestors 'self' https://web.telegram.org https://t.me"
     ].join("; ")
   );
   next();
@@ -107,6 +112,7 @@ app.use(express.static(path.join(process.cwd(), "public")));
 
 app.get("/api/health", healthHandler);
 app.post("/api/auth/login", loginHandler);
+app.post("/api/auth/telegram", telegramLoginHandler);
 app.post("/api/auth/logout", logoutHandler);
 app.get("/api/auth/me", meHandler);
 app.post("/api/auth/change-password", requireAuth, changePasswordHandler);

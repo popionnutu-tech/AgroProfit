@@ -33,8 +33,10 @@ async function getConfigHandler(_req, res) {
 
 async function createConfigEntryHandler(req, res, entity) {
   try {
+    const body = getBody(req);
     const entry = await createConfigEntry(entity, {
-      ...getBody(req),
+      ...body,
+      changeReason: body.changeReason || `Adaugare ${entity} prin dashboard`,
       changedBy: getActorLabel(req)
     });
     return sendJson(res, 201, entry);
@@ -46,8 +48,10 @@ async function createConfigEntryHandler(req, res, entity) {
 
 async function updateConfigEntryHandler(req, res, entity, id) {
   try {
+    const body = getBody(req);
     const entry = await updateConfigEntry(entity, id, {
-      ...getBody(req),
+      ...body,
+      changeReason: body.changeReason || `Modificare ${entity} prin dashboard`,
       changedBy: getActorLabel(req)
     });
 
@@ -58,7 +62,7 @@ async function updateConfigEntryHandler(req, res, entity, id) {
     return sendJson(res, 200, entry);
   } catch (error) {
     console.error(`Failed to update config entry for ${entity}:`, error.message);
-    return sendJson(res, 400, { error: "Nu am putut actualiza elementul." });
+    return sendJson(res, 400, { error: error.message || "Nu am putut actualiza elementul." });
   }
 }
 

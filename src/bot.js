@@ -381,17 +381,28 @@ function createRecentChangesMessage(auditLogs) {
   ].join("\n");
 }
 
+const MINI_APP_URL = process.env.MINI_APP_URL || process.env.BASE_URL || "";
+
+function createMiniAppKeyboard() {
+  if (!MINI_APP_URL) {
+    return null;
+  }
+  return Markup.inlineKeyboard([
+    [Markup.button.webApp("Deschide AgroProfit", MINI_APP_URL)]
+  ]);
+}
+
 function createHelpMessage() {
   return [
-    "Bot operational Agro Receptie.",
-    "Comenzi:",
-    "/receptie - inregistreaza marfa noua",
-    "/raport [YYYY-MM-DD] - raport zilnic scurt",
-    "/deschise - documente neinchise",
-    "/plati - loturi neachitate sau partial achitate",
-    "/reclamatii - reclamatii deschise",
-    "/modificari - modificari si redeschideri recente",
-    "/anuleaza - opreste fluxul curent"
+    "Bun venit in AgroProfit!",
+    "",
+    "Toata operarea (receptii, livrari, plati, rapoarte, reclamatii) se face din aplicatia AgroProfit.",
+    "Apasa butonul de mai jos sau butonul de meniu (≡) ca sa deschizi aplicatia.",
+    "",
+    "Bot-ul iti trimite automat:",
+    "• raportul de inchidere a zilei",
+    "• alerte critice (cand sunt probleme operationale)",
+    "• confirmari rapide pe rapoarte"
   ].join("\n");
 }
 
@@ -481,42 +492,20 @@ function startBot(token) {
   const bot = new Telegraf(token);
   activeBot = bot;
 
-  bot.start(async (ctx) => {
+  async function sendWelcome(ctx) {
     const linkMessage = await tryLinkTelegramAccount(ctx);
-    return ctx.reply([linkMessage, "", createHelpMessage()].join("\n"));
-  });
-  bot.command("ajutor", (ctx) => ctx.reply(createHelpMessage()));
-
-  bot.command("anuleaza", (ctx) => {
-    sessions.delete(ctx.chat.id);
-    return ctx.reply("Fluxul a fost anulat.");
-  });
-
-  bot.command("receptie", (ctx) => {
-    sessions.set(ctx.chat.id, {
-      stepIndex: 0,
-      payload: {},
-      receivedBy: ctx.from?.username || ctx.from?.first_name || "telegram-user"
-    });
-    return ctx.reply(["Pornim receptia de marfa.", steps[0].question].join("\n"));
-  });
-
-  bot.command("raport", async (ctx) => {
-    try {
-      const dateValue = parseDateArgument(ctx.message?.text);
-      if (!dateValue) {
-        return ctx.reply("Data trebuie sa fie in formatul YYYY-MM-DD.");
-      }
-
-      const snapshot = await loadManagementSnapshot(dateValue);
-      await replyWithMessages(ctx, buildManagementTelegramReportMessages(snapshot));
-      const actionPayload = createReportActionMessage(dateValue, resolveLinkedUsername(ctx));
-      return ctx.reply(actionPayload.text, actionPayload.extra);
-    } catch (error) {
-      console.error("Failed to build Telegram daily report:", error.message);
-      return ctx.reply("Nu am putut genera raportul zilnic.");
+    const keyboard = createMiniAppKeyboard();
+    const text = [linkMessage, "", createHelpMessage()].filter(Boolean).join("\n");
+    if (keyboard) {
+      return ctx.reply(text, keyboard);
     }
-  });
+    return ctx.reply(text);
+  }
+
+  bot.start(sendWelcome);
+  bot.command("ajutor", sendWelcome);
+  bot.command("help", sendWelcome);
+  bot.command("app", sendWelcome);
 
   bot.action(/^cdr:(confirm|details|resolve|run):(\d{4}-\d{2}-\d{2})$/, async (ctx) => {
     const [, action, dateValue] = ctx.match || [];
@@ -608,78 +597,11 @@ function startBot(token) {
     }
   });
 
-  bot.command("deschise", async (ctx) => {
-    try {
-      const [receipts, deliveries] = await Promise.all([listReceipts(), listDeliveries()]);
-      return ctx.reply(createOpenDocumentsMessage(receipts, deliveries));
-    } catch (error) {
-      console.error("Failed to load open documents:", error.message);
-      return ctx.reply("Nu am putut incarca documentele neinchise.");
-    }
-  });
-
-  bot.command("plati", async (ctx) => {
-    try {
-      const receipts = await listReceipts();
-      return ctx.reply(createOutstandingPaymentsMessage(receipts));
-    } catch (error) {
-      console.error("Failed to load outstanding payments:", error.message);
-      return ctx.reply("Nu am putut incarca loturile neachitate.");
-    }
-  });
-
-  bot.command("reclamatii", async (ctx) => {
-    try {
-      const complaints = await listComplaints();
-      return ctx.reply(createOpenComplaintsMessage(complaints));
-    } catch (error) {
-      console.error("Failed to load open complaints:", error.message);
-      return ctx.reply("Nu am putut incarca reclamatiile deschise.");
-    }
-  });
-
-  bot.command("modificari", async (ctx) => {
-    try {
-      const auditLogs = await listAuditLogs();
-      return ctx.reply(createRecentChangesMessage(auditLogs));
-    } catch (error) {
-      console.error("Failed to load recent changes:", error.message);
-      return ctx.reply("Nu am putut incarca modificarile recente.");
-    }
-  });
-
   bot.on("text", async (ctx) => {
     if (!ctx.message?.text || ctx.message.text.startsWith("/")) {
       return;
     }
-
-    const session = sessions.get(ctx.chat.id);
-    if (!session) {
-      return;
-    }
-
-    const currentStep = steps[session.stepIndex];
-    session.payload[currentStep.key] = ctx.message.text === "-" ? "" : ctx.message.text;
-    session.stepIndex += 1;
-
-    if (session.stepIndex >= steps.length) {
-      try {
-        const receipt = await createReceipt({
-          ...session.payload,
-          source: "telegram",
-          receivedBy: session.receivedBy,
-          status: "Noua"
-        });
-
-        sessions.delete(ctx.chat.id);
-        return ctx.reply(createReceiptMessage(receipt));
-      } catch (error) {
-        console.error("Failed to save Telegram receipt:", error.message);
-        return ctx.reply("A aparut o eroare la salvarea receptiei. Incearca din nou.");
-      }
-    }
-
-    return ctx.reply(steps[session.stepIndex].question);
+    return sendWelcome(ctx);
   });
 
   bot.catch((error) => {
@@ -688,8 +610,24 @@ function startBot(token) {
 
   bot
     .launch()
-    .then(() => {
+    .then(async () => {
       console.log("Telegram bot polling started.");
+      if (MINI_APP_URL) {
+        try {
+          await bot.telegram.setChatMenuButton({
+            menu_button: {
+              type: "web_app",
+              text: "AgroProfit",
+              web_app: { url: MINI_APP_URL }
+            }
+          });
+          console.log("Telegram chat menu button set to Mini App.");
+        } catch (menuError) {
+          console.error("Failed to set chat menu button:", menuError.message);
+        }
+      } else {
+        console.warn("MINI_APP_URL not set — chat menu button not configured.");
+      }
     })
     .catch((error) => {
       activeBot = null;

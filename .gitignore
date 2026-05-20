@@ -3,3 +3,5 @@ node_modules/
 data/
 .runtime-data/
 .runtime-data-backups/
+.vercel
+.claude/

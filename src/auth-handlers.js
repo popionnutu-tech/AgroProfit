@@ -1,4 +1,10 @@
-const { appendAuditLog, findUserByUsername, updateUserPasswordById } = require("./storage");
+const {
+  appendAuditLog,
+  createUser,
+  findUserByUsername,
+  updateUserById,
+  updateUserPasswordById
+} = require("./storage");
 const {
   clearFailedLogins,
   clearFailedLoginsForUsername,
@@ -16,6 +22,8 @@ const {
   validatePasswordPolicy,
   verifyPassword
 } = require("./auth");
+const { validateInitData } = require("./telegram-webapp-auth");
+const { linkTelegramUser } = require("./automation-state");
 
 function sendJson(res, statusCode, payload) {
   if (typeof res.status === "function" && typeof res.json === "function") {
@@ -210,9 +218,115 @@ async function changePasswordHandler(req, res) {
   }
 }
 
+function buildTelegramUsername(tgUser) {
+  const handle = String(tgUser?.username || "").trim().toLowerCase();
+  if (handle) return handle;
+  if (tgUser?.id) return `tg${tgUser.id}`;
+  return "";
+}
+
+function buildTelegramDisplayName(tgUser) {
+  const first = String(tgUser?.first_name || "").trim();
+  const last = String(tgUser?.last_name || "").trim();
+  const combined = [first, last].filter(Boolean).join(" ");
+  return combined || tgUser?.username || `Telegram ${tgUser?.id || ""}`;
+}
+
+async function telegramLoginHandler(req, res) {
+  const body = getBody(req);
+  const initData = String(body.initData || "");
+  const botToken = process.env.TELEGRAM_BOT_TOKEN;
+
+  if (!initData) {
+    return sendJson(res, 400, { error: "initData lipseste." });
+  }
+
+  if (!botToken || botToken === "replace_me") {
+    return sendJson(res, 503, { error: "Telegram bot nu este configurat." });
+  }
+
+  const validation = validateInitData(initData, botToken);
+  if (!validation.valid) {
+    return sendJson(res, 401, { error: `initData invalid (${validation.reason}).` });
+  }
+
+  const tgUser = validation.user;
+  const internalUsername = buildTelegramUsername(tgUser);
+  if (!internalUsername) {
+    return sendJson(res, 400, { error: "Telegram user nu contine identificator." });
+  }
+
+  try {
+    let user = await findUserByUsername(internalUsername);
+
+    if (!user) {
+      user = await createUser({
+        name: buildTelegramDisplayName(tgUser),
+        username: internalUsername,
+        roleCode: "operator",
+        channel: "telegram",
+        active: true,
+        changeReason: "Auto-provisioned din Telegram Mini App",
+        changedBy: "telegram"
+      });
+    } else if (!String(user.channel || "").includes("telegram")) {
+      try {
+        user = await updateUserById(user.id, {
+          channel: user.channel ? `${user.channel}+telegram` : "telegram",
+          changeReason: "Adaugat canal Telegram din Mini App",
+          changedBy: "telegram"
+        });
+      } catch {
+        // ignore if update fails (e.g. user inactive) — fallthrough handled below
+      }
+    }
+
+    if (!user || user.active === false) {
+      return sendJson(res, 403, { error: "Contul tau este dezactivat." });
+    }
+
+    if (tgUser?.id) {
+      try {
+        linkTelegramUser(user.username, {
+          chatId: tgUser.id,
+          telegramUsername: String(tgUser.username || "").trim().toLowerCase(),
+          firstName: tgUser.first_name || ""
+        });
+      } catch (linkError) {
+        console.error("Failed to link Telegram chat:", linkError.message);
+      }
+    }
+
+    const token = createSession(user);
+    setSessionCookie(res, req, token);
+
+    await appendAuditLog({
+      entityType: "auth",
+      entityId: user.id,
+      action: "telegram-login",
+      reason: "Autentificare prin Telegram Mini App",
+      user: user.name || user.username,
+      newValue: {
+        username: user.username,
+        telegramUserId: tgUser?.id || null,
+        telegramUsername: tgUser?.username || null
+      }
+    });
+
+    return sendJson(res, 200, {
+      ok: true,
+      user: sanitizeUserForSession(user)
+    });
+  } catch (error) {
+    console.error("Telegram login failed:", error.message);
+    return sendJson(res, 500, { error: "Nu am putut procesa autentificarea Telegram." });
+  }
+}
+
 module.exports = {
   changePasswordHandler,
   loginHandler,
   logoutHandler,
-  meHandler
+  meHandler,
+  telegramLoginHandler
 };
