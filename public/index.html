@@ -53,7 +53,7 @@
             <button class="view-tab sidebar-item is-active" data-view="acasa" type="button">
               <span class="sidebar-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11.5 12 4l9 7.5"/><path d="M5 10.5V20a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1v-9.5"/></svg>
-              </span><span>Acasă</span>
+              </span><span>Dashboard</span>
             </button>
             <button class="view-tab sidebar-item" data-view="receptii" data-access="receipts-read" type="button">
               <span class="sidebar-icon" aria-hidden="true">
@@ -181,7 +181,86 @@
           <div class="silos-grid" id="silos-grid"></div>
         </section>
 
-        <section class="stats" id="stats" data-view="acasa"></section>
+        <section class="dashboard" data-view="acasa">
+          <div class="dash-grid">
+
+            <!-- HERO: featured KPI (Valoare estimata) -->
+            <article class="dash-hero" id="dash-hero">
+              <span class="dash-hero-eyebrow">VALOARE ESTIMATĂ</span>
+              <strong class="dash-hero-value" id="dash-hero-value">0,00 MDL</strong>
+              <span class="dash-hero-delta" id="dash-hero-delta">▲ stoc activ</span>
+            </article>
+
+            <!-- KPI: Receptii totale -->
+            <article class="dash-card" id="dash-card-receipts">
+              <span class="dash-label">RECEPȚII · TOTALE</span>
+              <strong class="dash-value" id="dash-value-receipts">0</strong>
+              <svg class="dash-spark" viewBox="0 0 100 28" preserveAspectRatio="none" id="dash-spark-receipts">
+                <polyline points="0,22 14,18 28,20 42,12 56,15 70,8 84,12 100,5" fill="none" stroke="#1B5E3F" stroke-width="1.5" />
+              </svg>
+              <div class="dash-meta">
+                <span>noi azi</span><b id="dash-meta-receipts">0</b>
+              </div>
+            </article>
+
+            <!-- KPI: Cantitate totala -->
+            <article class="dash-card" id="dash-card-quantity">
+              <span class="dash-label">CANTITATE · TONE</span>
+              <strong class="dash-value" id="dash-value-quantity">0</strong>
+              <svg class="dash-spark" viewBox="0 0 100 28" preserveAspectRatio="none" id="dash-spark-quantity">
+                <polyline points="0,18 14,20 28,15 42,18 56,10 70,12 84,8 100,11" fill="none" stroke="#B08828" stroke-width="1.5" />
+              </svg>
+              <div class="dash-meta">
+                <span>livrată</span><b id="dash-meta-quantity">0</b>
+              </div>
+            </article>
+
+            <!-- ACTIVITY FEED: spans all rows -->
+            <aside class="dash-feed">
+              <header class="dash-feed-head">
+                <h4>Activitate</h4>
+                <small>ULTIMELE 24H</small>
+              </header>
+              <div class="dash-feed-body" id="dash-feed-body">
+                <p class="dash-feed-empty">Nu sunt evenimente recente.</p>
+              </div>
+            </aside>
+
+            <!-- Row 2: Operations -->
+            <article class="dash-card">
+              <span class="dash-label">PROCESĂRI</span>
+              <strong class="dash-value" id="dash-value-processing">0</strong>
+              <div class="dash-meta"><span>cantitate</span><b id="dash-meta-processing">0 t</b></div>
+            </article>
+            <article class="dash-card">
+              <span class="dash-label">DEȘEU CONFIRMAT</span>
+              <strong class="dash-value" id="dash-value-waste">0</strong>
+              <div class="dash-meta"><span>tone</span><b>—</b></div>
+            </article>
+            <article class="dash-card">
+              <span class="dash-label">LIVRĂRI</span>
+              <strong class="dash-value" id="dash-value-deliveries">0</strong>
+              <div class="dash-meta"><span>cantitate</span><b id="dash-meta-deliveries">0 t</b></div>
+            </article>
+
+            <!-- Row 3: Financial -->
+            <article class="dash-card">
+              <span class="dash-label">ÎNCASĂRI</span>
+              <strong class="dash-value" id="dash-value-collections">0 MDL</strong>
+              <div class="dash-meta"><span>tranzacții</span><b id="dash-meta-transactions">0</b></div>
+            </article>
+            <article class="dash-card">
+              <span class="dash-label">PLĂȚI</span>
+              <strong class="dash-value" id="dash-value-payments">0 MDL</strong>
+              <div class="dash-meta"><span>furnizori</span><b>—</b></div>
+            </article>
+            <article class="dash-card">
+              <span class="dash-label">RECLAMAȚII</span>
+              <strong class="dash-value" id="dash-value-complaints">0</strong>
+              <div class="dash-meta"><span>deschise</span><b id="dash-meta-modifications">0</b></div>
+            </article>
+          </div>
+        </section>
 
         <section class="panel filters-panel" data-view="receptii">
           <div class="panel-head">

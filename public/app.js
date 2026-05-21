@@ -414,24 +414,24 @@ function setView(view) {
   }
 }
 
-function renderStats(stats) {
-  const cards = [
-    ["Receptii totale", stats.totalReceipts],
-    ["Cantitate totala", formatNumber(stats.totalQuantity)],
-    ["Valoare estimata", currency.format(stats.totalValue || 0)],
-    ["Receptii noi", stats.byStatus.Noua || 0]
-  ];
+// Helper to safely set text on a dashboard cell (no-op if element missing)
+function setDashText(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = value;
+}
 
-  statsEl.innerHTML = cards
-    .map(
-      ([label, value]) => `
-        <article class="stat">
-          <span class="stat-label">${label}</span>
-          <strong class="stat-value">${value}</strong>
-        </article>
-      `
-    )
-    .join("");
+function renderStats(stats) {
+  setDashText("dash-hero-value", currency.format(stats.totalValue || 0));
+  const totalReceipts = Number(stats.totalReceipts || 0);
+  const newReceipts = Number((stats.byStatus && stats.byStatus.Noua) || 0);
+  setDashText("dash-value-receipts", formatNumber(totalReceipts));
+  setDashText("dash-meta-receipts", formatNumber(newReceipts));
+  setDashText("dash-value-quantity", formatNumber(stats.totalQuantity || 0));
+  // dash-hero-delta: simple textual hint
+  const deltaEl = document.getElementById("dash-hero-delta");
+  if (deltaEl) {
+    deltaEl.textContent = totalReceipts > 0 ? `▲ ${totalReceipts} recepții active` : "○ stoc inactiv";
+  }
 }
 
 function renderConfigSummary(summary) {
@@ -483,102 +483,63 @@ function renderOpeningDrafts() {
 }
 
 function renderProcessingStats(stats) {
-  if (!stats.processing) {
-    return;
-  }
-
-  const processingCards = [
-    ["Procesari", stats.processing.totalProcessings],
-    ["Cantitate procesata", formatNumber(stats.processing.totalProcessedQuantity)],
-    ["Deseu confirmat", formatNumber(stats.processing.totalConfirmedWaste)]
-  ];
-
-  const extraMarkup = processingCards
-    .map(
-      ([label, value]) => `
-        <article class="stat stat-secondary">
-          <span class="stat-label">${label}</span>
-          <strong class="stat-value">${value}</strong>
-        </article>
-      `
-    )
-    .join("");
-
-  statsEl.insertAdjacentHTML("beforeend", extraMarkup);
+  if (!stats.processing) return;
+  setDashText("dash-value-processing", formatNumber(stats.processing.totalProcessings || 0));
+  setDashText("dash-meta-processing", `${formatNumber(stats.processing.totalProcessedQuantity || 0)} t`);
+  setDashText("dash-value-waste", formatNumber(stats.processing.totalConfirmedWaste || 0));
 }
 
 function renderFinanceStats(stats) {
-  if (!stats.finance) {
-    return;
-  }
-
-  const financeCards = [
-    ["Plati totale", currency.format(stats.finance.totalPayments || 0)],
-    ["Incasari totale", currency.format(stats.finance.totalCollections || 0)],
-    ["Tranzactii", stats.finance.totalTransactions || 0]
-  ];
-
-  const extraMarkup = financeCards
-    .map(
-      ([label, value]) => `
-        <article class="stat stat-secondary">
-          <span class="stat-label">${label}</span>
-          <strong class="stat-value">${value}</strong>
-        </article>
-      `
-    )
-    .join("");
-
-  statsEl.insertAdjacentHTML("beforeend", extraMarkup);
+  if (!stats.finance) return;
+  setDashText("dash-value-collections", currency.format(stats.finance.totalCollections || 0));
+  setDashText("dash-value-payments", currency.format(stats.finance.totalPayments || 0));
+  setDashText("dash-meta-transactions", formatNumber(stats.finance.totalTransactions || 0));
 }
 
 function renderDeliveryStats(stats) {
-  if (!stats.deliveries || !stats.complaints) {
-    return;
-  }
-
-  const deliveryCards = [
-    ["Livrari", stats.deliveries.totalDeliveries || 0],
-    ["Cantitate livrata", formatNumber(stats.deliveries.totalDeliveredQuantity || 0)],
-    ["Reclamatii deschise", stats.complaints.openComplaints || 0]
-  ];
-
-  const extraMarkup = deliveryCards
-    .map(
-      ([label, value]) => `
-        <article class="stat stat-secondary">
-          <span class="stat-label">${label}</span>
-          <strong class="stat-value">${value}</strong>
-        </article>
-      `
-    )
-    .join("");
-
-  statsEl.insertAdjacentHTML("beforeend", extraMarkup);
+  if (!stats.deliveries || !stats.complaints) return;
+  setDashText("dash-value-deliveries", formatNumber(stats.deliveries.totalDeliveries || 0));
+  setDashText("dash-meta-deliveries", `${formatNumber(stats.deliveries.totalDeliveredQuantity || 0)} t`);
+  setDashText("dash-value-complaints", formatNumber(stats.complaints.openComplaints || 0));
 }
 
 function renderAuditStats(stats) {
-  if (!stats.audit) {
+  if (!stats.audit) return;
+  setDashText("dash-meta-modifications", formatNumber(stats.audit.recentAuditLogs || 0));
+  renderDashFeed();
+}
+
+// Render the activity feed in dashboard from audit logs cache
+function renderDashFeed() {
+  const body = document.getElementById("dash-feed-body");
+  if (!body) return;
+  const items = (Array.isArray(auditLogsCache) ? auditLogsCache : []).slice(0, 6);
+  if (!items.length) {
+    body.innerHTML = '<p class="dash-feed-empty">Nu sunt evenimente recente.</p>';
     return;
   }
-
-  const auditCards = [
-    ["Modificari", stats.audit.totalAuditLogs || 0],
-    ["Ultimele 24h", stats.audit.recentAuditLogs || 0]
-  ];
-
-  const extraMarkup = auditCards
-    .map(
-      ([label, value]) => `
-        <article class="stat stat-secondary">
-          <span class="stat-label">${label}</span>
-          <strong class="stat-value">${value}</strong>
-        </article>
-      `
-    )
+  body.innerHTML = items
+    .map((log) => {
+      const action = String(log.action || "").toLowerCase();
+      let dot = "";
+      if (/delete|cancel|reject/.test(action)) dot = "red";
+      else if (/update|edit|toggle|inactiv/.test(action)) dot = "gold";
+      const entity = log.entityType || "—";
+      const entityId = log.entityId ? ` #${log.entityId}` : "";
+      const reason = (log.reason || log.action || "").toString().slice(0, 80);
+      const when = String(log.createdAt || "").replace("T", " ").slice(5, 16);
+      const user = log.user || "—";
+      return `
+        <div class="dash-feed-item">
+          <div class="dash-feed-dot ${dot}"></div>
+          <div class="dash-feed-body-text">
+            <div class="dash-feed-title">${reason || `${entity}${entityId} · ${log.action || ""}`}</div>
+            <div class="dash-feed-meta">${when} · ${user}</div>
+          </div>
+        </div>
+      `;
+    })
     .join("");
-
-  statsEl.insertAdjacentHTML("beforeend", extraMarkup);
 }
 
 function isSunflowerProduct(name) {
@@ -2070,12 +2031,14 @@ async function loadAuditLogs() {
   if (!canAccess("audit")) {
     auditLogsCache = [];
     renderAuditLogs([]);
+    renderDashFeed();
     return;
   }
   const response = await fetch("/api/audit-logs");
   const data = await response.json();
   auditLogsCache = data.auditLogs;
   renderAuditLogs(data.auditLogs);
+  renderDashFeed();
 }
 
 async function loadLockouts() {
