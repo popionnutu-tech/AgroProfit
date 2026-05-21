@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const { writeJsonAtomic } = require("./atomic-write");
 
-const USE_SUPABASE = (process.env.STORAGE_DRIVER || "").toLowerCase() === "supabase";
+const USE_SUPABASE = (process.env.STORAGE_DRIVER || "").trim().toLowerCase() === "supabase";
 let kvBackend = null;
 if (USE_SUPABASE) {
   try {

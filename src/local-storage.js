@@ -15,7 +15,7 @@ const legacyDataDir = path.join(process.cwd(), "data");
 const receiptsFile = path.join(dataDir, "receipts.json");
 const configFile = path.join(dataDir, "config.json");
 
-const USE_SUPABASE = (process.env.STORAGE_DRIVER || "").toLowerCase() === "supabase";
+const USE_SUPABASE = (process.env.STORAGE_DRIVER || "").trim().toLowerCase() === "supabase";
 let kvBackend = null;
 if (USE_SUPABASE) {
   try {

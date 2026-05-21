@@ -5,8 +5,8 @@ let supabaseClient = null;
 function getSupabase() {
   if (supabaseClient) return supabaseClient;
 
-  const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const url = (process.env.SUPABASE_URL || "").trim();
+  const key = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim();
 
   if (!url || !key || key === "replace_me") {
     throw new Error(
