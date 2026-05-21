@@ -342,8 +342,8 @@ async function bootstrap() {
 }
 
 const bootstrapPromise = bootstrap().catch((error) => {
-  console.error("Bootstrap failed:", error.message);
-  process.exit(1);
+  console.error("Bootstrap failed:", error && error.stack ? error.stack : error);
+  throw error;
 });
 
 if (require.main === module) {
