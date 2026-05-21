@@ -101,6 +101,8 @@ textarea {
   height: auto;
   display: block;
   max-width: 240px;
+  max-height: 200px;
+  object-fit: contain;
 }
 
 .sidebar-nav {
@@ -129,14 +131,14 @@ textarea {
 .sidebar-item {
   display: flex;
   align-items: center;
-  gap: 11px;
+  gap: 10px;
   width: 100%;
-  padding: 7px 14px;
+  padding: 5px 12px;
   border: 0;
   background: transparent;
   color: #d8ddc9;
   text-align: left;
-  font-size: 0.87rem;
+  font-size: 0.84rem;
   border-radius: 8px;
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease;
@@ -161,8 +163,8 @@ textarea {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   flex-shrink: 0;
   color: var(--accent-2-soft);
   transition: color 0.15s ease;
@@ -174,14 +176,14 @@ textarea {
 }
 
 .sidebar-icon svg {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   display: block;
 }
 
 .sidebar-separator {
   height: 1px;
-  margin: 6px 16px;
+  margin: 4px 16px;
   background: rgba(255, 255, 255, 0.1);
 }
 
