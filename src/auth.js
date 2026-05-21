@@ -163,31 +163,48 @@ function clearSessionCookie(res, req) {
   res.setHeader("Set-Cookie", buildCookie("", req, 0));
 }
 
+const SESSION_SECRET = process.env.SESSION_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || "agroprofit-dev-secret";
+
+function signToken(payload) {
+  const json = JSON.stringify(payload);
+  const b64 = Buffer.from(json, "utf8").toString("base64url");
+  const sig = crypto.createHmac("sha256", SESSION_SECRET).update(b64).digest("base64url");
+  return `${b64}.${sig}`;
+}
+
+function verifyToken(token) {
+  if (!token || typeof token !== "string") return null;
+  const dot = token.indexOf(".");
+  if (dot < 0) return null;
+  const b64 = token.slice(0, dot);
+  const sig = token.slice(dot + 1);
+  const expectedSig = crypto.createHmac("sha256", SESSION_SECRET).update(b64).digest("base64url");
+  if (sig.length !== expectedSig.length) return null;
+  if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expectedSig))) return null;
+  try {
+    return JSON.parse(Buffer.from(b64, "base64url").toString("utf8"));
+  } catch {
+    return null;
+  }
+}
+
 function createSession(user) {
-  cleanupExpiredSessions();
-  const token = crypto.randomBytes(32).toString("hex");
   const now = Date.now();
-  sessions.set(token, {
+  return signToken({
     user: sanitizeUserForSession(user),
     createdAt: now,
     expiresAt: now + SESSION_TTL_MS,
     lastActivityAt: now
   });
-  return token;
 }
 
-function destroySession(token) {
-  if (token) {
-    sessions.delete(token);
-  }
+function destroySession(_token) {
+  // Stateless tokens — destroy is handled by clearing the cookie on the client.
 }
 
-function updateSessionUser(userId, patch) {
-  for (const session of sessions.values()) {
-    if (session?.user?.id === Number(userId)) {
-      Object.assign(session.user, patch);
-    }
-  }
+function updateSessionUser(_userId, _patch) {
+  // Stateless tokens — user data in the token reflects login moment.
+  // After password change / role update, user gets new token on next login.
 }
 
 function getClientIp(req) {
@@ -319,21 +336,17 @@ function unlockUsername(username) {
 }
 
 function attachCurrentUser(req, _res, next) {
-  cleanupExpiredSessions();
   const cookies = parseCookies(req.headers.cookie);
   const token = cookies[SESSION_COOKIE_NAME];
 
   req.sessionToken = token || "";
   req.currentUser = null;
 
-  if (token && sessions.has(token)) {
-    const session = sessions.get(token);
+  if (token) {
+    const payload = verifyToken(token);
     const now = Date.now();
-    if (session?.expiresAt > now && session?.lastActivityAt && now - session.lastActivityAt <= SESSION_INACTIVITY_MS) {
-      session.lastActivityAt = now;
-      req.currentUser = session.user;
-    } else {
-      sessions.delete(token);
+    if (payload && payload.expiresAt > now) {
+      req.currentUser = payload.user;
     }
   }
 
