@@ -587,8 +587,44 @@ function getLocationCapacity(loc, productName) {
   return base;
 }
 
+// Brand colours per product type. Returns { fill, edge, label } palette for SVG.
+function getProductPalette(name) {
+  const n = String(name || "").toLowerCase();
+  if (/grau|grâu|wheat|gri/i.test(n)) {
+    return { fill: "#D4B262", edge: "#8B6B1F", label: "#11211A" }; // wheat gold
+  }
+  if (/porumb|corn|maiz/i.test(n)) {
+    return { fill: "#E8A33B", edge: "#A66515", label: "#11211A" }; // corn deep orange
+  }
+  if (/floar|soarelui|sunflower/i.test(n)) {
+    return { fill: "#3A2F1F", edge: "#1A130A", label: "#FBF8EE" }; // sunflower seed dark
+  }
+  if (/soia|soy/i.test(n)) {
+    return { fill: "#C9B373", edge: "#7F6E3C", label: "#11211A" }; // soybean pale tan
+  }
+  if (/rapit|rapese|rapeseed|colza/i.test(n)) {
+    return { fill: "#4A6B2F", edge: "#2A3F1C", label: "#FBF8EE" }; // rapeseed olive
+  }
+  if (/orz|barley/i.test(n)) {
+    return { fill: "#B89669", edge: "#6F5638", label: "#11211A" }; // barley tan
+  }
+  if (/ovaz|ovăz|oats|oat/i.test(n)) {
+    return { fill: "#CFAE7B", edge: "#7B5F32", label: "#11211A" }; // oats
+  }
+  if (/secara|secară|rye/i.test(n)) {
+    return { fill: "#9C8050", edge: "#5D4823", label: "#FBF8EE" }; // rye
+  }
+  // default neutral grain
+  return { fill: "#A8956A", edge: "#5C4D2E", label: "#11211A" };
+}
+
+let lastStockSummary = null;
+
 function renderSilosGrid(summary) {
   if (!silosGridEl) return;
+  if (summary) lastStockSummary = summary;
+  const data = summary || lastStockSummary || { byLocation: [] };
+
   const cylinders = (currentConfig?.storageLocations || [])
     .filter((loc) => loc.active !== false && String(loc.type || "").toLowerCase() === "cilindru")
     .sort((a, b) => Number(a.id) - Number(b.id));
@@ -599,7 +635,7 @@ function renderSilosGrid(summary) {
   }
 
   const byLocation = new Map();
-  for (const item of summary.byLocation || []) {
+  for (const item of data.byLocation || []) {
     const key = String(item.location || "").trim();
     if (!key) continue;
     const existing = byLocation.get(key) || { items: [], total: 0 };
@@ -611,18 +647,20 @@ function renderSilosGrid(summary) {
   silosGridEl.innerHTML = cylinders
     .map((cyl) => {
       const state = byLocation.get(cyl.name) || { items: [], total: 0 };
-      const dominantProduct = (state.items.sort((a, b) => Number(b.quantity || 0) - Number(a.quantity || 0))[0] || {}).product || "—";
+      const dominantProduct = (state.items.sort((a, b) => Number(b.quantity || 0) - Number(a.quantity || 0))[0] || {}).product || "";
       const capacity = getLocationCapacity(cyl, dominantProduct);
       const filled = Math.max(0, state.total);
       const pct = capacity > 0 ? Math.min(100, (filled / capacity) * 100) : 0;
       const free = Math.max(capacity - filled, 0);
       const pctClass = pct >= 95 ? "is-crit" : pct >= 80 ? "is-warn" : "";
-      const fillColor = pct >= 95 ? "#B53E22" : pct >= 80 ? "#B08828" : "#2D8F60";
+      const palette = getProductPalette(dominantProduct);
       const fillH = Math.max(0, Math.min(120, (pct / 100) * 120));
       const fillY = 28 + (120 - fillH);
+      const isEmpty = filled <= 0;
+      const ringClass = pct >= 95 ? " is-crit-ring" : pct >= 80 ? " is-warn-ring" : "";
 
       return `
-        <article class="silo-card" data-id="${cyl.id}" title="${cyl.name} · ${formatNumber(filled)}/${formatNumber(capacity)} t">
+        <article class="silo-card${ringClass}" data-id="${cyl.id}" title="${cyl.name} · ${formatNumber(filled)}/${formatNumber(capacity)} t · ${dominantProduct || 'gol'}">
           <div class="silo-card-head">
             <span class="silo-name">${cyl.name}</span>
             <span class="silo-pct ${pctClass}">${pct.toFixed(0)}%</span>
@@ -643,22 +681,25 @@ function renderSilosGrid(summary) {
               <clipPath id="silo-clip-${cyl.id}">
                 <rect x="16" y="30" width="68" height="116" rx="1"/>
               </clipPath>
-              <g clip-path="url(#silo-clip-${cyl.id})">
-                <rect x="14" y="${fillY}" width="72" height="${fillH}" fill="${fillColor}" opacity="0.78"/>
-                <!-- top surface highlight -->
-                <ellipse cx="50" cy="${fillY}" rx="36" ry="3" fill="${fillColor}" opacity="0.45"/>
-              </g>
+              ${isEmpty ? '' : `<g clip-path="url(#silo-clip-${cyl.id})">
+                <rect x="14" y="${fillY}" width="72" height="${fillH}" fill="${palette.fill}"/>
+                <rect x="14" y="${fillY}" width="10" height="${fillH}" fill="#0F3D27" opacity="0.18"/>
+                <ellipse cx="50" cy="${fillY}" rx="36" ry="3" fill="${palette.edge}" opacity="0.55"/>
+                <ellipse cx="50" cy="${fillY}" rx="32" ry="2" fill="${palette.fill}" opacity="0.9"/>
+              </g>`}
               <!-- base door -->
               <rect x="46" y="142" width="8" height="6" fill="#0F3D27"/>
               <!-- ground line -->
               <line x1="6" y1="150" x2="94" y2="150" stroke="#D4B262" stroke-width="1.5"/>
               <!-- pct label inside -->
-              <text x="50" y="${Math.max(fillY + 14, 42)}" font-family="DM Mono, monospace" font-size="11" font-weight="600" text-anchor="middle" fill="${pct >= 25 ? '#FBF8EE' : '#0F3D27'}">${pct.toFixed(0)}%</text>
+              <text x="50" y="${isEmpty ? 92 : Math.max(fillY + 14, 42)}" font-family="DM Mono, monospace" font-size="11" font-weight="700" text-anchor="middle" fill="${isEmpty ? '#0F3D27' : (pct >= 25 ? palette.label : '#0F3D27')}">${pct.toFixed(0)}%</text>
             </svg>
           </div>
           <div class="silo-meta">
             <span>Liber <b>${formatNumber(free)}t</b></span>
-            <span class="silo-product">${dominantProduct}</span>
+            ${dominantProduct
+              ? `<span class="silo-product" style="color:${palette.edge};"><span class="silo-product-dot" style="background:${palette.fill};border-color:${palette.edge};"></span>${dominantProduct}</span>`
+              : '<span class="silo-product silo-product-empty">gol</span>'}
           </div>
         </article>
       `;
@@ -2000,6 +2041,7 @@ async function loadConfig() {
   renderReceiptSelectors(data);
   renderSetupLists(data);
   renderSetupSelectors(data);
+  renderSilosGrid(null);
   renderReceiptEstimate();
   applyRoleAccess();
 
@@ -2016,10 +2058,11 @@ async function loadConfig() {
 async function loadDashboard() {
   dailyReportDateEl.value = new Date().toISOString().slice(0, 10);
   openingDocumentDateEl.value = new Date().toISOString().slice(0, 10);
+  // Config first — silos panel and many other widgets depend on storageLocations + products.
+  await loadConfig();
   await Promise.all([
     loadOpeningDocuments(),
     loadReceipts(),
-    loadConfig(),
     loadProcessings(),
     loadStocks(),
     loadTransactions(),

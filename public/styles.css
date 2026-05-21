@@ -1009,3 +1009,29 @@ thead th {
     grid-template-columns: 1fr;
   }
 }
+
+/* Silo product dot + warning rings */
+.silo-product {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.silo-product-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1px solid;
+  display: inline-block;
+}
+.silo-product-empty {
+  color: var(--muted);
+  font-style: italic;
+}
+.silo-card.is-warn-ring {
+  border-color: var(--accent-2);
+  box-shadow: inset 0 0 0 1px rgba(176, 136, 40, 0.35);
+}
+.silo-card.is-crit-ring {
+  border-color: var(--danger);
+  box-shadow: inset 0 0 0 1px rgba(181, 62, 34, 0.35), 0 0 0 1px rgba(181, 62, 34, 0.12);
+}
