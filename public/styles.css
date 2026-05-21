@@ -923,54 +923,137 @@ thead th {
   align-self: stretch;
 }
 
+/* === Nomenclator data table (Excel/1C-style) ============================ */
+.setup-grid .list-block {
+  /* Reset earlier card grid — we use a real table now */
+  display: block;
+  margin-top: 10px;
+}
+
+.nom-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  background: var(--bg-paper);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  font-size: 0.82rem;
+}
+
+.nom-table thead th {
+  background: rgba(27, 94, 63, 0.08);
+  color: var(--accent-deep);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.nom-table tbody td {
+  padding: 7px 10px;
+  border-bottom: 1px solid rgba(17, 33, 26, 0.06);
+  vertical-align: middle;
+  color: var(--ink);
+}
+
+.nom-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.nom-table tbody tr:nth-child(even) td {
+  background: rgba(232, 225, 204, 0.25);
+}
+
+.nom-table tbody tr:hover td {
+  background: rgba(176, 136, 40, 0.08);
+}
+
+.nom-table .cell-status {
+  font-weight: 600;
+  white-space: nowrap;
+  font-size: 0.78rem;
+}
+
+.nom-table .cell-status.is-on {
+  color: var(--accent);
+}
+
+.nom-table .cell-status.is-off {
+  color: var(--muted);
+}
+
+.nom-table .cell-actions {
+  text-align: right;
+  white-space: nowrap;
+  width: 1%;
+}
+
+.cell-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 10px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  background: rgba(36, 95, 122, 0.08);
+  color: var(--accent-3);
+  border: 1px solid rgba(36, 95, 122, 0.15);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+  margin-left: 4px;
+}
+
+.cell-btn:hover {
+  background: rgba(36, 95, 122, 0.15);
+}
+
+.cell-btn-primary {
+  background: rgba(27, 94, 63, 0.1);
+  color: var(--accent-deep);
+  border-color: rgba(27, 94, 63, 0.2);
+}
+
+.cell-btn-primary:hover {
+  background: rgba(27, 94, 63, 0.18);
+}
+
 /* Setari sistem: keep main form + three sub-forms compact in one screen */
 .setup-grid article[data-view="nom-setari"] .setup-columns { margin-top: 10px; }
 .setup-grid article[data-view="nom-setari"] .compact-form { margin-bottom: 8px; }
 
-/* Setari sub-lists: single-column compact rows, no big empty cards */
-.setup-grid article[data-view="nom-setari"] .list-block,
-.setup-grid article[data-view="nom-setari"] .compact-list {
+/* Nomenclator forms: compact toolbar (inputs + button on one row) */
+.setup-grid .mini-form {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-top: 4px;
-}
-.setup-grid article[data-view="nom-setari"] .list-block .list-item,
-.setup-grid article[data-view="nom-setari"] .compact-list .list-item {
-  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 6px;
   align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border-radius: 10px;
 }
-.setup-grid article[data-view="nom-setari"] .list-block .list-item > *:first-child {
-  flex: 1 1 auto;
-  min-width: 0;
+.setup-grid .mini-form .split {
+  display: contents;
 }
-.setup-grid article[data-view="nom-setari"] .list-block .list-item h3 {
-  font-size: 0.82rem;
-  line-height: 1.2;
+.setup-grid .mini-form > input,
+.setup-grid .mini-form > select,
+.setup-grid .mini-form .split > input,
+.setup-grid .mini-form .split > select,
+.setup-grid .mini-form .split > label {
+  flex: 1 1 140px;
+  min-width: 140px;
 }
-.setup-grid article[data-view="nom-setari"] .list-block .list-item p {
-  font-size: 0.7rem;
-  margin: 1px 0 0;
-  line-height: 1.2;
+.setup-grid .mini-form > label {
+  flex: 1 1 160px;
+  min-width: 160px;
 }
-.setup-grid article[data-view="nom-setari"] .list-block .list-actions,
-.setup-grid article[data-view="nom-setari"] .compact-list .list-actions {
-  margin-top: 0;
-  flex-direction: row;
-  flex-shrink: 0;
-  gap: 4px;
-  min-width: 0;
-}
-.setup-grid article[data-view="nom-setari"] .list-block .list-actions button,
-.setup-grid article[data-view="nom-setari"] .compact-list .list-actions button {
+.setup-grid .mini-form button[type="submit"] {
   flex: 0 0 auto;
-  padding: 3px 8px;
-  font-size: 0.7rem;
-  border-radius: 6px;
-  min-width: 0;
+  margin-left: auto;
+  padding: 8px 18px;
 }
 
 .compact-form {

@@ -1419,6 +1419,78 @@ function renderFilterOptions() {
   ].join("");
 }
 
+// Column schema for each Nomenclator entity (Excel/1C-style table view)
+const ENTITY_COLUMNS = {
+  partners: [
+    { key: "name", label: "Nume" },
+    { key: "role", label: "Rol" },
+    { key: "fiscalProfile", label: "Statut fiscal" },
+    { key: "idno", label: "IDNO" },
+    { key: "phone", label: "Telefon" }
+  ],
+  products: [
+    { key: "code", label: "Cod" },
+    { key: "name", label: "Nume" },
+    { key: "unit", label: "Unitate" },
+    { key: "humidityNorm", label: "Umiditate %" },
+    { key: "impurityNorm", label: "Impuritati %" }
+  ],
+  storageLocations: [
+    { key: "name", label: "Nume" },
+    { key: "type", label: "Tip" },
+    { key: "capacity", label: "Capacitate", format: "number" },
+    { key: "costCategory", label: "Categorie cost" }
+  ],
+  tariffs: [
+    { key: "service", label: "Serviciu" },
+    { key: "product", label: "Produs" },
+    { key: "partner", label: "Partener" },
+    { key: "fiscalProfile", label: "Statut" },
+    { key: "calculation", label: "Mod calcul" },
+    { key: "value", label: "Valoare" },
+    { key: "validFrom", label: "Valabil din" }
+  ],
+  roles: [
+    { key: "name", label: "Nume" },
+    { key: "code", label: "Cod" },
+    { key: "permissions", label: "Permisii" }
+  ],
+  users: [
+    { key: "name", label: "Nume" },
+    { key: "username", label: "Username" },
+    { key: "roleName", label: "Rol", fallback: "roleCode" },
+    { key: "channel", label: "Canal" }
+  ],
+  paymentTypes: [
+    { key: "name", label: "Tip plata" }
+  ],
+  fiscalProfiles: [
+    { key: "name", label: "Statut" },
+    { key: "withholdingPercent", label: "Retinere %" },
+    { key: "vat", label: "TVA", format: "bool" }
+  ],
+  processingTypes: [
+    { key: "name", label: "Tip" },
+    { key: "resource", label: "Resursa" },
+    { key: "consumptionNorm", label: "Norma consum" }
+  ]
+};
+
+function formatCellValue(value, format) {
+  if (value === null || value === undefined || value === "") return "—";
+  if (format === "bool") return value ? "Da" : "Nu";
+  if (format === "number" && typeof formatNumber === "function") return formatNumber(value);
+  return String(value);
+}
+
+function getCellValue(item, col) {
+  let val = item[col.key];
+  if ((val === undefined || val === null || val === "") && col.fallback) {
+    val = item[col.fallback];
+  }
+  return formatCellValue(val, col.format);
+}
+
 function renderMiniList(entity, items) {
   const target = document.getElementById(`${entity}-list`);
   if (!target) {
@@ -1430,32 +1502,82 @@ function renderMiniList(entity, items) {
     return;
   }
 
-  target.innerHTML = items
+  const cols = ENTITY_COLUMNS[entity];
+  // Fallback to legacy card view if entity is unknown
+  if (!cols) {
+    target.innerHTML = items
+      .map((item) => {
+        const detail = getItemDetails(entity, item);
+        const canToggle = Object.prototype.hasOwnProperty.call(item, "active");
+        return `
+          <article class="list-item">
+            <div>
+              <strong>${getItemTitle(entity, item)}</strong>
+              <p>${detail}</p>
+            </div>
+            <div class="list-actions">
+              <button class="ghost-button" type="button" data-action="edit" data-entity="${entity}" data-id="${item.id}">
+                Editeaza
+              </button>
+              ${
+                canToggle
+                  ? `<button class="ghost-button" type="button" data-action="toggle" data-entity="${entity}" data-id="${item.id}">
+                      ${item.active ? "Dezactiveaza" : "Activeaza"}
+                    </button>`
+                  : ""
+              }
+            </div>
+          </article>
+        `;
+      })
+      .join("");
+    return;
+  }
+
+  const headerCells = cols
+    .map((col) => `<th>${col.label}</th>`)
+    .join("");
+  // Status + actions are always last
+  const hasStatus = items.some((it) => Object.prototype.hasOwnProperty.call(it, "active"));
+  const statusHeader = hasStatus ? "<th>Status</th>" : "";
+
+  const rows = items
     .map((item) => {
-      const detail = getItemDetails(entity, item);
+      const cells = cols.map((col) => `<td>${getCellValue(item, col)}</td>`).join("");
       const canToggle = Object.prototype.hasOwnProperty.call(item, "active");
+      const statusCell = hasStatus
+        ? `<td class="cell-status ${item.active === false ? "is-off" : "is-on"}">${
+            canToggle ? (item.active ? "Activ" : "Inactiv") : "—"
+          }</td>`
+        : "";
+      const toggleBtn = canToggle
+        ? `<button class="cell-btn" type="button" data-action="toggle" data-entity="${entity}" data-id="${item.id}" title="${item.active ? "Dezactiveaza" : "Activeaza"}">${item.active ? "Off" : "On"}</button>`
+        : "";
       return `
-        <article class="list-item">
-          <div>
-            <strong>${getItemTitle(entity, item)}</strong>
-            <p>${detail}</p>
-          </div>
-          <div class="list-actions">
-            <button class="ghost-button" type="button" data-action="edit" data-entity="${entity}" data-id="${item.id}">
-              Editeaza
-            </button>
-            ${
-              canToggle
-                ? `<button class="ghost-button" type="button" data-action="toggle" data-entity="${entity}" data-id="${item.id}">
-                    ${item.active ? "Dezactiveaza" : "Activeaza"}
-                  </button>`
-                : ""
-            }
-          </div>
-        </article>
+        <tr>
+          ${cells}
+          ${statusCell}
+          <td class="cell-actions">
+            <button class="cell-btn cell-btn-primary" type="button" data-action="edit" data-entity="${entity}" data-id="${item.id}">Editează</button>
+            ${toggleBtn}
+          </td>
+        </tr>
       `;
     })
     .join("");
+
+  target.innerHTML = `
+    <table class="nom-table">
+      <thead>
+        <tr>
+          ${headerCells}
+          ${statusHeader}
+          <th class="cell-actions">Acțiuni</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
 }
 
 function getItemTitle(entity, item) {
