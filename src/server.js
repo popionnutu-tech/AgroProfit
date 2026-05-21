@@ -317,16 +317,20 @@ app.get("*", (_req, res) => {
 });
 
 async function bootstrap() {
+  console.log("[bootstrap] start. STORAGE_DRIVER=", process.env.STORAGE_DRIVER, "SUPABASE_URL set?", !!process.env.SUPABASE_URL);
   if (typeof storage.initStorage === "function") {
+    const t0 = Date.now();
     await storage.initStorage();
-    console.log(`Storage initialized (driver: ${storage.storageDriver}).`);
+    console.log(`[bootstrap] Storage initialized (driver: ${storage.storageDriver}) in ${Date.now() - t0}ms.`);
   }
 
   try {
     const { initAutomationState } = require("./automation-state");
+    const t0 = Date.now();
     await initAutomationState();
+    console.log(`[bootstrap] Automation state init OK in ${Date.now() - t0}ms.`);
   } catch (error) {
-    console.error("Automation state init failed:", error.message);
+    console.error("[bootstrap] Automation state init failed:", error.message);
   }
 
   if (typeof storage.runMigrationIfNeeded === "function") {
