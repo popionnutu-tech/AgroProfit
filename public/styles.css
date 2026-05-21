@@ -338,7 +338,7 @@ textarea {
 .main-area {
   flex: 1;
   min-width: 0;
-  padding: 24px 32px 48px;
+  padding: 20px 28px 32px;
   max-width: calc(1360px);
 }
 
@@ -826,6 +826,62 @@ thead th {
 .setup-columns > div {
   min-width: 0;
 }
+
+/* Compact density for Nomenclator sub-pages so each fits on screen */
+.setup-grid .panel { padding: 14px 18px; }
+.setup-grid .panel-head { margin-bottom: 10px; }
+.setup-grid .panel-head h2 { font-size: 1.1rem; margin-bottom: 2px; }
+.setup-grid .panel-head p { font-size: 0.82rem; line-height: 1.3; }
+.setup-grid form,
+.setup-grid .mini-form { gap: 8px; }
+.setup-grid label { gap: 4px; font-size: 0.85rem; font-weight: 600; }
+.setup-grid input,
+.setup-grid select,
+.setup-grid textarea {
+  padding: 8px 12px;
+  border-radius: 12px;
+  font-size: 0.9rem;
+}
+.setup-grid .mini-form button { padding: 9px 14px; border-radius: 12px; font-size: 0.9rem; }
+.setup-grid .list-block { gap: 6px; margin-top: 10px; }
+.setup-grid .list-item { padding: 8px 12px; border-radius: 12px; gap: 8px; }
+.setup-grid .compact-list .list-item { padding: 6px 10px; }
+.setup-grid .list-item h3 { font-size: 0.92rem; margin: 0; }
+.setup-grid .list-item p { font-size: 0.78rem; margin: 2px 0 0; }
+.setup-grid .list-actions { min-width: 78px; gap: 4px; }
+.setup-grid .list-actions button { padding: 4px 8px; font-size: 0.75rem; border-radius: 8px; }
+.setup-grid .editor-empty { padding: 10px 14px; font-size: 0.85rem; border-radius: 12px; }
+.setup-grid .table-wrap th,
+.setup-grid .table-wrap td { padding: 8px 10px; font-size: 0.82rem; }
+
+/* Roluri si utilizatori: roles list + add-user form + users list side by side */
+.setup-grid article[data-view="nom-utilizatori"] {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+  align-items: start;
+}
+.setup-grid article[data-view="nom-utilizatori"] > .panel-head {
+  grid-column: 1 / -1;
+}
+.setup-grid article[data-view="nom-utilizatori"] > #users-list {
+  grid-column: 1 / -1;
+}
+.setup-grid article[data-view="nom-utilizatori"] > .user-form {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+@media (max-width: 900px) {
+  .setup-grid article[data-view="nom-utilizatori"] {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Setari sistem: keep main form + three sub-forms compact in one screen */
+.setup-grid article[data-view="nom-setari"] .setup-columns { margin-top: 10px; }
+.setup-grid article[data-view="nom-setari"] .compact-form { margin-bottom: 8px; }
 
 .compact-form {
   margin-bottom: 14px;
