@@ -26,6 +26,11 @@
   box-sizing: border-box;
 }
 
+/* hidden attribute must always override flex/grid display */
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   font-family: var(--font-body);
