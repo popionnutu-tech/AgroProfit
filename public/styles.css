@@ -906,6 +906,52 @@ thead th {
 .setup-grid article[data-view="nom-setari"] .setup-columns { margin-top: 10px; }
 .setup-grid article[data-view="nom-setari"] .compact-form { margin-bottom: 8px; }
 
+/* Setari sub-lists: single-column compact rows, no big empty cards */
+.setup-grid article[data-view="nom-setari"] .list-block,
+.setup-grid article[data-view="nom-setari"] .compact-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+.setup-grid article[data-view="nom-setari"] .list-block .list-item,
+.setup-grid article[data-view="nom-setari"] .compact-list .list-item {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 10px;
+}
+.setup-grid article[data-view="nom-setari"] .list-block .list-item > *:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.setup-grid article[data-view="nom-setari"] .list-block .list-item h3 {
+  font-size: 0.82rem;
+  line-height: 1.2;
+}
+.setup-grid article[data-view="nom-setari"] .list-block .list-item p {
+  font-size: 0.7rem;
+  margin: 1px 0 0;
+  line-height: 1.2;
+}
+.setup-grid article[data-view="nom-setari"] .list-block .list-actions,
+.setup-grid article[data-view="nom-setari"] .compact-list .list-actions {
+  margin-top: 0;
+  flex-direction: row;
+  flex-shrink: 0;
+  gap: 4px;
+  min-width: 0;
+}
+.setup-grid article[data-view="nom-setari"] .list-block .list-actions button,
+.setup-grid article[data-view="nom-setari"] .compact-list .list-actions button {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  font-size: 0.7rem;
+  border-radius: 6px;
+  min-width: 0;
+}
+
 .compact-form {
   margin-bottom: 14px;
 }
