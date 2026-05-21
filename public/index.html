@@ -1241,7 +1241,11 @@
             </form>
 
             <div class="setup-columns">
-              <div>
+              <section class="nom-subsection">
+                <header class="nom-subsection-head">
+                  <h3>Tipuri de plată</h3>
+                  <span class="nom-subsection-hint">Numerar, transfer, card etc.</span>
+                </header>
                 <form class="mini-form compact-form" data-entity-form="paymentTypes">
                   <input name="name" placeholder="Tip plata nou" required />
                   <select name="active">
@@ -1251,9 +1255,13 @@
                   <button type="submit">Adauga tip plata</button>
                 </form>
                 <div class="list-block compact-list" id="paymentTypes-list"></div>
-              </div>
+              </section>
 
-              <div>
+              <section class="nom-subsection">
+                <header class="nom-subsection-head">
+                  <h3>Statuturi fiscale</h3>
+                  <span class="nom-subsection-hint">Persoana fizică, plătitor TVA etc.</span>
+                </header>
                 <form class="mini-form compact-form" data-entity-form="fiscalProfiles">
                   <input name="name" placeholder="Statut fiscal" required />
                   <div class="split">
@@ -1275,9 +1283,13 @@
                   <button type="submit">Adauga statut fiscal</button>
                 </form>
                 <div class="list-block compact-list" id="fiscalProfiles-list"></div>
-              </div>
+              </section>
 
-              <div>
+              <section class="nom-subsection">
+                <header class="nom-subsection-head">
+                  <h3>Tipuri de procesare</h3>
+                  <span class="nom-subsection-hint">Curățire, uscare, păstrare</span>
+                </header>
                 <form class="mini-form compact-form" data-entity-form="processingTypes">
                   <input name="name" placeholder="Tip procesare" required />
                   <div class="split">
@@ -1296,7 +1308,7 @@
                   <button type="submit">Adauga procesare</button>
                 </form>
                 <div class="list-block compact-list" id="processingTypes-list"></div>
-              </div>
+              </section>
             </div>
           </article>
 
