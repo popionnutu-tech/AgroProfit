@@ -127,9 +127,30 @@ function canDo(cap) {
   return perms.includes(cap);
 }
 
+// --- Token persistence (Telegram WebView blocks cookies, so we use Bearer)
+const TOKEN_KEY = "agroprofit-mini-token";
+
+function getStoredToken() {
+  try { return localStorage.getItem(TOKEN_KEY) || ""; } catch (_) { return ""; }
+}
+
+function setStoredToken(token) {
+  try {
+    if (token) localStorage.setItem(TOKEN_KEY, token);
+    else localStorage.removeItem(TOKEN_KEY);
+  } catch (_) {}
+}
+
 // --- API helpers
 async function api(path, opts) {
-  const res = await fetch(path, opts);
+  opts = opts || {};
+  const headers = Object.assign({}, opts.headers || {});
+  const token = getStoredToken();
+  if (token) headers["Authorization"] = "Bearer " + token;
+  const res = await fetch(path, Object.assign({ credentials: "include" }, opts, { headers }));
+  if (res.status === 401) {
+    setStoredToken("");
+  }
   if (!res.ok) {
     let msg = `HTTP ${res.status}`;
     try {
@@ -144,8 +165,8 @@ async function api(path, opts) {
 // --- Session
 async function loadSession() {
   try {
-    const data = await api("/api/auth/session", { credentials: "include" });
-    return data.user;
+    const data = await api("/api/auth/me");
+    return data.user || data;
   } catch (err) {
     return null;
   }
@@ -155,9 +176,9 @@ async function loginWithCredentials(username, password) {
   const data = await api("/api/auth/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    credentials: "include",
     body: JSON.stringify({ username, password })
   });
+  if (data.token) setStoredToken(data.token);
   return data.user;
 }
 
@@ -165,16 +186,17 @@ async function loginWithTelegram(initData) {
   const data = await api("/api/auth/telegram", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    credentials: "include",
     body: JSON.stringify({ initData })
   });
+  if (data.token) setStoredToken(data.token);
   return data.user;
 }
 
 async function logout() {
   try {
-    await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
+    await api("/api/auth/logout", { method: "POST" });
   } catch (_) {}
+  setStoredToken("");
   state.user = null;
   showLogin();
 }

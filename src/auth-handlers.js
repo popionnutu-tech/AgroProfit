@@ -113,7 +113,8 @@ async function loginHandler(req, res) {
 
     return sendJson(res, 200, {
       ok: true,
-      user: sanitizeUserForSession(user)
+      user: sanitizeUserForSession(user),
+      token
     });
   } catch (error) {
     console.error("Failed to login:", error.message);
@@ -315,7 +316,8 @@ async function telegramLoginHandler(req, res) {
 
     return sendJson(res, 200, {
       ok: true,
-      user: sanitizeUserForSession(user)
+      user: sanitizeUserForSession(user),
+      token
     });
   } catch (error) {
     console.error("Telegram login failed:", error.message);

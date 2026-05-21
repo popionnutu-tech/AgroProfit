@@ -337,7 +337,16 @@ function unlockUsername(username) {
 
 function attachCurrentUser(req, _res, next) {
   const cookies = parseCookies(req.headers.cookie);
-  const token = cookies[SESSION_COOKIE_NAME];
+  let token = cookies[SESSION_COOKIE_NAME];
+
+  // Fallback: accept Bearer token via Authorization header
+  // (used by Telegram Mini App where cookies can be blocked by WebView).
+  if (!token) {
+    const auth = String(req.headers["authorization"] || "");
+    if (auth.startsWith("Bearer ")) {
+      token = auth.slice(7).trim();
+    }
+  }
 
   req.sessionToken = token || "";
   req.currentUser = null;
