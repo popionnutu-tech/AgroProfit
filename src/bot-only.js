@@ -14,6 +14,13 @@ async function main() {
     console.log(`Storage initialized (driver: ${storage.storageDriver}).`);
   }
 
+  try {
+    const { initAutomationState } = require("./automation-state");
+    await initAutomationState();
+  } catch (error) {
+    console.error("Automation state init failed:", error.message);
+  }
+
   if (typeof storage.runMigrationIfNeeded === "function") {
     try {
       const result = storage.runMigrationIfNeeded();

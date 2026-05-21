@@ -2605,7 +2605,9 @@ function runMigrationIfNeeded() {
       return { migrated: false, version: currentVersion };
     }
 
-    backupRuntimeData({ force: true, suffix: "pre-tran-a-b" });
+    if (!USE_SUPABASE) {
+      backupRuntimeData({ force: true, suffix: "pre-tran-a-b" });
+    }
 
     const state = readReceiptsState();
     if (!Array.isArray(state.partnerAdvances)) {

@@ -2,6 +2,16 @@ const fs = require("fs");
 const path = require("path");
 const { writeJsonAtomic } = require("./atomic-write");
 
+const USE_SUPABASE = (process.env.STORAGE_DRIVER || "").toLowerCase() === "supabase";
+let kvBackend = null;
+if (USE_SUPABASE) {
+  try {
+    kvBackend = require("./supabase-state-kv");
+  } catch (error) {
+    console.error("automation-state: Supabase KV unavailable:", error.message);
+  }
+}
+
 const runtimeDir = path.join(process.cwd(), ".runtime-data");
 const automationStateFile = path.join(runtimeDir, "automation-state.json");
 
@@ -18,53 +28,91 @@ const defaultAutomationState = {
   }
 };
 
+let cachedAutomationState = null;
+
 function ensureRuntimeDir() {
   if (!fs.existsSync(runtimeDir)) {
     fs.mkdirSync(runtimeDir, { recursive: true });
   }
 }
 
-function readAutomationState() {
-  ensureRuntimeDir();
-
-  if (!fs.existsSync(automationStateFile)) {
-    writeJsonAtomic(automationStateFile, defaultAutomationState);
-    return JSON.parse(JSON.stringify(defaultAutomationState));
-  }
-
-  const raw = fs.readFileSync(automationStateFile, "utf8");
-  const parsed = JSON.parse(raw);
-
+function mergeAutomationState(parsed) {
   return {
     ...defaultAutomationState,
     ...parsed,
-    telegramLinks: { ...defaultAutomationState.telegramLinks, ...(parsed.telegramLinks || {}) },
+    telegramLinks: { ...defaultAutomationState.telegramLinks, ...(parsed?.telegramLinks || {}) },
     reports: {
       ...defaultAutomationState.reports,
-      ...(parsed.reports || {}),
+      ...(parsed?.reports || {}),
       closeOfDay: {
         ...defaultAutomationState.reports.closeOfDay,
-        ...(parsed.reports?.closeOfDay || {}),
+        ...(parsed?.reports?.closeOfDay || {}),
         actions: {
           ...defaultAutomationState.reports.closeOfDay.actions,
-          ...(parsed.reports?.closeOfDay?.actions || {})
+          ...(parsed?.reports?.closeOfDay?.actions || {})
         }
       },
       criticalAlerts: {
         ...defaultAutomationState.reports.criticalAlerts,
-        ...(parsed.reports?.criticalAlerts || {}),
+        ...(parsed?.reports?.criticalAlerts || {}),
         byDate: {
           ...defaultAutomationState.reports.criticalAlerts.byDate,
-          ...(parsed.reports?.criticalAlerts?.byDate || {})
+          ...(parsed?.reports?.criticalAlerts?.byDate || {})
         }
       }
     }
   };
 }
 
-function writeAutomationState(state) {
+async function initAutomationState() {
+  if (cachedAutomationState) return cachedAutomationState;
+
+  if (USE_SUPABASE && kvBackend) {
+    const parsed = await kvBackend.loadKv("automation-state", null);
+    cachedAutomationState = mergeAutomationState(parsed || {});
+  } else {
+    ensureRuntimeDir();
+    if (!fs.existsSync(automationStateFile)) {
+      writeJsonAtomic(automationStateFile, defaultAutomationState);
+      cachedAutomationState = JSON.parse(JSON.stringify(defaultAutomationState));
+    } else {
+      const raw = fs.readFileSync(automationStateFile, "utf8");
+      cachedAutomationState = mergeAutomationState(JSON.parse(raw));
+    }
+  }
+  return cachedAutomationState;
+}
+
+function readAutomationState() {
+  if (cachedAutomationState) {
+    return mergeAutomationState(cachedAutomationState);
+  }
+
+  if (USE_SUPABASE) {
+    // Cache miss in Supabase mode — return defaults; caller may need init first.
+    cachedAutomationState = JSON.parse(JSON.stringify(defaultAutomationState));
+    return mergeAutomationState(cachedAutomationState);
+  }
+
   ensureRuntimeDir();
-  writeJsonAtomic(automationStateFile, state);
+  if (!fs.existsSync(automationStateFile)) {
+    writeJsonAtomic(automationStateFile, defaultAutomationState);
+    cachedAutomationState = JSON.parse(JSON.stringify(defaultAutomationState));
+    return mergeAutomationState(cachedAutomationState);
+  }
+  const raw = fs.readFileSync(automationStateFile, "utf8");
+  cachedAutomationState = mergeAutomationState(JSON.parse(raw));
+  return mergeAutomationState(cachedAutomationState);
+}
+
+function writeAutomationState(state) {
+  cachedAutomationState = state;
+  if (USE_SUPABASE) {
+    if (kvBackend) kvBackend.queueSave("automation-state", state);
+  } else {
+    ensureRuntimeDir();
+    writeJsonAtomic(automationStateFile, state);
+  }
 }
 
 function linkTelegramUser(username, chatInfo = {}) {
@@ -398,6 +446,7 @@ function markCloseOfDaySent(dateValue) {
 }
 
 module.exports = {
+  initAutomationState,
   createDefaultCriticalAlertEscalation,
   getCloseOfDayReportActionState,
   getCriticalAlertState,
