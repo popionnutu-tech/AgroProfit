@@ -316,24 +316,39 @@ app.get("*", (_req, res) => {
   res.sendFile(path.join(process.cwd(), "public", "index.html"));
 });
 
-if (typeof storage.runMigrationIfNeeded === "function") {
-  try {
-    const result = storage.runMigrationIfNeeded();
-    if (result?.migrated) {
-      console.log(`Migrare aplicata: ${result.version}`);
+async function bootstrap() {
+  if (typeof storage.initStorage === "function") {
+    await storage.initStorage();
+    console.log(`Storage initialized (driver: ${storage.storageDriver}).`);
+  }
+
+  if (typeof storage.runMigrationIfNeeded === "function") {
+    try {
+      const result = storage.runMigrationIfNeeded();
+      if (result?.migrated) {
+        console.log(`Migrare aplicata: ${result.version}`);
+      }
+    } catch (error) {
+      console.error("Migration error at boot:", error.message);
     }
-  } catch (error) {
-    console.error("Migration error at boot:", error.message);
   }
 }
 
+const bootstrapPromise = bootstrap().catch((error) => {
+  console.error("Bootstrap failed:", error.message);
+  process.exit(1);
+});
+
 if (require.main === module) {
-  app.listen(port, () => {
-    console.log(`Server running on http://localhost:${port}`);
-    startBot(process.env.TELEGRAM_BOT_TOKEN);
-    startCloseOfDayScheduler();
-    startCriticalAlertMonitor();
+  bootstrapPromise.then(() => {
+    app.listen(port, () => {
+      console.log(`Server running on http://localhost:${port}`);
+      startBot(process.env.TELEGRAM_BOT_TOKEN);
+      startCloseOfDayScheduler();
+      startCriticalAlertMonitor();
+    });
   });
 }
 
 module.exports = app;
+module.exports.bootstrapPromise = bootstrapPromise;

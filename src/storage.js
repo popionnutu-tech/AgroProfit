@@ -2,14 +2,10 @@ const localStorage = require("./local-storage");
 
 const storageDriver = (process.env.STORAGE_DRIVER || "local").toLowerCase();
 
-let storage = localStorage;
-
-if (storageDriver === "supabase") {
-  const supabaseStorage = require("./supabase-storage");
-  storage = supabaseStorage;
-}
-
+// local-storage.js handles both file-based (STORAGE_DRIVER=local) and
+// Supabase-backed (STORAGE_DRIVER=supabase) persistence internally —
+// using the same in-memory cache + business logic in both cases.
 module.exports = {
-  ...storage,
+  ...localStorage,
   storageDriver
 };

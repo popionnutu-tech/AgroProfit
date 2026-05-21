@@ -1,5 +1,3 @@
-api/
-src/
 test/
 test-support/
 scripts/
@@ -7,3 +5,4 @@ scripts/
 .runtime-data-backups/
 notes/
 *.md
+.claude/

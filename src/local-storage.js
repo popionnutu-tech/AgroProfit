@@ -15,6 +15,20 @@ const legacyDataDir = path.join(process.cwd(), "data");
 const receiptsFile = path.join(dataDir, "receipts.json");
 const configFile = path.join(dataDir, "config.json");
 
+const USE_SUPABASE = (process.env.STORAGE_DRIVER || "").toLowerCase() === "supabase";
+let kvBackend = null;
+if (USE_SUPABASE) {
+  try {
+    kvBackend = require("./supabase-state-kv");
+  } catch (error) {
+    console.error("Failed to load Supabase KV backend:", error.message);
+  }
+}
+
+let receiptsCache = null;
+let configCache = null;
+let initPromise = null;
+
 const CURRENT_MIGRATION_VERSION = "tranșa-a-b-v1";
 
 const defaultReceiptsState = {
@@ -321,6 +335,7 @@ function ensureDir() {
 }
 
 function ensureStorage() {
+  if (USE_SUPABASE) return;
   ensureDir();
 
   if (!fs.existsSync(receiptsFile)) {
@@ -337,21 +352,64 @@ function ensureStorage() {
   }
 }
 
-function readJson(file, fallback) {
-  ensureStorage();
-  const raw = fs.readFileSync(file, "utf8");
-  const parsed = JSON.parse(raw);
-  return { ...fallback, ...parsed };
+async function initStorage() {
+  if (receiptsCache && configCache) {
+    return { receiptsCache, configCache };
+  }
+
+  if (USE_SUPABASE) {
+    if (!kvBackend) {
+      throw new Error("Supabase KV backend not loaded — check SUPABASE_URL/KEY env vars.");
+    }
+    const [receipts, config] = await Promise.all([
+      kvBackend.loadKv("receipts", null),
+      kvBackend.loadKv("config", null)
+    ]);
+    receiptsCache = receipts || JSON.parse(JSON.stringify(defaultReceiptsState));
+    configCache = config || JSON.parse(JSON.stringify(defaultConfigState));
+  } else {
+    ensureStorage();
+    receiptsCache = JSON.parse(fs.readFileSync(receiptsFile, "utf8"));
+    configCache = JSON.parse(fs.readFileSync(configFile, "utf8"));
+  }
+
+  return { receiptsCache, configCache };
 }
 
-function writeJson(file, state) {
-  ensureStorage();
-  backupRuntimeData();
-  writeJsonAtomic(file, state);
+function ensureInitialized() {
+  if (receiptsCache === null || configCache === null) {
+    if (USE_SUPABASE) {
+      throw new Error("Storage not initialized. Call await initStorage() before any read/write.");
+    }
+    ensureStorage();
+    receiptsCache = JSON.parse(fs.readFileSync(receiptsFile, "utf8"));
+    configCache = JSON.parse(fs.readFileSync(configFile, "utf8"));
+  }
+}
+
+function persistReceipts(state) {
+  if (USE_SUPABASE) {
+    if (kvBackend) kvBackend.queueSave("receipts", state);
+  } else {
+    ensureDir();
+    backupRuntimeData();
+    writeJsonAtomic(receiptsFile, state);
+  }
+}
+
+function persistConfig(state) {
+  if (USE_SUPABASE) {
+    if (kvBackend) kvBackend.queueSave("config", state);
+  } else {
+    ensureDir();
+    backupRuntimeData();
+    writeJsonAtomic(configFile, state);
+  }
 }
 
 function readReceiptsState() {
-  const state = readJson(receiptsFile, defaultReceiptsState);
+  ensureInitialized();
+  const state = { ...defaultReceiptsState, ...receiptsCache };
   if (!Array.isArray(state.partnerAdvances)) {
     state.partnerAdvances = [];
   }
@@ -359,11 +417,13 @@ function readReceiptsState() {
 }
 
 function writeReceiptsState(state) {
-  writeJson(receiptsFile, state);
+  receiptsCache = state;
+  persistReceipts(state);
 }
 
 function readConfigState() {
-  const state = readJson(configFile, defaultConfigState);
+  ensureInitialized();
+  const state = { ...defaultConfigState, ...configCache };
 
   for (const entity of configEntities) {
     if (!Array.isArray(state[entity])) {
@@ -410,14 +470,18 @@ function readConfigState() {
       Number(state.nextIds.users || 0),
       state.users.reduce((max, item) => Math.max(max, Number(item.id || 0)), 0)
     );
-    writeJson(configFile, state);
+    configCache = state;
+    persistConfig(state);
+  } else {
+    configCache = state;
   }
 
   return state;
 }
 
 function writeConfigState(state) {
-  writeJson(configFile, state);
+  configCache = state;
+  persistConfig(state);
 }
 
 function sanitizeBoolean(value) {
@@ -2620,6 +2684,7 @@ function runMigrationIfNeeded() {
 }
 
 module.exports = {
+  initStorage,
   applyAdvanceCredit,
   appendAuditLog,
   closeReceipt,
