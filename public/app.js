@@ -191,11 +191,13 @@ function getDefaultView() {
     "deschidere",
     "rapoarte",
     "audit",
-    "configurare"
+    "nom-parteneri"
   ];
-  const saved = (function () {
+  let saved = (function () {
     try { return window.localStorage.getItem("active-view"); } catch (_err) { return null; }
   })();
+  // Migrate legacy "configurare" stored view to the first nomenclator sub-page
+  if (saved === "configurare") saved = "nom-parteneri";
   if (saved && canAccessView(saved)) {
     return saved;
   }
@@ -399,6 +401,11 @@ function setView(view) {
       .filter(Boolean);
     el.hidden = allowed.length > 0 && !allowed.includes(view);
   });
+
+  // Keep parent group open when any sub-view is active
+  if (typeof syncSidebarGroups === "function") {
+    syncSidebarGroups(view);
+  }
 
   try {
     window.localStorage.setItem("active-view", view);
@@ -2727,6 +2734,29 @@ document.querySelectorAll(".view-tab").forEach((button) => {
     closeSidebarDrawer();
   });
 });
+
+// Expand/collapse sidebar groups (e.g. Nomenclator)
+document.querySelectorAll(".sidebar-group-toggle").forEach((toggle) => {
+  toggle.addEventListener("click", () => {
+    const group = toggle.closest(".sidebar-group");
+    if (!group) return;
+    const isOpen = group.classList.toggle("is-open");
+    toggle.setAttribute("aria-expanded", isOpen ? "true" : "false");
+  });
+});
+
+// Keep a sidebar group expanded whenever one of its sub-views is active
+function syncSidebarGroups(view) {
+  document.querySelectorAll(".sidebar-group").forEach((group) => {
+    const subviews = Array.from(group.querySelectorAll(".sidebar-subitem"))
+      .map((el) => el.dataset.view);
+    const hasActive = subviews.includes(view);
+    if (hasActive) {
+      group.classList.add("is-open");
+      group.querySelector(".sidebar-group-toggle")?.setAttribute("aria-expanded", "true");
+    }
+  });
+}
 
 const sidebarEl = document.getElementById("sidebar");
 const sidebarToggleEl = document.getElementById("sidebar-toggle");

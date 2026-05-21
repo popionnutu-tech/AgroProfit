@@ -101,11 +101,28 @@
               </span><span>Audit</span>
             </button>
             <div class="sidebar-separator" aria-hidden="true"></div>
-            <button class="view-tab sidebar-item" data-view="configurare" data-access="setup" type="button">
-              <span class="sidebar-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-7"/><path d="M4 10V3"/><path d="M12 21v-9"/><path d="M12 8V3"/><path d="M20 21v-5"/><path d="M20 12V3"/><path d="M2 14h4"/><path d="M10 8h4"/><path d="M18 16h4"/></svg>
-              </span><span>Configurare</span>
-            </button>
+            <div class="sidebar-group" data-group="nomenclator" data-access="setup">
+              <button class="sidebar-item sidebar-group-toggle" type="button" aria-expanded="false">
+                <span class="sidebar-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h10l4 4v12a2 2 0 0 1-2 2H4z"/><path d="M14 4v4h4"/><path d="M7 13h8"/><path d="M7 17h5"/></svg>
+                </span>
+                <span class="sidebar-group-label">Nomenclator</span>
+                <span class="sidebar-chevron" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg>
+                </span>
+              </button>
+              <div class="sidebar-submenu">
+                <button class="view-tab sidebar-subitem" data-view="nom-parteneri" data-access="setup" type="button">Parteneri</button>
+                <button class="view-tab sidebar-subitem" data-view="nom-produse" data-access="setup" type="button">Produse</button>
+                <button class="view-tab sidebar-subitem" data-view="nom-locatii" data-access="setup" type="button">Locații de stoc</button>
+                <button class="view-tab sidebar-subitem" data-view="nom-tarife" data-access="setup" type="button">Tarife</button>
+                <button class="view-tab sidebar-subitem" data-view="nom-utilizatori" data-access="setup" type="button">Roluri și utilizatori</button>
+                <button class="view-tab sidebar-subitem" data-view="nom-setari" data-access="setup" type="button">Setări sistem</button>
+                <button class="view-tab sidebar-subitem" data-view="nom-automatizare" data-access="setup" type="button">Automatizare zi</button>
+                <button class="view-tab sidebar-subitem" data-view="nom-alerte" data-access="setup" type="button">Alerte Telegram</button>
+                <button class="view-tab sidebar-subitem" data-view="nom-securitate" data-access="security-admin" type="button">Securitate acces</button>
+              </div>
+            </div>
           </nav>
           <div class="sidebar-footer">
             <div class="sidebar-user">
@@ -1059,10 +1076,10 @@
           </div>
         </section>
 
-        <section class="stats config-stats" id="config-summary" data-view="configurare"></section>
+        <section class="stats config-stats" id="config-summary" data-view="nom-parteneri,nom-produse,nom-locatii,nom-tarife,nom-utilizatori,nom-setari,nom-automatizare,nom-alerte,nom-securitate"></section>
 
-        <section class="setup-grid" data-view="configurare" data-access="setup">
-          <article class="panel">
+        <section class="setup-grid" data-view="nom-parteneri,nom-produse,nom-locatii,nom-tarife,nom-utilizatori,nom-setari,nom-automatizare,nom-alerte,nom-securitate" data-access="setup">
+          <article class="panel" data-view="nom-parteneri">
             <div class="panel-head">
               <h2>Parteneri</h2>
               <p>Furnizori, cumparatori si statut fiscal</p>
@@ -1085,7 +1102,7 @@
             <div class="list-block" id="partners-list"></div>
           </article>
 
-          <article class="panel">
+          <article class="panel" data-view="nom-produse">
             <div class="panel-head">
               <h2>Produse</h2>
               <p>Norme de umiditate si impuritati</p>
@@ -1111,7 +1128,7 @@
             <div class="list-block" id="products-list"></div>
           </article>
 
-          <article class="panel">
+          <article class="panel" data-view="nom-locatii">
             <div class="panel-head">
               <h2>Locatii de stoc</h2>
               <p>Groapa, tampon, cilindri, depozit separat</p>
@@ -1142,7 +1159,7 @@
             <div class="list-block" id="storageLocations-list"></div>
           </article>
 
-          <article class="panel">
+          <article class="panel" data-view="nom-tarife">
             <div class="panel-head">
               <h2>Tarife</h2>
               <p>Curatire, uscare si reguli comerciale de baza</p>
@@ -1172,7 +1189,7 @@
             <div class="list-block" id="tariffs-list"></div>
           </article>
 
-          <article class="panel">
+          <article class="panel" data-view="nom-utilizatori">
             <div class="panel-head">
               <h2>Roluri si utilizatori</h2>
               <p>Rolurile v1 sunt fixe; administrezi utilizatorii si rolul lor.</p>
@@ -1204,7 +1221,7 @@
             <div class="list-block compact-list" id="users-list"></div>
           </article>
 
-          <article class="panel">
+          <article class="panel" data-view="nom-setari">
             <div class="panel-head">
               <h2>Setari sistem</h2>
               <p>Canal de raportare si inchidere de zi</p>
@@ -1283,7 +1300,7 @@
             </div>
           </article>
 
-          <article class="panel" data-access="setup">
+          <article class="panel" data-view="nom-automatizare" data-access="setup">
             <div class="panel-head">
               <h2>Automatizare inchidere zi</h2>
               <p>Status operare, destinatari Telegram si test manual al raportarii automate.</p>
@@ -1309,7 +1326,7 @@
             </div>
           </article>
 
-          <article class="panel" data-access="setup">
+          <article class="panel" data-view="nom-alerte" data-access="setup">
             <div class="panel-head">
               <h2>Alerte critice Telegram</h2>
               <p>Monitorizare alerte CRITIC, workflow de raspuns si escaladare automata.</p>
@@ -1338,7 +1355,7 @@
             </div>
           </article>
 
-          <article class="panel" data-access="security-admin">
+          <article class="panel" data-view="nom-securitate" data-access="security-admin">
             <div class="panel-head">
               <h2>Securitate acces</h2>
               <p>Lista utilizatorilor blocati temporar si deblocare manuala de catre administrator.</p>
@@ -1359,7 +1376,7 @@
           </article>
         </section>
 
-        <section class="panel editor-panel" id="editor-panel" data-view="configurare">
+        <section class="panel editor-panel" id="editor-panel" data-view="nom-parteneri,nom-produse,nom-locatii,nom-tarife,nom-utilizatori,nom-setari">
           <div class="panel-head">
             <h2 id="editor-title">Editor configurare</h2>
             <p id="editor-copy">

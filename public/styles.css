@@ -185,6 +185,85 @@ textarea {
   background: rgba(255, 255, 255, 0.1);
 }
 
+.sidebar-group {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.sidebar-group-toggle {
+  width: 100%;
+}
+
+.sidebar-group-label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.sidebar-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: var(--accent-2-soft);
+  transition: transform 0.18s ease, color 0.15s ease;
+  flex-shrink: 0;
+  margin-left: 4px;
+}
+
+.sidebar-chevron svg {
+  width: 12px;
+  height: 12px;
+  display: block;
+}
+
+.sidebar-group.is-open > .sidebar-group-toggle .sidebar-chevron {
+  transform: rotate(90deg);
+  color: var(--accent-2-bright);
+}
+
+.sidebar-submenu {
+  display: none;
+  flex-direction: column;
+  gap: 1px;
+  padding: 2px 0 4px 30px;
+}
+
+.sidebar-group.is-open > .sidebar-submenu {
+  display: flex;
+}
+
+.sidebar-subitem {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 5px 10px;
+  border: 0;
+  background: transparent;
+  color: #c2c8b5;
+  text-align: left;
+  font-size: 0.8rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+  border-left: 2px solid transparent;
+  line-height: 1.25;
+  flex-shrink: 0;
+}
+
+.sidebar-subitem:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #ffffff;
+}
+
+.sidebar-subitem.is-active {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+  border-left-color: var(--accent-2-bright);
+  font-weight: 600;
+}
+
 .sidebar-footer {
   margin-top: auto;
   padding: 6px 10px 0;
