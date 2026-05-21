@@ -84,12 +84,10 @@ const defaultConfigState = {
     { id: 2, name: "Porumb", code: "PORUMB", unit: "tone", humidityNorm: 14, impurityNorm: 2, active: true }
   ],
   storageLocations: [
-    { id: 1, name: "Groapa primire", type: "groapa", capacity: 120, costCategory: "neprocesat", active: true },
-    { id: 2, name: "Tampon 1", type: "tampon", capacity: 100, costCategory: "neprocesat", active: true },
-    { id: 3, name: "Tampon 2", type: "tampon", capacity: 100, costCategory: "neprocesat", active: true },
-    { id: 4, name: "Cilindru 1", type: "cilindru", capacity: 2000, costCategory: "procesat", active: true },
-    { id: 5, name: "Cilindru 2", type: "cilindru", capacity: 2000, costCategory: "procesat", active: true },
-    { id: 6, name: "Depozit separat", type: "depozit", capacity: 500, costCategory: "neprocesat", active: true }
+    { id: 1, name: "Cilindru 1", type: "cilindru", capacity: 2000, capacitySunflower: 1100, costCategory: "procesat", active: true },
+    { id: 2, name: "Cilindru 2", type: "cilindru", capacity: 2000, capacitySunflower: 1100, costCategory: "procesat", active: true },
+    { id: 3, name: "Cilindru 3", type: "cilindru", capacity: 2000, capacitySunflower: 1100, costCategory: "procesat", active: true },
+    { id: 4, name: "Cilindru 4", type: "cilindru", capacity: 2000, capacitySunflower: 1100, costCategory: "procesat", active: true }
   ],
   tariffs: [
     {

@@ -75,6 +75,7 @@ const processingProvisionalNetEl = document.getElementById("processing-provision
 const processingFinalNetEl = document.getElementById("processing-final-net");
 const stocksBodyEl = document.getElementById("stocks-body");
 const stockSummaryEl = document.getElementById("stock-summary");
+const silosGridEl = document.getElementById("silos-grid");
 const receiptStatusFilterEl = document.getElementById("receipt-status-filter");
 const receiptProductFilterEl = document.getElementById("receipt-product-filter");
 const processingTypeFilterEl = document.getElementById("processing-type-filter");
@@ -573,7 +574,100 @@ function renderAuditStats(stats) {
   statsEl.insertAdjacentHTML("beforeend", extraMarkup);
 }
 
+function isSunflowerProduct(name) {
+  return /floar/i.test(String(name || ""));
+}
+
+function getLocationCapacity(loc, productName) {
+  const base = Number(loc?.capacity || 0);
+  const sunCap = Number(loc?.capacitySunflower || 0);
+  if (productName && isSunflowerProduct(productName) && sunCap > 0) {
+    return sunCap;
+  }
+  return base;
+}
+
+function renderSilosGrid(summary) {
+  if (!silosGridEl) return;
+  const cylinders = (currentConfig?.storageLocations || [])
+    .filter((loc) => loc.active !== false && String(loc.type || "").toLowerCase() === "cilindru")
+    .sort((a, b) => Number(a.id) - Number(b.id));
+
+  if (!cylinders.length) {
+    silosGridEl.innerHTML = '<p class="hero-copy" style="grid-column:1/-1;color:var(--muted);">Niciun cilindru configurat. Configurează în Setari → Locatii.</p>';
+    return;
+  }
+
+  const byLocation = new Map();
+  for (const item of summary.byLocation || []) {
+    const key = String(item.location || "").trim();
+    if (!key) continue;
+    const existing = byLocation.get(key) || { items: [], total: 0 };
+    existing.items.push(item);
+    existing.total += Number(item.quantity || 0);
+    byLocation.set(key, existing);
+  }
+
+  silosGridEl.innerHTML = cylinders
+    .map((cyl) => {
+      const state = byLocation.get(cyl.name) || { items: [], total: 0 };
+      const dominantProduct = (state.items.sort((a, b) => Number(b.quantity || 0) - Number(a.quantity || 0))[0] || {}).product || "—";
+      const capacity = getLocationCapacity(cyl, dominantProduct);
+      const filled = Math.max(0, state.total);
+      const pct = capacity > 0 ? Math.min(100, (filled / capacity) * 100) : 0;
+      const free = Math.max(capacity - filled, 0);
+      const pctClass = pct >= 95 ? "is-crit" : pct >= 80 ? "is-warn" : "";
+      const fillColor = pct >= 95 ? "#B53E22" : pct >= 80 ? "#B08828" : "#2D8F60";
+      const fillH = Math.max(0, Math.min(120, (pct / 100) * 120));
+      const fillY = 28 + (120 - fillH);
+
+      return `
+        <article class="silo-card" data-id="${cyl.id}" title="${cyl.name} · ${formatNumber(filled)}/${formatNumber(capacity)} t">
+          <div class="silo-card-head">
+            <span class="silo-name">${cyl.name}</span>
+            <span class="silo-pct ${pctClass}">${pct.toFixed(0)}%</span>
+          </div>
+          <div class="silo-visual">
+            <svg viewBox="0 0 100 180" preserveAspectRatio="xMidYMax meet">
+              <!-- conical roof -->
+              <path d="M14 28 L50 6 L86 28 Z" fill="#D4B262" stroke="#0F3D27" stroke-width="1.2"/>
+              <!-- silo body -->
+              <rect x="14" y="28" width="72" height="120" rx="2" fill="#F4EFE0" stroke="#0F3D27" stroke-width="1.2"/>
+              <!-- shadow on left side -->
+              <rect x="14" y="28" width="10" height="120" fill="#0F3D27" opacity="0.12"/>
+              <!-- ribs (horizontal) -->
+              <line x1="14" y1="58" x2="86" y2="58" stroke="#0F3D27" stroke-width="0.5" opacity="0.35"/>
+              <line x1="14" y1="88" x2="86" y2="88" stroke="#0F3D27" stroke-width="0.5" opacity="0.35"/>
+              <line x1="14" y1="118" x2="86" y2="118" stroke="#0F3D27" stroke-width="0.5" opacity="0.35"/>
+              <!-- fill (grain inside) -->
+              <clipPath id="silo-clip-${cyl.id}">
+                <rect x="16" y="30" width="68" height="116" rx="1"/>
+              </clipPath>
+              <g clip-path="url(#silo-clip-${cyl.id})">
+                <rect x="14" y="${fillY}" width="72" height="${fillH}" fill="${fillColor}" opacity="0.78"/>
+                <!-- top surface highlight -->
+                <ellipse cx="50" cy="${fillY}" rx="36" ry="3" fill="${fillColor}" opacity="0.45"/>
+              </g>
+              <!-- base door -->
+              <rect x="46" y="142" width="8" height="6" fill="#0F3D27"/>
+              <!-- ground line -->
+              <line x1="6" y1="150" x2="94" y2="150" stroke="#D4B262" stroke-width="1.5"/>
+              <!-- pct label inside -->
+              <text x="50" y="${Math.max(fillY + 14, 42)}" font-family="DM Mono, monospace" font-size="11" font-weight="600" text-anchor="middle" fill="${pct >= 25 ? '#FBF8EE' : '#0F3D27'}">${pct.toFixed(0)}%</text>
+            </svg>
+          </div>
+          <div class="silo-meta">
+            <span>Liber <b>${formatNumber(free)}t</b></span>
+            <span class="silo-product">${dominantProduct}</span>
+          </div>
+        </article>
+      `;
+    })
+    .join("");
+}
+
 function renderStockSummary(summary) {
+  renderSilosGrid(summary);
   const cards = [
     ["Cantitate stoc", formatNumber(summary.totals.totalQuantity)],
     ["Locatii active", summary.totals.totalLocations],
