@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="ro">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
+    <meta name="theme-color" content="#1B5E3F" />
+    <title>AgroProfit+ · Mini App</title>
+    <link rel="icon" type="image/svg+xml" href="/agroprofit-mark.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/m/mini.css" />
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  </head>
+  <body class="tg-app">
+    <!-- Login fallback (only shown if not in Telegram) -->
+    <section class="tg-login" id="tg-login" hidden>
+      <div class="tg-login-card">
+        <img class="tg-logo" src="/agroprofit-mark.svg" alt="AgroProfit+" />
+        <h2>AgroProfit+ Mini</h2>
+        <p class="tg-muted">Conectează-te pentru a continua.</p>
+        <form id="tg-login-form" class="tg-form">
+          <input id="tg-username" name="username" placeholder="Utilizator" autocomplete="username" required />
+          <input id="tg-password" name="password" type="password" placeholder="Parolă" autocomplete="current-password" required />
+          <button type="submit">Intră</button>
+          <p class="tg-error" id="tg-login-error"></p>
+        </form>
+      </div>
+    </section>
+
+    <!-- Main app shell -->
+    <div class="tg-shell" id="tg-shell" hidden>
+
+      <!-- Header -->
+      <header class="tg-header">
+        <div class="tg-hi">
+          <div class="tg-hi-eyebrow" id="tg-hi-eyebrow">SALUT</div>
+          <div class="tg-hi-name" id="tg-hi-name">—</div>
+        </div>
+        <div class="tg-role" id="tg-role">—</div>
+      </header>
+
+      <main class="tg-main">
+
+        <!-- HOME view -->
+        <section class="tg-view is-active" data-tgview="home">
+
+          <!-- Live KPI hero -->
+          <article class="tg-hero">
+            <span class="tg-hero-eyebrow">STOC · LIVE</span>
+            <strong class="tg-hero-value" id="tg-stoc-value">0%</strong>
+            <span class="tg-hero-meta" id="tg-stoc-meta">8.000 t · 4 cilindri</span>
+          </article>
+
+          <!-- Quick actions (role-aware) -->
+          <section class="tg-actions">
+            <h3 class="tg-section-title">Acțiuni rapide</h3>
+            <div class="tg-actions-grid" id="tg-actions-grid">
+              <!-- buttons injected by JS -->
+            </div>
+          </section>
+
+          <!-- Today KPI -->
+          <section class="tg-kpis">
+            <h3 class="tg-section-title">Astăzi</h3>
+            <div class="tg-kpi-grid">
+              <article class="tg-kpi">
+                <span class="tg-kpi-label">RECEPȚII</span>
+                <strong class="tg-kpi-value" id="tg-k-receipts">0</strong>
+              </article>
+              <article class="tg-kpi">
+                <span class="tg-kpi-label">LIVRĂRI</span>
+                <strong class="tg-kpi-value" id="tg-k-deliveries">0</strong>
+              </article>
+              <article class="tg-kpi">
+                <span class="tg-kpi-label">ÎNCASĂRI</span>
+                <strong class="tg-kpi-value" id="tg-k-collections">0</strong>
+              </article>
+              <article class="tg-kpi">
+                <span class="tg-kpi-label">RECLAMAȚII</span>
+                <strong class="tg-kpi-value" id="tg-k-complaints">0</strong>
+              </article>
+            </div>
+          </section>
+
+          <!-- Activity feed -->
+          <section class="tg-feed">
+            <h3 class="tg-section-title">Ultima activitate</h3>
+            <div class="tg-feed-list" id="tg-feed-list">
+              <p class="tg-muted">Nu sunt evenimente recente.</p>
+            </div>
+          </section>
+        </section>
+
+        <!-- RECEPTII view -->
+        <section class="tg-view" data-tgview="receptii">
+          <h3 class="tg-view-title">Recepții recente</h3>
+          <div class="tg-list" id="tg-receipts-list">
+            <p class="tg-muted">Se încarcă…</p>
+          </div>
+        </section>
+
+        <!-- LIVRARI view -->
+        <section class="tg-view" data-tgview="livrari">
+          <h3 class="tg-view-title">Livrări recente</h3>
+          <div class="tg-list" id="tg-deliveries-list">
+            <p class="tg-muted">Se încarcă…</p>
+          </div>
+        </section>
+
+        <!-- BANI / Financiar view -->
+        <section class="tg-view" data-tgview="bani">
+          <h3 class="tg-view-title">Tranzacții recente</h3>
+          <div class="tg-list" id="tg-transactions-list">
+            <p class="tg-muted">Se încarcă…</p>
+          </div>
+        </section>
+
+        <!-- CONT view -->
+        <section class="tg-view" data-tgview="cont">
+          <article class="tg-profile">
+            <div class="tg-profile-avatar" id="tg-profile-avatar">—</div>
+            <div class="tg-profile-info">
+              <div class="tg-profile-name" id="tg-profile-name">—</div>
+              <div class="tg-profile-role" id="tg-profile-role">—</div>
+            </div>
+          </article>
+          <div class="tg-actions-list">
+            <a class="tg-link-row" href="/" target="_blank" rel="noopener">
+              <span>Deschide versiunea web completă</span>
+              <span class="tg-arrow">›</span>
+            </a>
+            <button class="tg-link-row" id="tg-logout-button" type="button">
+              <span class="tg-danger">Ieșire</span>
+              <span class="tg-arrow">›</span>
+            </button>
+          </div>
+          <p class="tg-foot">AgroProfit+ · v1 · Mini App</p>
+        </section>
+      </main>
+
+      <!-- Bottom navigation -->
+      <nav class="tg-nav">
+        <button class="tg-nav-btn is-active" data-target="home" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11.5 12 4l9 7.5"/><path d="M5 10.5V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-9.5"/></svg>
+          <span>Acasă</span>
+        </button>
+        <button class="tg-nav-btn" data-target="receptii" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/><path d="M12 4v10"/><path d="m7 9 5 5 5-5"/></svg>
+          <span>Recepții</span>
+        </button>
+        <button class="tg-nav-btn" data-target="livrari" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 16V6a1 1 0 0 1 1-1h10v11"/><path d="M14 9h4l3 3v4h-7"/><circle cx="7.5" cy="18.5" r="2"/><circle cx="16.5" cy="18.5" r="2"/></svg>
+          <span>Livrări</span>
+        </button>
+        <button class="tg-nav-btn" data-target="bani" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M14.8 9.3a3 3 0 0 0-5.3 1.6c0 1.4 1 2.3 3 2.8 2 .5 3 1.4 3 2.8a3 3 0 0 1-5.3 1.6"/></svg>
+          <span>Bani</span>
+        </button>
+        <button class="tg-nav-btn" data-target="cont" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>
+          <span>Cont</span>
+        </button>
+      </nav>
+    </div>
+
+    <script src="/m/mini.js"></script>
+  </body>
+</html>

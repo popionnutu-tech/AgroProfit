@@ -312,6 +312,14 @@ app.post("/api/automation/close-of-day/run", requireRoles(["admin"]), runCloseOf
 app.get("/api/automation/critical-alerts/status", requireRoles(["admin"]), getCriticalAlertsStatusHandler);
 app.post("/api/automation/critical-alerts/check", requireRoles(["admin"]), runCriticalAlertsCheckHandler);
 
+// Telegram Mini App SPA — serve its own index.html for any /m/* path
+app.get("/m", (_req, res) => {
+  res.sendFile(path.join(process.cwd(), "public", "m", "index.html"));
+});
+app.get("/m/*", (_req, res) => {
+  res.sendFile(path.join(process.cwd(), "public", "m", "index.html"));
+});
+
 app.get("*", (_req, res) => {
   res.sendFile(path.join(process.cwd(), "public", "index.html"));
 });
