@@ -51,38 +51,60 @@
           </div>
           <nav class="sidebar-nav">
             <button class="view-tab sidebar-item is-active" data-view="acasa" type="button">
-              <span class="sidebar-icon">🏠</span><span>Acasă</span>
+              <span class="sidebar-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11.5 12 4l9 7.5"/><path d="M5 10.5V20a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1v-9.5"/></svg>
+              </span><span>Acasă</span>
             </button>
             <button class="view-tab sidebar-item" data-view="receptii" data-access="receipts-read" type="button">
-              <span class="sidebar-icon">📥</span><span>Recepții</span>
+              <span class="sidebar-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/><path d="M12 4v10"/><path d="m7 9 5 5 5-5"/></svg>
+              </span><span>Recepții</span>
             </button>
             <button class="view-tab sidebar-item" data-view="procesare" data-access="processings-read" type="button">
-              <span class="sidebar-icon">⚙️</span><span>Procesare</span>
+              <span class="sidebar-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.55V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1.03H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1.03-1.55V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15 4.6a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.1.36.36.69.69.92.34.23.74.36 1.16.36H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1.03Z"/></svg>
+              </span><span>Procesare</span>
             </button>
             <button class="view-tab sidebar-item" data-view="stoc" data-access="stocks-read" type="button">
-              <span class="sidebar-icon">📦</span><span>Stoc</span>
+              <span class="sidebar-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8 12 3 3 8v8l9 5 9-5V8Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
+              </span><span>Stoc</span>
             </button>
             <button class="view-tab sidebar-item" data-view="livrari" data-access="deliveries-read" type="button">
-              <span class="sidebar-icon">📤</span><span>Livrări</span>
+              <span class="sidebar-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 16V6a1 1 0 0 1 1-1h10v11"/><path d="M14 9h4l3 3v4h-7"/><circle cx="7.5" cy="18.5" r="2"/><circle cx="16.5" cy="18.5" r="2"/></svg>
+              </span><span>Livrări</span>
             </button>
             <button class="view-tab sidebar-item" data-view="reclamatii" data-access="complaints-read" type="button">
-              <span class="sidebar-icon">⚠️</span><span>Reclamații</span>
+              <span class="sidebar-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.86 1.82 18a2 2 0 0 0 1.7 3h16.96a2 2 0 0 0 1.7-3L13.7 3.86a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+              </span><span>Reclamații</span>
             </button>
             <button class="view-tab sidebar-item" data-view="financiar" data-access="finance" type="button">
-              <span class="sidebar-icon">💰</span><span>Financiar</span>
+              <span class="sidebar-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M14.8 9.3a3 3 0 0 0-5.3 1.6c0 1.4 1 2.3 3 2.8 2 .5 3 1.4 3 2.8a3 3 0 0 1-5.3 1.6"/><path d="M12 6.5V8"/><path d="M12 16v1.5"/></svg>
+              </span><span>Financiar</span>
             </button>
             <button class="view-tab sidebar-item" data-view="deschidere" data-access="opening" type="button">
-              <span class="sidebar-icon">📋</span><span>Deschidere</span>
+              <span class="sidebar-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4h6v3H9z"/><path d="M9 12h6"/><path d="M9 16h4"/></svg>
+              </span><span>Deschidere</span>
             </button>
             <button class="view-tab sidebar-item" data-view="rapoarte" data-access="reports" type="button">
-              <span class="sidebar-icon">📊</span><span>Rapoarte</span>
+              <span class="sidebar-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><rect x="7" y="13" width="3" height="5"/><rect x="12" y="9" width="3" height="9"/><rect x="17" y="5" width="3" height="13"/></svg>
+              </span><span>Rapoarte</span>
             </button>
             <button class="view-tab sidebar-item" data-view="audit" data-access="audit" type="button">
-              <span class="sidebar-icon">🔍</span><span>Audit</span>
+              <span class="sidebar-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+              </span><span>Audit</span>
             </button>
             <div class="sidebar-separator" aria-hidden="true"></div>
             <button class="view-tab sidebar-item" data-view="configurare" data-access="setup" type="button">
-              <span class="sidebar-icon">🛠️</span><span>Configurare</span>
+              <span class="sidebar-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-7"/><path d="M4 10V3"/><path d="M12 21v-9"/><path d="M12 8V3"/><path d="M20 21v-5"/><path d="M20 12V3"/><path d="M2 14h4"/><path d="M10 8h4"/><path d="M18 16h4"/></svg>
+              </span><span>Configurare</span>
             </button>
           </nav>
           <div class="sidebar-footer">
