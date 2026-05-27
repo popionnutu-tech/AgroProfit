@@ -1273,8 +1273,14 @@ function renderReceiptSelectors(config) {
     processingReceiptSelect,
     processingReceiptOptions,
     (item) => `#${item.id} - ${item.product} - ${item.supplier}`,
-    "Selecteaza receptia"
+    processingReceiptOptions.length ? "Selecteaza receptia" : "Nu există recepții disponibile — adaugă mai întâi o recepție"
   );
+  if (processingReceiptSelect) {
+    processingReceiptSelect.disabled = !processingReceiptOptions.length;
+    processingReceiptSelect.title = processingReceiptOptions.length
+      ? "Alege lotul de recepție pe care îl procesezi"
+      : "Mai întâi creează o recepție din meniul Recepții";
+  }
   renderSelectOptions(
     processingTypeSelect,
     config.processingTypes.filter((item) => item.active),
@@ -1907,7 +1913,11 @@ function getReceiptEstimate() {
   );
   const cleaningTariff = Number(getActiveTariff("Curatire")?.value || 0);
   const dryingTariff = Number(getActiveTariff("Uscare")?.value || 0);
-  const cleaningServiceTotal = quantity * cleaningTariff;
+  // Services are charged ONLY for the % above norma.
+  //   uscare   = tarif_uscare   × (umiditate − norma_umiditate)   × kg
+  //   curatare = tarif_curatare × (impuritati − norma_impuritati) × kg
+  // If umiditate ≤ norma AND impuritati ≤ norma → 0 (no services).
+  const cleaningServiceTotal = quantity * excessImpurity * cleaningTariff;
   const dryingServiceTotal = quantity * excessHumidity * dryingTariff;
   const preliminaryServicesTotal = cleaningServiceTotal + dryingServiceTotal;
   const preliminaryMerchandiseValue = provisionalNetQuantity * price;
@@ -2217,8 +2227,22 @@ async function createReceipt(formData) {
 }
 
 function validateReceiptForm(formData) {
-  if (!formData.get("supplierId")) {
+  // Defensive: bail out early if config is still loading
+  if (!currentConfig || !Array.isArray(currentConfig.partners) || !currentConfig.partners.length) {
+    return "Configurarea încă se încarcă. Mai încearcă în câteva secunde.";
+  }
+
+  const supplierId = formData.get("supplierId");
+  if (!supplierId) {
     return "Selecteaza furnizorul.";
+  }
+
+  // Verify the selected supplier actually exists in our cached config
+  const supplierExists = currentConfig.partners.some(
+    (item) => String(item.id) === String(supplierId)
+  );
+  if (!supplierExists) {
+    return "Furnizorul nu a fost găsit. Reîncarcă pagina și încearcă din nou.";
   }
 
   if (!formData.get("productId")) {
