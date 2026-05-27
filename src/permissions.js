@@ -40,7 +40,9 @@ const SYSTEM_ROLE_CAPABILITIES = {
     "finance-write",
     "opening",
     "reports",
-    "config-read"
+    "config-read",
+    "nomenclator-read",
+    "nomenclator-create"
   ],
   "accountant-sef": [
     "receipts-read",
@@ -56,7 +58,9 @@ const SYSTEM_ROLE_CAPABILITIES = {
     "opening",
     "reports",
     "audit",
-    "config-read"
+    "config-read",
+    "nomenclator-read",
+    "nomenclator-create"
   ],
   control: [
     "receipts-read",
@@ -87,6 +91,9 @@ const SYSTEM_ROLE_CAPABILITIES = {
     "audit",
     "security-admin",
     "setup",
+    "nomenclator-read",
+    "nomenclator-create",
+    "nomenclator-update",
     "config-read"
   ]
 };

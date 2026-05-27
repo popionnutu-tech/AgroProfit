@@ -1502,6 +1502,8 @@ function renderMiniList(entity, items) {
   const hasStatus = items.some((it) => Object.prototype.hasOwnProperty.call(it, "active"));
   const statusHeader = hasStatus ? "<th>Status</th>" : "";
 
+  // Show edit/toggle buttons only to users with nomenclator-update (admin)
+  const canModify = canAccess("nomenclator-update");
   const rows = items
     .map((item) => {
       const cells = cols.map((col) => `<td>${getCellValue(item, col)}</td>`).join("");
@@ -1511,17 +1513,20 @@ function renderMiniList(entity, items) {
             canToggle ? (item.active ? "Activ" : "Inactiv") : "—"
           }</td>`
         : "";
-      const toggleBtn = canToggle
+      const editBtn = canModify
+        ? `<button class="cell-btn cell-btn-primary" type="button" data-action="edit" data-entity="${entity}" data-id="${item.id}">Editează</button>`
+        : "";
+      const toggleBtn = canModify && canToggle
         ? `<button class="cell-btn" type="button" data-action="toggle" data-entity="${entity}" data-id="${item.id}" title="${item.active ? "Dezactiveaza" : "Activeaza"}">${item.active ? "Off" : "On"}</button>`
         : "";
+      const actionsCell = canModify
+        ? `<td class="cell-actions">${editBtn}${toggleBtn}</td>`
+        : `<td class="cell-actions"><span class="cell-locked" title="Doar admin poate modifica">—</span></td>`;
       return `
         <tr>
           ${cells}
           ${statusCell}
-          <td class="cell-actions">
-            <button class="cell-btn cell-btn-primary" type="button" data-action="edit" data-entity="${entity}" data-id="${item.id}">Editează</button>
-            ${toggleBtn}
-          </td>
+          ${actionsCell}
         </tr>
       `;
     })

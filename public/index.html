@@ -115,7 +115,7 @@
               </span><span>Audit</span>
             </button>
             <div class="sidebar-separator" aria-hidden="true"></div>
-            <div class="sidebar-group" data-group="nomenclator" data-access="setup">
+            <div class="sidebar-group" data-group="nomenclator" data-access="nomenclator-read">
               <button class="sidebar-item sidebar-group-toggle" type="button" aria-expanded="false">
                 <span class="sidebar-icon" aria-hidden="true">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h10l4 4v12a2 2 0 0 1-2 2H4z"/><path d="M14 4v4h4"/><path d="M7 13h8"/><path d="M7 17h5"/></svg>
@@ -126,10 +126,10 @@
                 </span>
               </button>
               <div class="sidebar-submenu">
-                <button class="view-tab sidebar-subitem" data-view="nom-parteneri" data-access="setup" type="button">Parteneri</button>
-                <button class="view-tab sidebar-subitem" data-view="nom-produse" data-access="setup" type="button">Produse</button>
-                <button class="view-tab sidebar-subitem" data-view="nom-locatii" data-access="setup" type="button">Locații de stoc</button>
-                <button class="view-tab sidebar-subitem" data-view="nom-tarife" data-access="setup" type="button">Tarife</button>
+                <button class="view-tab sidebar-subitem" data-view="nom-parteneri" data-access="nomenclator-read" type="button">Parteneri</button>
+                <button class="view-tab sidebar-subitem" data-view="nom-produse" data-access="nomenclator-read" type="button">Produse</button>
+                <button class="view-tab sidebar-subitem" data-view="nom-locatii" data-access="nomenclator-read" type="button">Locații de stoc</button>
+                <button class="view-tab sidebar-subitem" data-view="nom-tarife" data-access="nomenclator-read" type="button">Tarife</button>
                 <button class="view-tab sidebar-subitem" data-view="nom-utilizatori" data-access="setup" type="button">Roluri și utilizatori</button>
                 <button class="view-tab sidebar-subitem" data-view="nom-setari" data-access="setup" type="button">Setări sistem</button>
                 <button class="view-tab sidebar-subitem" data-view="nom-automatizare" data-access="setup" type="button">Automatizare zi</button>
@@ -1171,7 +1171,7 @@
 
         <section class="stats config-stats" id="config-summary" data-view="nom-parteneri,nom-produse,nom-locatii,nom-tarife,nom-utilizatori,nom-setari,nom-automatizare,nom-alerte,nom-securitate"></section>
 
-        <section class="setup-grid" data-view="nom-parteneri,nom-produse,nom-locatii,nom-tarife,nom-utilizatori,nom-setari,nom-automatizare,nom-alerte,nom-securitate" data-access="setup">
+        <section class="setup-grid" data-view="nom-parteneri,nom-produse,nom-locatii,nom-tarife,nom-utilizatori,nom-setari,nom-automatizare,nom-alerte,nom-securitate" data-access="nomenclator-read">
           <article class="panel" data-view="nom-parteneri">
             <div class="panel-head">
               <h2>Parteneri</h2>
@@ -1481,7 +1481,7 @@
           </article>
         </section>
 
-        <section class="panel editor-panel" id="editor-panel" data-view="nom-parteneri,nom-produse,nom-locatii,nom-tarife,nom-utilizatori,nom-setari">
+        <section class="panel editor-panel" id="editor-panel" data-view="nom-parteneri,nom-produse,nom-locatii,nom-tarife,nom-utilizatori,nom-setari" data-access="nomenclator-update">
           <div class="panel-head">
             <h2 id="editor-title">Editor configurare</h2>
             <p id="editor-copy">

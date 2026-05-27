@@ -133,10 +133,22 @@ app.post(
 
 app.get("/api/config", getConfigHandler);
 
-app.post("/api/config/:entity", requireRoles(["admin"]), async (req, res) => {
+// Whitelist of entities that contabil / contabil-sef can create (read-only nomenclator)
+const NOMENCLATOR_CREATE_ALLOWED = new Set(["partners", "products", "storageLocations", "tariffs"]);
+
+app.post("/api/config/:entity", async (req, res, next) => {
+  const role = req.currentUser && req.currentUser.roleCode;
+  if (role === "admin") return next();
+  if ((role === "accountant" || role === "accountant-sef") && NOMENCLATOR_CREATE_ALLOWED.has(req.params.entity)) {
+    return next();
+  }
+  if (!req.currentUser) return res.status(401).json({ error: "Autentificare necesara." });
+  return res.status(403).json({ error: "Nu ai drepturi pentru aceasta operatiune." });
+}, async (req, res) => {
   return createConfigEntryHandler(req, res, req.params.entity);
 });
 
+// PATCH/UPDATE remains admin-only
 app.patch("/api/config/:entity/:id", requireRoles(["admin"]), async (req, res) => {
   return updateConfigEntryHandler(req, res, req.params.entity, req.params.id);
 });
