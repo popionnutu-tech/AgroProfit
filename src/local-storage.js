@@ -53,7 +53,9 @@ const defaultConfigState = {
     tariffs: 2,
     paymentTypes: 2,
     fiscalProfiles: 3,
-    processingTypes: 3
+    processingTypes: 3,
+    vehicles: 0,
+    labReports: 0
   },
   roles: listSystemRoles(),
   users: [
@@ -67,7 +69,9 @@ const defaultConfigState = {
       address: "Balti",
       phone: "+37360000001",
       role: "furnizor",
-      fiscalProfile: "Persoana fizica"
+      fiscalProfile: "Persoana fizica",
+      bankName: "",
+      iban: ""
     },
     {
       id: 2,
@@ -76,7 +80,9 @@ const defaultConfigState = {
       address: "Chisinau",
       phone: "+37360000002",
       role: "cumparator",
-      fiscalProfile: "Persoana juridica platitor TVA"
+      fiscalProfile: "Persoana juridica platitor TVA",
+      bankName: "",
+      iban: ""
     }
   ],
   products: [
@@ -127,6 +133,8 @@ const defaultConfigState = {
     { id: 2, name: "Uscare", consumptionNorm: 1.2, resource: "gaz", active: true },
     { id: 3, name: "Pastrare", consumptionNorm: 0, resource: "spatiu", active: true }
   ],
+  vehicles: [],
+  labReports: [],
   systemSettings: {
     closeOfDayHour: 17,
     reportChannel: "telegram",
@@ -145,7 +153,9 @@ const configEntities = [
   "tariffs",
   "paymentTypes",
   "fiscalProfiles",
-  "processingTypes"
+  "processingTypes",
+  "vehicles",
+  "labReports"
 ];
 
 const defaultUserPassword = process.env.DEFAULT_USER_PASSWORD || "Agro2026!";
@@ -951,7 +961,35 @@ function normalizeEntityPayload(entity, payload) {
         fiscalProfile: requiredText(
           payload.fiscalProfile || "Persoana fizica",
           "Statutul fiscal"
-        )
+        ),
+        bankName: String(payload.bankName || "").trim(),
+        iban: String(payload.iban || "").trim()
+      };
+    case "vehicles":
+      return {
+        number: requiredText(payload.number, "Numarul masinii"),
+        series: String(payload.series || "").trim(),
+        driver: String(payload.driver || "").trim(),
+        active: sanitizeBoolean(payload.active ?? true)
+      };
+    case "labReports":
+      return {
+        reportNumber: requiredText(payload.reportNumber, "Numarul raportului"),
+        reportDate: String(payload.reportDate || "").trim(),
+        issuedBy: String(payload.issuedBy || "").trim(),
+        contactPhone: String(payload.contactPhone || "").trim(),
+        product: requiredText(payload.product, "Denumirea produsului"),
+        originCountry: String(payload.originCountry || "").trim(),
+        harvestYear: String(payload.harvestYear || "").trim(),
+        humidity: sanitizeNumber(payload.humidity),
+        aflatoxinB1: String(payload.aflatoxinB1 || "").trim(),
+        impuritiesTotal: sanitizeNumber(payload.impuritiesTotal),
+        impuritiesDiverse: sanitizeNumber(payload.impuritiesDiverse),
+        brokenGrains: sanitizeNumber(payload.brokenGrains),
+        sproutedGrains: sanitizeNumber(payload.sproutedGrains),
+        defectiveGrains: sanitizeNumber(payload.defectiveGrains),
+        destination: String(payload.destination || "").trim(),
+        active: sanitizeBoolean(payload.active ?? true)
       };
     case "products":
       return {

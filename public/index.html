@@ -130,6 +130,8 @@
                 <button class="view-tab sidebar-subitem" data-view="nom-produse" data-access="nomenclator-read" type="button">Produse</button>
                 <button class="view-tab sidebar-subitem" data-view="nom-locatii" data-access="nomenclator-read" type="button">Locații de stoc</button>
                 <button class="view-tab sidebar-subitem" data-view="nom-tarife" data-access="nomenclator-read" type="button">Tarife</button>
+                <button class="view-tab sidebar-subitem" data-view="nom-masini" data-access="nomenclator-read" type="button">Mașini</button>
+                <button class="view-tab sidebar-subitem" data-view="nom-laborator" data-access="nomenclator-read" type="button">Date laborator</button>
                 <button class="view-tab sidebar-subitem" data-view="nom-utilizatori" data-access="setup" type="button">Roluri și utilizatori</button>
                 <button class="view-tab sidebar-subitem" data-view="nom-setari" data-access="setup" type="button">Setări sistem</button>
                 <button class="view-tab sidebar-subitem" data-view="nom-automatizare" data-access="setup" type="button">Automatizare zi</button>
@@ -874,7 +876,8 @@
                 </label>
                 <label>
                   Mașină (nr.)
-                  <input name="vehicle" placeholder="Ex: AG-102" />
+                  <input name="vehicle" list="vehicles-datalist" placeholder="Ex: AG-102" />
+                  <datalist id="vehicles-datalist"></datalist>
                 </label>
               </div>
 
@@ -1228,9 +1231,9 @@
           </div>
         </section>
 
-        <section class="stats config-stats" id="config-summary" data-view="nom-parteneri,nom-produse,nom-locatii,nom-tarife,nom-utilizatori,nom-setari,nom-automatizare,nom-alerte,nom-securitate"></section>
+        <section class="stats config-stats" id="config-summary" data-view="nom-parteneri,nom-produse,nom-locatii,nom-tarife,nom-masini,nom-laborator,nom-utilizatori,nom-setari,nom-automatizare,nom-alerte,nom-securitate"></section>
 
-        <section class="setup-grid" data-view="nom-parteneri,nom-produse,nom-locatii,nom-tarife,nom-utilizatori,nom-setari,nom-automatizare,nom-alerte,nom-securitate" data-access="nomenclator-read">
+        <section class="setup-grid" data-view="nom-parteneri,nom-produse,nom-locatii,nom-tarife,nom-masini,nom-laborator,nom-utilizatori,nom-setari,nom-automatizare,nom-alerte,nom-securitate" data-access="nomenclator-read">
           <article class="panel" data-view="nom-parteneri">
             <div class="panel-head">
               <h2>Parteneri</h2>
@@ -1241,6 +1244,10 @@
               <input name="idno" placeholder="IDNO" />
               <input name="phone" placeholder="Telefon" />
               <input name="address" placeholder="Adresa" />
+              <div class="split">
+                <input name="bankName" placeholder="Banca" />
+                <input name="iban" placeholder="IBAN / cont" />
+              </div>
               <div class="split">
                 <select name="role">
                   <option value="furnizor">Furnizor</option>
@@ -1339,6 +1346,68 @@
               <button type="submit">Adauga tarif</button>
             </form>
             <div class="list-block" id="tariffs-list"></div>
+          </article>
+
+          <article class="panel" data-view="nom-masini">
+            <div class="panel-head">
+              <h2>Mașini</h2>
+              <p>Numărul și seria mașinilor, pentru a fi alese la livrare</p>
+            </div>
+            <form class="mini-form" data-entity-form="vehicles">
+              <div class="split">
+                <input name="number" placeholder="Nr. mașină (ex: AG-102)" required />
+                <input name="series" placeholder="Serie" />
+              </div>
+              <div class="split">
+                <input name="driver" placeholder="Șofer (opțional)" />
+                <select name="active">
+                  <option value="true">Activ</option>
+                  <option value="false">Inactiv</option>
+                </select>
+              </div>
+              <button type="submit">Adauga mașină</button>
+            </form>
+            <div class="list-block" id="vehicles-list"></div>
+          </article>
+
+          <article class="panel" data-view="nom-laborator">
+            <div class="panel-head">
+              <h2>Date laborator</h2>
+              <p>Date din raportul de laborator, folosite la forma de tipar (certificat de calitate) la livrări</p>
+            </div>
+            <form class="mini-form" data-entity-form="labReports">
+              <div class="split">
+                <input name="reportNumber" placeholder="Nr. raport de încercări" required />
+                <input name="reportDate" type="date" placeholder="Data raportului" />
+              </div>
+              <div class="split">
+                <input name="issuedBy" placeholder="Cine a eliberat raportul" />
+                <input name="contactPhone" placeholder="Telefon de contact" />
+              </div>
+              <div class="split">
+                <input name="product" placeholder="Denumirea produsului" required />
+                <input name="originCountry" placeholder="Țara de origine" />
+              </div>
+              <div class="split">
+                <input name="harvestYear" placeholder="Anul recoltei" />
+                <input name="humidity" type="number" step="0.01" placeholder="Umiditate %" />
+              </div>
+              <div class="split">
+                <input name="aflatoxinB1" placeholder="Aflatoxina B1" />
+                <input name="impuritiesTotal" type="number" step="0.01" placeholder="Impurități totale %" />
+              </div>
+              <div class="split">
+                <input name="impuritiesDiverse" type="number" step="0.01" placeholder="Impurități diverse %" />
+                <input name="brokenGrains" type="number" step="0.01" placeholder="Boabe sparte %" />
+              </div>
+              <div class="split">
+                <input name="sproutedGrains" type="number" step="0.01" placeholder="Boabe încolțite %" />
+                <input name="defectiveGrains" type="number" step="0.01" placeholder="Boabe defecte %" />
+              </div>
+              <input name="destination" placeholder="Destinația produsului" />
+              <button type="submit">Adauga raport laborator</button>
+            </form>
+            <div class="list-block" id="labReports-list"></div>
           </article>
 
           <article class="panel" data-view="nom-utilizatori">
@@ -1540,7 +1609,7 @@
           </article>
         </section>
 
-        <section class="panel editor-panel" id="editor-panel" data-view="nom-parteneri,nom-produse,nom-locatii,nom-tarife,nom-utilizatori,nom-setari" data-access="nomenclator-update">
+        <section class="panel editor-panel" id="editor-panel" data-view="nom-parteneri,nom-produse,nom-locatii,nom-tarife,nom-masini,nom-laborator,nom-utilizatori,nom-setari" data-access="nomenclator-update">
           <div class="panel-head">
             <h2 id="editor-title">Editor configurare</h2>
             <p id="editor-copy">

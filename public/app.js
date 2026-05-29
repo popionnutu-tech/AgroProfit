@@ -143,7 +143,9 @@ const entityLabels = {
   users: "Utilizatori",
   paymentTypes: "Tipuri plata",
   fiscalProfiles: "Statut fiscal",
-  processingTypes: "Tipuri procesare"
+  processingTypes: "Tipuri procesare",
+  vehicles: "Masini",
+  labReports: "Date laborator"
 };
 
 let currentConfig = null;
@@ -1638,7 +1640,24 @@ const ENTITY_COLUMNS = {
     { key: "role", label: "Rol" },
     { key: "fiscalProfile", label: "Statut fiscal" },
     { key: "idno", label: "IDNO" },
-    { key: "phone", label: "Telefon" }
+    { key: "phone", label: "Telefon" },
+    { key: "address", label: "Adresa" },
+    { key: "bankName", label: "Banca" },
+    { key: "iban", label: "IBAN" }
+  ],
+  vehicles: [
+    { key: "number", label: "Nr. mașină" },
+    { key: "series", label: "Serie" },
+    { key: "driver", label: "Șofer" }
+  ],
+  labReports: [
+    { key: "reportNumber", label: "Nr. raport" },
+    { key: "reportDate", label: "Data" },
+    { key: "product", label: "Produs" },
+    { key: "humidity", label: "Umiditate %" },
+    { key: "impuritiesTotal", label: "Impurități %" },
+    { key: "harvestYear", label: "An recoltă" },
+    { key: "destination", label: "Destinație" }
   ],
   products: [
     { key: "code", label: "Cod" },
@@ -1841,8 +1860,10 @@ function renderSetupLists(config) {
     "users",
     "paymentTypes",
     "fiscalProfiles",
-    "processingTypes"
-  ].forEach((entity) => renderMiniList(entity, config[entity]));
+    "processingTypes",
+    "vehicles",
+    "labReports"
+  ].forEach((entity) => renderMiniList(entity, config[entity] || []));
 }
 
 function renderSetupSelectors(config) {
@@ -1858,6 +1879,15 @@ function renderSetupSelectors(config) {
   systemSettingsForm.elements.reportChannel.value = config.systemSettings.reportChannel;
   systemSettingsForm.elements.reportAudience.value = config.systemSettings.reportAudience;
   systemSettingsForm.elements.defaultCurrency.value = config.systemSettings.defaultCurrency;
+
+  // Populate vehicles datalist for the delivery form (Etapa 5)
+  const vehiclesDatalist = document.getElementById("vehicles-datalist");
+  if (vehiclesDatalist) {
+    vehiclesDatalist.innerHTML = (config.vehicles || [])
+      .filter((v) => v.active !== false)
+      .map((v) => `<option value="${v.number}">${v.series ? v.series + " · " : ""}${v.driver || ""}</option>`)
+      .join("");
+  }
 }
 
 function getEditorSchema(entity) {
@@ -1880,6 +1910,8 @@ function getEditorSchema(entity) {
         { name: "idno", label: "IDNO", type: "text" },
         { name: "phone", label: "Telefon", type: "text" },
         { name: "address", label: "Adresa", type: "text" },
+        { name: "bankName", label: "Banca", type: "text" },
+        { name: "iban", label: "IBAN / cont", type: "text" },
         {
           name: "role",
           label: "Rol",
@@ -1896,6 +1928,38 @@ function getEditorSchema(entity) {
           type: "select",
           options: () => currentConfig.fiscalProfiles.map((item) => ({ value: item.name, label: item.name }))
         }
+      ]
+    },
+    vehicles: {
+      title: "Editare mașină",
+      copy: "Actualizează numărul, seria și șoferul.",
+      fields: [
+        { name: "number", label: "Nr. mașină", type: "text" },
+        { name: "series", label: "Serie", type: "text" },
+        { name: "driver", label: "Șofer", type: "text" },
+        commonActiveField
+      ]
+    },
+    labReports: {
+      title: "Editare raport laborator",
+      copy: "Date din raportul de laborator pentru certificatul de calitate.",
+      fields: [
+        { name: "reportNumber", label: "Nr. raport", type: "text" },
+        { name: "reportDate", label: "Data raportului", type: "date" },
+        { name: "issuedBy", label: "Eliberat de", type: "text" },
+        { name: "contactPhone", label: "Telefon contact", type: "text" },
+        { name: "product", label: "Produs", type: "text" },
+        { name: "originCountry", label: "Țara de origine", type: "text" },
+        { name: "harvestYear", label: "An recoltă", type: "text" },
+        { name: "humidity", label: "Umiditate %", type: "number", step: "0.01" },
+        { name: "aflatoxinB1", label: "Aflatoxina B1", type: "text" },
+        { name: "impuritiesTotal", label: "Impurități totale %", type: "number", step: "0.01" },
+        { name: "impuritiesDiverse", label: "Impurități diverse %", type: "number", step: "0.01" },
+        { name: "brokenGrains", label: "Boabe sparte %", type: "number", step: "0.01" },
+        { name: "sproutedGrains", label: "Boabe încolțite %", type: "number", step: "0.01" },
+        { name: "defectiveGrains", label: "Boabe defecte %", type: "number", step: "0.01" },
+        { name: "destination", label: "Destinație", type: "text" },
+        commonActiveField
       ]
     },
     products: {

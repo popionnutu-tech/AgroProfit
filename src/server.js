@@ -134,7 +134,7 @@ app.post(
 app.get("/api/config", getConfigHandler);
 
 // Whitelist of entities that contabil / contabil-sef can create (read-only nomenclator)
-const NOMENCLATOR_CREATE_ALLOWED = new Set(["partners", "products", "storageLocations", "tariffs"]);
+const NOMENCLATOR_CREATE_ALLOWED = new Set(["partners", "products", "storageLocations", "tariffs", "vehicles", "labReports"]);
 
 app.post("/api/config/:entity", async (req, res, next) => {
   const role = req.currentUser && req.currentUser.roleCode;
