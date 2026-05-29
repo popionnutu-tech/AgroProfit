@@ -5,3 +5,4 @@ data/
 .runtime-data-backups/
 .vercel
 .claude/
+.env*.local

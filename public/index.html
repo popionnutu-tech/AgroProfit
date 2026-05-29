@@ -206,8 +206,8 @@
         <section class="dashboard" data-view="acasa">
           <div class="dash-grid">
 
-            <!-- HERO: featured KPI (Valoare estimata) -->
-            <article class="dash-hero" id="dash-hero">
+            <!-- HERO: featured KPI (Valoare estimata) — doar pentru finance -->
+            <article class="dash-hero" id="dash-hero" data-access="finance">
               <span class="dash-hero-eyebrow">VALOARE ESTIMATĂ</span>
               <strong class="dash-hero-value" id="dash-hero-value">0,00 MDL</strong>
               <span class="dash-hero-delta" id="dash-hero-delta">▲ stoc activ</span>
@@ -281,6 +281,26 @@
               <strong class="dash-value" id="dash-value-complaints">0</strong>
               <div class="dash-meta"><span>deschise</span><b id="dash-meta-modifications">0</b></div>
             </article>
+          </div>
+        </section>
+
+        <section class="panel table-panel" data-view="acasa">
+          <div class="panel-head">
+            <h2>Stoc neprocesat pe produs</h2>
+            <p>Produs recepționat care încă nu a fost procesat</p>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Produs</th>
+                  <th>Tone</th>
+                  <th>Kg</th>
+                  <th>Recepții</th>
+                </tr>
+              </thead>
+              <tbody id="unprocessed-stock-body"></tbody>
+            </table>
           </div>
         </section>
 
@@ -463,6 +483,12 @@
               <select name="supplierId" id="supplier-select" required></select>
             </label>
 
+            <label id="new-supplier-wrap" hidden>
+              Nume furnizor nou (persoană fizică)
+              <input name="newSupplierName" id="new-supplier-name" type="text" placeholder="Ex: Ion Popescu" />
+              <span class="field-hint">Se salvează ca furnizor temporar. Contabilul completează datele oficiale ulterior.</span>
+            </label>
+
             <label>
               Produs
               <select name="productId" id="product-select" required></select>
@@ -470,18 +496,19 @@
 
             <div class="split">
               <label>
-                Cantitate
-                <input name="quantity" type="number" min="0" step="0.01" required />
+                Cantitate (kg)
+                <input name="quantity" id="quantity-input" type="number" min="0" step="1" required placeholder="ex: 50000" />
+                <span class="field-hint" id="quantity-tons-hint">&nbsp;</span>
               </label>
               <label>
-                Unitate
+                Unitate stoc
                 <input name="unit" id="unit-input" readonly required />
               </label>
             </div>
 
             <div class="split">
               <label>
-                Pret / unitate
+                Pret / tonă
                 <input name="price" type="number" min="0" step="0.01" placeholder="0 daca se completeaza ulterior" />
                 <span class="field-hint">Optional. Daca lipseste, ramane 0 si se poate completa ulterior.</span>
               </label>
@@ -509,7 +536,7 @@
               <div class="split">
                 <label>
                   Vehicul
-                  <input name="vehicle" placeholder="Ex: CTC-204" />
+                  <input name="vehicle" list="vehicles-datalist" placeholder="Alege sau scrie nr. mașinii" />
                 </label>
                 <label>
                   Receptionat de
@@ -536,11 +563,11 @@
                 <span>Net provizoriu</span>
                 <strong id="estimate-net">0</strong>
               </div>
-              <div class="estimate-card">
+              <div class="estimate-card" data-access="finance">
                 <span>Servicii estimate</span>
                 <strong id="estimate-services">0 MDL</strong>
               </div>
-              <div class="estimate-card estimate-card-accent">
+              <div class="estimate-card estimate-card-accent" data-access="finance">
                 <span>Plata preliminara</span>
                 <strong id="estimate-payable">0 MDL</strong>
               </div>
@@ -561,7 +588,7 @@
               <p>Vizualizare operativa cu sursa si locatia de stoc</p>
             </div>
             <div class="table-wrap">
-              <table>
+              <table id="receipts-table">
                 <thead>
                   <tr>
                     <th>ID</th>
@@ -570,8 +597,8 @@
                     <th>Furnizor</th>
                     <th>Brut / net</th>
                     <th>Locatie</th>
-                    <th>Plata prelim.</th>
-                    <th>Data plata</th>
+                    <th class="col-fin">Plata prelim.</th>
+                    <th class="col-fin">Data plata</th>
                     <th>Status</th>
                     <th>Sursa</th>
                   </tr>
@@ -581,6 +608,11 @@
               </table>
             </div>
           </section>
+        </section>
+
+        <section class="eod-banner" id="eod-processing-banner" data-view="procesare" hidden>
+          <span id="eod-processing-text">Azi au fost recepții, dar nicio procesare. Introdu o procesare sau confirmă că nu s-a procesat nimic.</span>
+          <button type="button" id="eod-confirm-btn">Confirmă: nu s-a procesat nimic azi</button>
         </section>
 
         <section class="grid processing-grid" data-view="procesare">
@@ -594,6 +626,12 @@
               Recepție (lotul pe care îl procesezi)
               <select name="receiptId" id="processing-receipt-select" required></select>
               <small class="field-hint">Dacă lista este goală — mai întâi creează o recepție din meniul „Recepții".</small>
+            </label>
+
+            <label>
+              Lot
+              <input name="lot" id="processing-lot-input" type="text" placeholder="Ex: SOIE 12.05.2026" />
+              <small class="field-hint">Se completează automat din produs + data primirii; îl poți modifica.</small>
             </label>
 
             <div class="split">
@@ -670,6 +708,7 @@
                     <th>ID</th>
                     <th>Data</th>
                     <th>Produs</th>
+                    <th>Lot</th>
                     <th>Receptie</th>
                     <th>Tip</th>
                     <th>Procesat</th>
@@ -679,6 +718,74 @@
                 </thead>
                 <tbody id="processings-body"></tbody>
                 <tfoot id="processings-foot"></tfoot>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <section class="grid processing-grid" data-view="procesare">
+          <form class="panel form-panel" id="transfer-form" data-access="processing-write">
+            <div class="panel-head">
+              <h2>Transfer între cilindri</h2>
+              <p>Mută un produs dintr-un cilindru în altul. Stocul pe cilindri se actualizează automat.</p>
+            </div>
+
+            <label>
+              Produs
+              <select name="productId" id="transfer-product-select" required></select>
+            </label>
+
+            <div class="split">
+              <label>
+                Din cilindru
+                <select name="fromLocationId" id="transfer-from-select" required></select>
+              </label>
+              <label>
+                În cilindru
+                <select name="toLocationId" id="transfer-to-select" required></select>
+              </label>
+            </div>
+
+            <div class="split">
+              <label>
+                Cantitate
+                <input name="quantity" id="transfer-quantity-input" type="number" min="0" step="0.01" required />
+                <span class="field-hint" id="transfer-available-hint">&nbsp;</span>
+              </label>
+              <label>
+                Operator
+                <select name="operator" id="transfer-user-select"></select>
+              </label>
+            </div>
+
+            <label>
+              Observatii
+              <input name="note" placeholder="Comentariu transfer" />
+            </label>
+
+            <button type="submit">Salveaza transferul</button>
+            <p class="form-message" id="transfer-message"></p>
+          </form>
+
+          <section class="panel table-panel">
+            <div class="panel-head">
+              <h2>Transferuri recente</h2>
+              <p>Mutări de produs între cilindri</p>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Data</th>
+                    <th>Produs</th>
+                    <th>Din</th>
+                    <th>În</th>
+                    <th>Cantitate</th>
+                    <th>Operator</th>
+                  </tr>
+                </thead>
+                <tbody id="transfers-body"></tbody>
               </table>
             </div>
           </section>
@@ -696,8 +803,8 @@
                 <tr>
                   <th>Locatie</th>
                   <th>Produs</th>
-                  <th>Cantitate</th>
-                  <th>Unitate</th>
+                  <th>Tone</th>
+                  <th>Kg</th>
                 </tr>
               </thead>
               <tbody id="stocks-body"></tbody>
@@ -828,13 +935,13 @@
 
             <div class="split">
               <label>
-                Cantitate livrata
-                <input name="deliveredQuantity" id="delivery-quantity-input" type="number" min="0" step="0.01" required />
+                Cantitate livrată (kg)
+                <input name="deliveredQuantity" id="delivery-quantity-input" type="number" min="0" step="1" required placeholder="ex: 40000" />
               </label>
               <div></div>
             </div>
 
-            <details class="optional-fields" data-access="finance,delivery-write">
+            <details class="optional-fields" data-access="finance">
               <summary>Date pentru factură (contabil)</summary>
               <div class="split">
                 <label>
@@ -947,6 +1054,42 @@
             </div>
           </section>
         </section>
+
+        <dialog id="delivery-billing-dialog" class="billing-dialog">
+          <form id="delivery-billing-form" method="dialog">
+            <h3>Date factură livrare <span id="billing-delivery-id"></span></h3>
+            <input type="hidden" name="id" />
+            <div class="split">
+              <label>Vânzător<input name="seller" placeholder="Denumire vânzător" /></label>
+              <label>Invoice / factură<input name="invoiceNumber" placeholder="Nr. invoice" /></label>
+            </div>
+            <div class="split">
+              <label>Nr. contract<input name="contractNumber" placeholder="Contract" /></label>
+              <label>Data contract<input name="contractDate" type="date" /></label>
+            </div>
+            <div class="split">
+              <label>Preț (lei)<input name="priceLei" type="number" min="0" step="0.01" placeholder="MDL / unitate" /></label>
+              <label>Preț valută<input name="priceForeign" type="number" min="0" step="0.01" placeholder="EUR / USD" /></label>
+            </div>
+            <div class="split">
+              <label>Valuta
+                <select name="currency">
+                  <option value="MDL">MDL</option>
+                  <option value="EUR">EUR</option>
+                  <option value="USD">USD</option>
+                  <option value="RON">RON</option>
+                </select>
+              </label>
+              <label>Mașină (nr.)<input name="vehicle" list="vehicles-datalist" placeholder="Ex: AG-102" /></label>
+            </div>
+            <label>Observații<input name="note" placeholder="Comentariu" /></label>
+            <div class="form-actions">
+              <button type="submit" value="save">Salvează</button>
+              <button type="button" class="ghost-button" id="billing-cancel-btn">Renunță</button>
+            </div>
+            <p class="form-message" id="billing-message"></p>
+          </form>
+        </dialog>
 
         <section class="grid complaint-grid" data-view="reclamatii">
           <form class="panel form-panel" id="complaint-form" data-access="complaint-write">

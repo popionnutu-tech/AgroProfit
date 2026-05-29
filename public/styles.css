@@ -1336,6 +1336,48 @@ thead th {
 .badge-ok { background: #d1fae5; color: #065f46; }
 .badge-alert { background: #fee2e2; color: #991b1b; }
 
+.row-note { font-size: 0.75rem; color: var(--muted, #6b7280); font-style: italic; }
+
+.eod-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #f59e0b;
+  border-radius: 12px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  font-weight: 600;
+}
+.eod-banner button {
+  background: #92400e;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 14px;
+  cursor: pointer;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+dialog.billing-dialog {
+  border: none;
+  border-radius: 16px;
+  padding: 24px;
+  width: min(560px, 92vw);
+  box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+}
+dialog.billing-dialog::backdrop { background: rgba(0,0,0,0.4); }
+dialog.billing-dialog h3 { margin: 0 0 16px; }
+dialog.billing-dialog .split { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+dialog.billing-dialog label { display: flex; flex-direction: column; gap: 4px; font-size: 0.85rem; }
+dialog.billing-dialog input,
+dialog.billing-dialog select { padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 8px; }
+dialog.billing-dialog .form-actions { display: flex; gap: 12px; margin-top: 16px; }
+
 .action-row {
   display: flex;
   gap: 4px;

@@ -277,6 +277,39 @@ app.get(
   getStockSummaryHandler
 );
 
+// Transfer de produs intre cilindri (mutare stoc).
+app.get(
+  "/api/transfers",
+  requireRoles(["operator", "manager", "accountant", "accountant-sef", "admin", "control"]),
+  async (_req, res) => {
+    try {
+      const transfers = await storage.listTransfers();
+      return res.status(200).json({ transfers });
+    } catch (error) {
+      console.error("Failed to list transfers:", error.message);
+      return res.status(500).json({ error: "Nu am putut incarca transferurile." });
+    }
+  }
+);
+
+app.post(
+  "/api/transfers",
+  requireRoles(["operator", "manager", "admin"]),
+  async (req, res) => {
+    try {
+      const transfer = await storage.createTransfer({
+        ...req.body,
+        operator: req.body && req.body.operator ? req.body.operator : getActorLabel(req),
+        createdBy: getActorLabel(req)
+      });
+      return res.status(201).json(transfer);
+    } catch (error) {
+      console.error("Failed to create transfer:", error.message);
+      return res.status(400).json({ error: error.message || "Nu am putut salva transferul." });
+    }
+  }
+);
+
 app.get(
   "/api/transactions",
   requireRoles(["manager", "accountant", "accountant-sef", "admin", "control"]),
@@ -343,13 +376,13 @@ app.post("/api/deliveries/:id/reopen", requireRoles(["manager", "admin"]), async
 
 app.get(
   "/api/complaints",
-  requireRoles(["operator", "manager", "accountant", "accountant-sef", "admin", "control"]),
+  requireRoles(["manager", "accountant", "accountant-sef", "admin", "control"]),
   listComplaintsHandler
 );
 
 app.post(
   "/api/complaints",
-  requireRoles(["operator", "manager", "accountant", "accountant-sef", "admin"]),
+  requireRoles(["manager", "accountant", "accountant-sef", "admin"]),
   createComplaintHandler
 );
 

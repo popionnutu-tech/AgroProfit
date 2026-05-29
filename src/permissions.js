@@ -7,8 +7,6 @@ const SYSTEM_ROLE_CAPABILITIES = {
     "stocks-read",
     "deliveries-read",
     "delivery-write",
-    "complaints-read",
-    "complaint-write",
     "config-read"
   ],
   manager: [

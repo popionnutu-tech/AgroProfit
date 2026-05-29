@@ -670,7 +670,7 @@ function listOpeningDebtItemsFromDocuments(openingDocuments = []) {
   return normalizeOpeningDocuments(openingDocuments).flatMap((item) => item.debtItems || []);
 }
 
-function createStockSummary(receipts, deliveries = [], openingDocuments = []) {
+function createStockSummary(receipts, deliveries = [], openingDocuments = [], transfers = []) {
   const stockByLocation = new Map();
   const deliveredByLocation = new Map();
   const openingStockItems = openingDocuments.flatMap((item) => item.stockItems || []);
@@ -716,6 +716,39 @@ function createStockSummary(receipts, deliveries = [], openingDocuments = []) {
 
     existing.quantity += quantity;
     stockByLocation.set(key, existing);
+  }
+
+  // Transferuri intre cilindri: scad din locatia sursa, adaug in destinatie.
+  for (const item of transfers) {
+    const product = item.product;
+    const unit = item.unit || "tone";
+    const qty = Number(item.quantity || 0);
+    if (!product || qty <= 0) continue;
+
+    const fromLocation = item.fromLocation || "Fara locatie";
+    const toLocation = item.toLocation || "Fara locatie";
+    const fromKey = `${fromLocation}::${product}`;
+    const toKey = `${toLocation}::${product}`;
+
+    const fromExisting = stockByLocation.get(fromKey) || {
+      location: fromLocation,
+      product,
+      quantity: 0,
+      unit,
+      costCategory: item.fromLocationId || null
+    };
+    fromExisting.quantity -= qty;
+    stockByLocation.set(fromKey, fromExisting);
+
+    const toExisting = stockByLocation.get(toKey) || {
+      location: toLocation,
+      product,
+      quantity: 0,
+      unit,
+      costCategory: item.toLocationId || null
+    };
+    toExisting.quantity += qty;
+    stockByLocation.set(toKey, toExisting);
   }
 
   const byLocation = Array.from(stockByLocation.values())
@@ -1374,6 +1407,7 @@ async function createProcessing(payload) {
     id: nextId(state.processings),
     receiptId: Number(payload.receiptId),
     product: payload.product,
+    lot: payload.lot || "",
     sourceLocation: payload.sourceLocation || "",
     processingType: payload.processingType,
     processedQuantity: sanitizeNumber(payload.processedQuantity),
@@ -2447,7 +2481,91 @@ async function getStockSummary() {
   const openingDocuments = await listOpeningDocuments();
   const receipts = await listReceipts();
   const deliveries = await listDeliveries();
-  return createStockSummary(receipts, deliveries, openingDocuments);
+  const transfers = await listTransfers();
+  return createStockSummary(receipts, deliveries, openingDocuments, transfers);
+}
+
+async function listTransfers() {
+  const state = readReceiptsState();
+  return (state.transfers || []).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+}
+
+// Transfer de produs intre cilindri (mutare stoc dintr-o locatie in alta).
+async function createTransfer(payload) {
+  const config = readConfigState();
+  const fromLocation = (config.storageLocations || []).find(
+    (item) => Number(item.id) === Number(payload.fromLocationId)
+  );
+  const toLocation = (config.storageLocations || []).find(
+    (item) => Number(item.id) === Number(payload.toLocationId)
+  );
+  const product = (config.products || []).find(
+    (item) => Number(item.id) === Number(payload.productId)
+  );
+  const quantity = sanitizeNumber(payload.quantity);
+
+  if (!product) {
+    throw new Error("Selecteaza produsul de transferat.");
+  }
+  if (!fromLocation) {
+    throw new Error("Selecteaza cilindrul sursa.");
+  }
+  if (!toLocation) {
+    throw new Error("Selecteaza cilindrul destinatie.");
+  }
+  if (Number(fromLocation.id) === Number(toLocation.id)) {
+    throw new Error("Cilindrul sursa si cel destinatie trebuie sa fie diferite.");
+  }
+  if (quantity <= 0) {
+    throw new Error("Cantitatea de transfer trebuie sa fie mai mare ca zero.");
+  }
+
+  // Verificam ca exista suficient stoc in cilindrul sursa pentru acest produs.
+  const summary = await getStockSummary();
+  const available = Number(
+    (summary.byLocation.find(
+      (item) => item.location === fromLocation.name && item.product === product.name
+    ) || {}).quantity || 0
+  );
+  if (quantity > available) {
+    throw new Error(
+      `Stoc insuficient in ${fromLocation.name}: disponibil ${available} ${product.unit || "tone"}.`
+    );
+  }
+
+  const state = readReceiptsState();
+  if (!Array.isArray(state.transfers)) {
+    state.transfers = [];
+  }
+
+  const transfer = {
+    id: nextId(state.transfers),
+    product: product.name,
+    productId: product.id,
+    unit: product.unit || "tone",
+    fromLocation: fromLocation.name,
+    fromLocationId: fromLocation.id,
+    toLocation: toLocation.name,
+    toLocationId: toLocation.id,
+    quantity,
+    operator: payload.operator || "",
+    note: payload.note || "",
+    createdAt: new Date().toISOString()
+  };
+
+  state.transfers.push(transfer);
+
+  createAuditEntry(state, {
+    entityType: "transfer",
+    entityId: transfer.id,
+    action: "create",
+    reason: "Transfer intre cilindri",
+    user: payload.createdBy || "dashboard",
+    newValue: { ...transfer }
+  });
+
+  writeReceiptsState(state);
+  return transfer;
 }
 
 async function getConfig() {
@@ -2532,6 +2650,31 @@ async function createConfigEntry(entity, payload) {
 
   if (entity === "products" && state.products.some((item) => item.code === normalized.code)) {
     throw new Error("Exista deja un produs cu acest cod.");
+  }
+
+  // Nu permitem doi furnizori/parteneri cu acelasi nume.
+  // IDNO-ul diferentiaza persoane reale cu acelasi nume.
+  if (entity === "partners") {
+    const sameName = state.partners.filter(
+      (item) =>
+        String(item.name || "").trim().toLowerCase() ===
+        String(normalized.name || "").trim().toLowerCase()
+    );
+    if (sameName.length) {
+      const newIdno = String(normalized.idno || "").trim();
+      if (newIdno) {
+        if (sameName.some((item) => String(item.idno || "").trim() === newIdno)) {
+          throw new Error(
+            `Exista deja un partener "${normalized.name}" cu acelasi IDNO (${newIdno}).`
+          );
+        }
+        // acelasi nume dar IDNO diferit => persoana diferita, permitem
+      } else {
+        throw new Error(
+          `Exista deja un partener cu numele "${normalized.name}". Alege-l din lista sau adauga IDNO-ul daca e alta persoana.`
+        );
+      }
+    }
   }
 
   if (entity === "roles" && state.roles.some((item) => item.code === normalized.code)) {
@@ -2962,6 +3105,7 @@ module.exports = {
   createQuickSupplier,
   createReceipt,
   createTransaction,
+  createTransfer,
   createUser,
   exportResourceAsCsv,
   findUserByUsername,
@@ -2983,6 +3127,7 @@ module.exports = {
   listProcessings,
   listReceipts,
   listTransactions,
+  listTransfers,
   listUsers,
   reopenReceipt,
   runMigrationIfNeeded,
