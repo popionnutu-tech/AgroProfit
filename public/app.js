@@ -675,6 +675,10 @@ function renderSilosGrid(summary) {
               <text x="50" y="${isEmpty ? 92 : Math.max(fillY + 14, 42)}" font-family="DM Mono, monospace" font-size="11" font-weight="700" text-anchor="middle" fill="${isEmpty ? '#0F3D27' : (pct >= 25 ? palette.label : '#0F3D27')}">${pct.toFixed(0)}%</text>
             </svg>
           </div>
+          <div class="silo-stored-line">
+            <span class="silo-stored-qty">${formatNumber(filled)} t</span>
+            <span class="silo-stored-kg">${formatNumber(filled * 1000)} kg</span>
+          </div>
           <div class="silo-meta">
             <span>Liber <b>${formatNumber(free)}t</b></span>
             ${dominantProduct
@@ -685,6 +689,62 @@ function renderSilosGrid(summary) {
       `;
     })
     .join("");
+
+  // Aggregate stock per product across all cylinders (Etapa 3)
+  renderStockByProduct(data);
+}
+
+function renderStockByProduct(data) {
+  const el = document.getElementById("stock-by-product");
+  if (!el) return;
+
+  const byProduct = new Map();
+  let grandTotal = 0;
+  for (const item of data.byLocation || []) {
+    const product = String(item.product || "").trim();
+    if (!product) continue;
+    const qty = Number(item.quantity || 0);
+    grandTotal += qty;
+    const existing = byProduct.get(product) || { qty: 0, locations: new Set() };
+    existing.qty += qty;
+    if (item.location) existing.locations.add(item.location);
+    byProduct.set(product, existing);
+  }
+
+  if (!byProduct.size) {
+    el.innerHTML = "";
+    return;
+  }
+
+  const rows = Array.from(byProduct.entries())
+    .sort((a, b) => b[1].qty - a[1].qty)
+    .map(([product, info]) => {
+      const palette = getProductPalette(product);
+      return `
+        <tr>
+          <td><span class="sbp-dot" style="background:${palette.fill};border-color:${palette.edge};"></span>${product}</td>
+          <td>${formatNumber(info.qty)} t</td>
+          <td>${formatNumber(info.qty * 1000)} kg</td>
+          <td>${info.locations.size} ${info.locations.size === 1 ? "cilindru" : "cilindri"}</td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  el.innerHTML = `
+    <div class="sbp-head">
+      <h3>Stoc total pe produs</h3>
+      <span class="sbp-total">Total: <b>${formatNumber(grandTotal)} t</b> · ${formatNumber(grandTotal * 1000)} kg</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Produs</th><th>Cantitate (t)</th><th>Cantitate (kg)</th><th>Locatii</th></tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
 }
 
 function renderStockSummary(summary) {
