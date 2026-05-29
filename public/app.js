@@ -203,6 +203,15 @@ function formatNumber(value) {
   }).format(n);
 }
 
+// Valoarea e stocata intern in tone. O afisam in kg DOAR daca inregistrarea a fost
+// introdusa in kg (camp enteredUnit === "kg"). Datele vechi (fara camp) raman in tone.
+function formatQtyByEntry(valueTons, rec) {
+  const v = Number(valueTons || 0);
+  return rec && rec.enteredUnit === "kg"
+    ? `${formatNumber(v * 1000)} kg`
+    : `${formatNumber(v)} t`;
+}
+
 function setCurrentUser(user) {
   currentSessionUser = user || null;
   currentUserNameEl.textContent = currentSessionUser?.name || "-";
@@ -965,7 +974,7 @@ function renderReceipts(receipts) {
             <span class="supplier-name">${item.supplier}</span>
             ${canChangeSupplier ? `<button type="button" class="cell-btn change-supplier-btn" data-action="change-supplier" data-id="${item.id}" title="Schimbă furnizorul">✎</button>` : ""}
           </td>
-          <td>${formatNumber((item.grossQuantity || item.quantity) * 1000)} / ${formatNumber((item.provisionalNetQuantity || item.quantity) * 1000)} kg</td>
+          <td>${formatQtyByEntry(item.grossQuantity || item.quantity, item)} / ${formatQtyByEntry(item.provisionalNetQuantity || item.quantity, item)}</td>
           <td>${item.location || "-"}</td>
           <td class="col-fin">${currency.format(Number(item.preliminaryPayableAmount || 0))}</td>
           <td class="col-fin">${formatDateShort(item.paymentDate || item.paidAt)}</td>
@@ -1003,14 +1012,14 @@ function renderReceiptTotals(rows) {
     byProduct[key] = (byProduct[key] || 0) + net;
   });
   const perProduct = Object.entries(byProduct)
-    .map(([prod, qty]) => `${prod}: ${formatNumber(qty * 1000)} kg`)
+    .map(([prod, qty]) => `${prod}: ${formatNumber(qty)} t`)
     .join(" · ");
   const payPart = canAccess("finance")
     ? `&nbsp;·&nbsp; Plată prelim: <b>${currency.format(totalPay)}</b> `
     : "";
   receiptsFootEl.innerHTML = `
     <tr class="totals-row">
-      <td colspan="10">TOTAL (${rows.length} recepții) &nbsp;·&nbsp; Net: <b>${formatNumber(totalNet * 1000)} kg</b> ${payPart}&nbsp;·&nbsp; ${perProduct}</td>
+      <td colspan="10">TOTAL (${rows.length} recepții) &nbsp;·&nbsp; Net: <b>${formatNumber(totalNet)} t</b> ${payPart}&nbsp;·&nbsp; ${perProduct}</td>
     </tr>
   `;
 }
@@ -1255,7 +1264,7 @@ function renderDeliveries(deliveries) {
           <td>${item.customer}</td>
           <td class="col-fin">${item.seller || "-"}</td>
           <td>${item.product}</td>
-          <td>${formatNumber(qty * 1000)} kg</td>
+          <td>${formatQtyByEntry(qty, item)}</td>
           <td class="col-fin">${item.vehicle || "-"}</td>
           <td class="col-fin">${priceLabel}</td>
           <td>
@@ -1294,11 +1303,11 @@ function renderDeliveryTotals(rows) {
     byProduct[key] = (byProduct[key] || 0) + qty;
   });
   const perProduct = Object.entries(byProduct)
-    .map(([prod, qty]) => `${prod}: ${formatNumber(qty * 1000)} kg`)
+    .map(([prod, qty]) => `${prod}: ${formatNumber(qty)} t`)
     .join(" · ");
   deliveriesFootEl.innerHTML = `
     <tr class="totals-row">
-      <td colspan="10">TOTAL (${rows.length} livrări) &nbsp;·&nbsp; Cantitate: <b>${formatNumber(totalQty * 1000)} kg</b> &nbsp;·&nbsp; ${perProduct}</td>
+      <td colspan="10">TOTAL (${rows.length} livrări) &nbsp;·&nbsp; Cantitate: <b>${formatNumber(totalQty)} t</b> &nbsp;·&nbsp; ${perProduct}</td>
     </tr>
   `;
 }
@@ -2771,6 +2780,7 @@ async function createReceipt(formData) {
     productId: formData.get("productId"),
     product: product?.name || "",
     quantity: String(Number(formData.get("quantity") || 0) / 1000),
+    enteredUnit: "kg",
     unit: product?.unit || formData.get("unit"),
     price: formData.get("price") || "0",
     humidity: formData.get("humidity") || String(selectedProduct?.humidityNorm ?? 0),
@@ -3228,8 +3238,8 @@ function renderDeliveryPreview() {
   );
 
   deliveryLocationEl.textContent = receipt.location || "-";
-  // Disponibil afisat in kg (intern e in tone)
-  deliveryAvailableEl.textContent = `${formatNumber(availableQuantity * 1000)} kg`;
+  // Disponibil: in kg daca receptia sursa a fost introdusa in kg, altfel in tone
+  deliveryAvailableEl.textContent = formatQtyByEntry(availableQuantity, receipt);
   deliveryStatusPreviewEl.textContent = receipt.deliveryStatus || "Nelivrat";
 
   if (!deliveryQuantityInput.value) {
@@ -3276,6 +3286,7 @@ async function createDelivery(formData) {
   if (payload.deliveredQuantity) {
     payload.deliveredQuantity = String(Number(payload.deliveredQuantity || 0) / 1000);
   }
+  payload.enteredUnit = "kg";
   const response = await fetch("/api/deliveries", {
     method: "POST",
     headers: {

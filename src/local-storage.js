@@ -1232,6 +1232,8 @@ async function createReceipt(payload) {
     tareWeight,
     netWeight,
     unit: payload.unit,
+    // Marcaj: receptia a fost introdusa in kg (afisare in kg). Vechile receptii nu au acest camp -> afisate in tone.
+    enteredUnit: payload.enteredUnit === "kg" ? "kg" : "tone",
     price: Number(payload.price),
     humidity: sanitizeNumber(payload.humidity),
     impurity: sanitizeNumber(payload.impurity),
@@ -1843,6 +1845,8 @@ async function createDelivery(payload) {
     tareWeight: 0,
     netWeight: 0,
     quantityAtDelivery: 0,
+    // Marcaj: livrarea a fost introdusa in kg. Vechile livrari nu au acest camp -> afisate in tone.
+    enteredUnit: payload.enteredUnit === "kg" ? "kg" : "tone",
     invoiceNumber: payload.invoiceNumber || "",
     note: payload.note || "",
     status: "Proiect",
