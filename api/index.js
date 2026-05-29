@@ -29,6 +29,16 @@ module.exports = async (req, res) => {
     res.setHeader("Content-Type", "application/json");
     return res.end(JSON.stringify({ error: "bootstrap failed", details: String(bootError && bootError.message || bootError) }));
   }
+  // CRITIC pe serverless: reincarcam starea din KV inainte de fiecare cerere, ca
+  // instantele "calde" sa nu serveasca date vechi din cache-ul lor in memorie.
+  if (storage && typeof storage.reloadFromKv === "function") {
+    try {
+      await storage.reloadFromKv();
+    } catch (reloadError) {
+      console.error("[wrapper] reloadFromKv failed:", reloadError && reloadError.message);
+    }
+  }
+
   // Lasam Express sa trateze cererea, apoi asteptam finalul raspunsului.
   await new Promise((resolve) => {
     let done = false;

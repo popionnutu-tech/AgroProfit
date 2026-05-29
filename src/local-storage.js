@@ -424,6 +424,19 @@ async function flushPendingWrites() {
   }
 }
 
+// Pe serverless (Vercel) fiecare instanta isi tine propriul cache in memorie si nu-l
+// reincarca, deci instantele "calde" servesc date vechi. La fiecare cerere reincarcam
+// starea din Supabase KV ca citirile sa fie mereu proaspete (consistenta intre instante).
+async function reloadFromKv() {
+  if (!USE_SUPABASE || !kvBackend) return;
+  const [receipts, config] = await Promise.all([
+    kvBackend.loadKv("receipts", null),
+    kvBackend.loadKv("config", null)
+  ]);
+  if (receipts) receiptsCache = receipts;
+  if (config) configCache = config;
+}
+
 function readReceiptsState() {
   ensureInitialized();
   const state = { ...defaultReceiptsState, ...receiptsCache };
@@ -3108,6 +3121,7 @@ function runMigrationIfNeeded() {
 module.exports = {
   initStorage,
   flushPendingWrites,
+  reloadFromKv,
   applyAdvanceCredit,
   appendAuditLog,
   closeReceipt,
