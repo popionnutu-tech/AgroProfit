@@ -11,7 +11,7 @@ const {
 } = require("./automation-handlers");
 const { startCloseOfDayScheduler } = require("./close-of-day");
 const { startCriticalAlertMonitor } = require("./critical-alerts");
-const { attachCurrentUser, requireAuth, requireRoles } = require("./auth");
+const { attachCurrentUser, getActorLabel, requireAuth, requireRoles } = require("./auth");
 const {
   changePasswordHandler,
   loginHandler,
@@ -131,6 +131,25 @@ app.post(
   createOpeningDocumentHandler
 );
 
+app.delete(
+  "/api/opening-documents/:id",
+  requireRoles(["admin"]),
+  async (req, res) => {
+    try {
+      const removed = await storage.deleteOpeningDocument(req.params.id, {
+        changedBy: req.currentUser?.name || req.currentUser?.username || "admin"
+      });
+      if (!removed) {
+        return res.status(404).json({ error: "Documentul nu a fost gasit." });
+      }
+      return res.status(200).json({ ok: true });
+    } catch (error) {
+      console.error("Failed to delete opening document:", error.message);
+      return res.status(400).json({ error: error.message || "Nu am putut sterge documentul." });
+    }
+  }
+);
+
 app.get("/api/config", getConfigHandler);
 
 // Whitelist of entities that contabil / contabil-sef can create (read-only nomenclator)
@@ -148,10 +167,35 @@ app.post("/api/config/:entity", async (req, res, next) => {
   return createConfigEntryHandler(req, res, req.params.entity);
 });
 
+// Contabilul poate completa/valida furnizorii (parteneri) in nomenclator.
+// Trebuie inregistrata INAINTE de ruta generica de mai jos.
+app.patch(
+  "/api/config/partners/:id",
+  requireRoles(["accountant", "accountant-sef", "manager", "admin"]),
+  async (req, res) => {
+    return updateConfigEntryHandler(req, res, "partners", req.params.id);
+  }
+);
+
 // PATCH/UPDATE remains admin-only
 app.patch("/api/config/:entity/:id", requireRoles(["admin"]), async (req, res) => {
   return updateConfigEntryHandler(req, res, req.params.entity, req.params.id);
 });
+
+// Furnizor temporar adaugat rapid de operator la receptie (doar numele).
+app.post(
+  "/api/partners/quick-supplier",
+  requireRoles(["operator", "manager", "admin"]),
+  async (req, res) => {
+    try {
+      const partner = await storage.createQuickSupplier(req.body && req.body.name, getActorLabel(req));
+      return res.status(201).json(partner);
+    } catch (error) {
+      console.error("Failed to create quick supplier:", error.message);
+      return res.status(400).json({ error: error.message || "Nu am putut adauga furnizorul." });
+    }
+  }
+);
 
 app.patch("/api/system-settings", requireRoles(["admin"]), updateSystemSettingsHandler);
 
@@ -187,6 +231,25 @@ app.post("/api/receipts", requireRoles(["operator", "manager", "admin"]), create
 app.patch("/api/receipts/:id/status", requireRoles(["operator", "manager", "admin"]), async (req, res) => {
   return updateReceiptStatusHandler(req, res, req.params.id);
 });
+
+// Contabilul corecteaza DOAR furnizorul unei receptii (restul ramane blocat).
+app.patch(
+  "/api/receipts/:id/supplier",
+  requireRoles(["accountant", "accountant-sef", "manager", "admin"]),
+  async (req, res) => {
+    try {
+      const receipt = await storage.updateReceiptSupplier(
+        req.params.id,
+        req.body && req.body.supplierId,
+        getActorLabel(req)
+      );
+      return res.status(200).json(receipt);
+    } catch (error) {
+      console.error("Failed to change receipt supplier:", error.message);
+      return res.status(400).json({ error: error.message || "Nu am putut schimba furnizorul." });
+    }
+  }
+);
 
 app.post("/api/receipts/:id/close", requireRoles(["manager", "admin"]), async (req, res) => {
   return closeReceiptHandler(req, res, req.params.id);

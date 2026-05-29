@@ -959,13 +959,15 @@ function normalizeEntityPayload(entity, payload) {
         idno: String(payload.idno || "").trim(),
         address: String(payload.address || "").trim(),
         phone: String(payload.phone || "").trim(),
+        contract: String(payload.contract || "").trim(),
         role: requiredText(payload.role || "furnizor", "Rolul partenerului"),
         fiscalProfile: requiredText(
           payload.fiscalProfile || "Persoana fizica",
           "Statutul fiscal"
         ),
         bankName: String(payload.bankName || "").trim(),
-        iban: String(payload.iban || "").trim()
+        iban: String(payload.iban || "").trim(),
+        status: payload.status === "temporar" ? "temporar" : "validat"
       };
     case "vehicles":
       return {
@@ -1089,6 +1091,26 @@ async function listOpeningDocuments() {
   return normalizeOpeningDocuments(state.openingDocuments || []).sort(
     (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
   );
+}
+
+async function deleteOpeningDocument(id, payload = {}) {
+  const state = readReceiptsState();
+  const idx = (state.openingDocuments || []).findIndex((d) => Number(d.id) === Number(id));
+  if (idx < 0) {
+    return null;
+  }
+  const removed = state.openingDocuments[idx];
+  state.openingDocuments.splice(idx, 1);
+  createAuditEntry(state, {
+    entityType: "opening-document",
+    entityId: Number(id),
+    action: "delete",
+    reason: payload.changeReason || "Stergere document sold initial",
+    user: payload.changedBy || "dashboard",
+    oldValue: { ...removed }
+  });
+  writeReceiptsState(state);
+  return removed;
 }
 
 async function listOpeningDebtItems() {
@@ -2268,6 +2290,57 @@ async function updateReceiptStatusWithAudit(id, status, payload = {}) {
   return receipt;
 }
 
+// Furnizor temporar adaugat rapid de operator la receptie (doar numele).
+// Contabilul il completeaza ulterior in Nomenclator -> Parteneri si il valideaza.
+async function createQuickSupplier(name, changedBy) {
+  const cleanName = String(name || "").trim();
+  if (!cleanName) {
+    throw new Error("Introdu numele furnizorului nou.");
+  }
+  return createConfigEntry("partners", {
+    name: cleanName,
+    role: "furnizor",
+    fiscalProfile: "Persoana fizica",
+    status: "temporar",
+    changeReason: "Furnizor temporar adaugat de operator la receptie",
+    changedBy: changedBy || "operator"
+  });
+}
+
+// Contabilul poate corecta DOAR furnizorul unei receptii deja introduse.
+// Restul datelor din receptie raman neschimbate.
+async function updateReceiptSupplier(id, partnerId, changedBy) {
+  const state = readReceiptsState();
+  const receipt = state.receipts.find((item) => item.id === Number(id));
+  if (!receipt) {
+    throw new Error("Receptia nu a fost gasita.");
+  }
+
+  const config = readConfigState();
+  const partner = (config.partners || []).find((item) => item.id === Number(partnerId));
+  if (!partner) {
+    throw new Error("Furnizorul selectat nu exista.");
+  }
+
+  const oldValue = { supplier: receipt.supplier, supplierId: receipt.supplierId };
+  receipt.supplier = partner.name;
+  receipt.supplierId = partner.id;
+  receipt.updatedAt = new Date().toISOString();
+
+  createAuditEntry(state, {
+    entityType: "receipt",
+    entityId: receipt.id,
+    action: "receipt-change-supplier",
+    reason: "Corectare furnizor de catre contabil",
+    user: changedBy || "dashboard",
+    oldValue,
+    newValue: { supplier: receipt.supplier, supplierId: receipt.supplierId }
+  });
+
+  writeReceiptsState(state);
+  return receipt;
+}
+
 async function closeReceipt(id, payload = {}) {
   const state = readReceiptsState();
   const receipt = state.receipts.find((item) => item.id === Number(id));
@@ -2886,6 +2959,7 @@ module.exports = {
   createDelivery,
   createOpeningDocument,
   createProcessing,
+  createQuickSupplier,
   createReceipt,
   createTransaction,
   createUser,
@@ -2904,6 +2978,7 @@ module.exports = {
   listDeliveries,
   listOpeningDebtItems,
   listOpeningDocuments,
+  deleteOpeningDocument,
   listPartnerAdvances,
   listProcessings,
   listReceipts,
@@ -2918,6 +2993,7 @@ module.exports = {
   updateProcessing,
   updateReceiptStatus,
   updateReceiptStatusWithAudit,
+  updateReceiptSupplier,
   updateSystemSettings,
   updateTransaction,
   updateUserById,
