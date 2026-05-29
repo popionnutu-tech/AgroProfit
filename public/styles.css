@@ -1429,6 +1429,71 @@ thead th {
   display: none;
 }
 
+/* Document print buttons in livrari (Etapa 6) */
+.doc-print-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+.doc-print-btn {
+  padding: 3px 8px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  background: rgba(27, 94, 63, 0.08);
+  color: var(--accent-deep);
+  border: 1px solid rgba(27, 94, 63, 0.18);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.doc-print-btn:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* Act de verificare (Etapa 7) */
+.statement-result {
+  margin-top: 16px;
+}
+.statement-partner h3 {
+  margin: 0 0 4px;
+  font-size: 1.1rem;
+  color: var(--accent-deep);
+}
+.statement-partner-meta {
+  font-size: 0.82rem;
+  color: var(--muted);
+  margin-bottom: 14px;
+  line-height: 1.5;
+}
+.statement-sub {
+  margin: 18px 0 8px;
+  font-size: 0.95rem;
+  color: var(--accent-deep);
+}
+.statement-balance {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 18px;
+  padding: 14px 18px;
+  border: 2px solid;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.5);
+}
+.statement-balance span {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.statement-balance strong {
+  font-size: 1.2rem;
+}
+#statement-generate-btn {
+  white-space: nowrap;
+}
+
 .table-wrap tfoot .totals-row td {
   background: rgba(27, 94, 63, 0.07);
   border-top: 2px solid rgba(27, 94, 63, 0.2);

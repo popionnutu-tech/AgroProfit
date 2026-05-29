@@ -154,6 +154,22 @@ app.patch("/api/config/:entity/:id", requireRoles(["admin"]), async (req, res) =
 });
 
 app.patch("/api/system-settings", requireRoles(["admin"]), updateSystemSettingsHandler);
+
+// Act de verificare pe furnizor (doar admin) — Etapa 7
+app.get("/api/reports/supplier-statement", requireRoles(["admin"]), async (req, res) => {
+  try {
+    const { partnerId, from, to } = req.query;
+    if (!partnerId) {
+      return res.status(400).json({ error: "Selecteaza un furnizor." });
+    }
+    const statement = await storage.getSupplierStatement(partnerId, from, to);
+    return res.status(200).json(statement);
+  } catch (error) {
+    console.error("Failed to build supplier statement:", error.message);
+    return res.status(400).json({ error: error.message || "Nu am putut genera actul de verificare." });
+  }
+});
+
 app.get("/api/users", requireRoles(["admin"]), listUsersHandler);
 app.post("/api/users", requireRoles(["admin"]), createUserHandler);
 app.patch("/api/users/:id", requireRoles(["admin"]), async (req, res) => {

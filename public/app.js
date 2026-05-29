@@ -1168,6 +1168,11 @@ function renderDeliveries(deliveries) {
             <div>${item.invoiceNumber || "-"}</div>
             <div>${deliveryStatusBadge(status)}</div>
             <div class="action-row">${buttons}</div>
+            ${canAccess("finance") ? `<div class="doc-print-row">
+              <button type="button" class="doc-print-btn" data-print="invoice" data-id="${item.id}">Factură</button>
+              <button type="button" class="doc-print-btn" data-print="certificate" data-id="${item.id}">Certificat</button>
+              <button type="button" class="doc-print-btn" data-print="act" data-id="${item.id}">Act achiziție</button>
+            </div>` : ""}
           </td>
         </tr>
       `;
@@ -1887,6 +1892,19 @@ function renderSetupSelectors(config) {
       .filter((v) => v.active !== false)
       .map((v) => `<option value="${v.number}">${v.series ? v.series + " · " : ""}${v.driver || ""}</option>`)
       .join("");
+  }
+
+  // Populate supplier select for Act de verificare (Etapa 7)
+  const statementPartnerSelect = document.getElementById("statement-partner-select");
+  if (statementPartnerSelect) {
+    const suppliers = (config.partners || []).filter(
+      (p) => p.role === "furnizor" || p.role === "ambele"
+    );
+    const prev = statementPartnerSelect.value;
+    statementPartnerSelect.innerHTML =
+      '<option value="">Selecteaza furnizor</option>' +
+      suppliers.map((p) => `<option value="${p.id}">${p.name}</option>`).join("");
+    if (prev) statementPartnerSelect.value = prev;
   }
 }
 
@@ -3151,6 +3169,315 @@ function getEntityItem(entity, id) {
   return currentConfig[entity].find((item) => String(item.id) === String(id));
 }
 
+// ============================================================
+//  Documente de tipar (Etapa 6) — print engine + builders
+// ============================================================
+function openPrintWindow(bodyHtml, title) {
+  const win = window.open("", "_blank");
+  if (!win) {
+    alert("Permite ferestrele pop-up pentru a printa documentul.");
+    return;
+  }
+  const doc = `<!DOCTYPE html><html lang="ro"><head><meta charset="utf-8"><title>${title}</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm; }
+  * { box-sizing: border-box; }
+  body { font-family: 'Times New Roman', Georgia, serif; color: #111; font-size: 13px; line-height: 1.45; margin: 0; }
+  .doc-head { display:flex; justify-content:space-between; align-items:flex-start; border-bottom:2px solid #1B5E3F; padding-bottom:10px; margin-bottom:16px; }
+  .doc-brand { font-size:20px; font-weight:800; color:#1B5E3F; letter-spacing:-0.5px; }
+  .doc-brand small { display:block; font-size:10px; font-weight:400; color:#666; letter-spacing:2px; text-transform:uppercase; }
+  .doc-title { text-align:center; font-size:18px; font-weight:700; margin:14px 0 4px; text-transform:uppercase; }
+  .doc-subtitle { text-align:center; font-size:12px; color:#555; margin-bottom:18px; }
+  .doc-parties { display:flex; gap:24px; margin-bottom:18px; }
+  .doc-party { flex:1; border:1px solid #ccc; border-radius:6px; padding:10px 12px; }
+  .doc-party h4 { margin:0 0 6px; font-size:11px; text-transform:uppercase; letter-spacing:1px; color:#1B5E3F; }
+  .doc-party div { font-size:12px; margin:2px 0; }
+  table.doc-table { width:100%; border-collapse:collapse; margin:12px 0; }
+  table.doc-table th { background:#1B5E3F; color:#fff; font-size:11px; text-transform:uppercase; letter-spacing:0.5px; padding:7px 8px; text-align:left; }
+  table.doc-table td { border:1px solid #ccc; padding:6px 8px; font-size:12px; }
+  table.doc-table tfoot td { font-weight:700; background:#f0ece0; }
+  .doc-grid { display:grid; grid-template-columns:1fr 1fr; gap:6px 20px; margin:10px 0; }
+  .doc-grid div { font-size:12px; padding:3px 0; border-bottom:1px dotted #ddd; }
+  .doc-grid b { display:inline-block; min-width:140px; color:#444; }
+  .doc-total { text-align:right; font-size:15px; font-weight:700; margin:12px 0; }
+  .doc-sign { display:flex; justify-content:space-between; margin-top:40px; }
+  .doc-sign div { width:45%; border-top:1px solid #333; padding-top:6px; font-size:11px; text-align:center; color:#555; }
+  .doc-foot { margin-top:30px; font-size:10px; color:#999; text-align:center; border-top:1px solid #eee; padding-top:8px; }
+  @media print { .no-print { display:none; } }
+</style></head><body>
+${bodyHtml}
+<div class="no-print" style="text-align:center;margin-top:24px;">
+  <button onclick="window.print()" style="padding:10px 24px;font-size:14px;background:#1B5E3F;color:#fff;border:0;border-radius:6px;cursor:pointer;">Printează</button>
+</div>
+<div class="doc-foot">Generat de AgroProfit+ · ${new Date().toLocaleString("ro-RO")}</div>
+</body></html>`;
+  win.document.write(doc);
+  win.document.close();
+}
+
+function docHeader() {
+  return `<div class="doc-head">
+    <div class="doc-brand">AgroProfit+<small>Partenerul tău în agricultură</small></div>
+    <div style="text-align:right;font-size:11px;color:#666;">Data: ${new Date().toLocaleDateString("ro-RO")}</div>
+  </div>`;
+}
+
+function moneyRo(n) {
+  return new Intl.NumberFormat("ro-RO", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(n) || 0);
+}
+
+function buildStatementPrintHtml(data) {
+  const p = data.partner;
+  const t = data.totals;
+  const receiptRows = data.receipts.map((r) => `
+    <tr><td>${formatDateShort(r.date)}</td><td>${r.product}</td><td>${formatNumber(r.quantity)} ${r.unit}</td><td>${moneyRo(r.price)}</td><td>${moneyRo(r.amount)}</td></tr>`).join("");
+  const paymentRows = data.payments.map((pm) => `
+    <tr><td>${formatDateShort(pm.date)}</td><td>${pm.paymentType || "-"}</td><td>${pm.reference || "-"}</td><td>${moneyRo(pm.amount)}</td></tr>`).join("");
+  const balanceText = t.balance > 0
+    ? `Datorie către furnizor: ${moneyRo(t.balance)} MDL`
+    : t.balance < 0 ? `Avans: ${moneyRo(Math.abs(t.balance))} MDL` : "Achitat integral";
+  const periodText = data.period.from || data.period.to
+    ? `Perioada: ${data.period.from || "început"} — ${data.period.to || "azi"}` : "Toată perioada";
+  return `${docHeader()}
+    <div class="doc-title">Act de verificare</div>
+    <div class="doc-subtitle">${periodText}</div>
+    <div class="doc-party" style="margin-bottom:14px;">
+      <h4>Furnizor</h4>
+      <div><b>${p.name}</b></div>
+      ${p.idno ? `<div>IDNO: ${p.idno}</div>` : ""}
+      ${p.address ? `<div>Adresa: ${p.address}</div>` : ""}
+      ${p.bankName ? `<div>Banca: ${p.bankName}</div>` : ""}
+      ${p.iban ? `<div>IBAN: ${p.iban}</div>` : ""}
+    </div>
+    <h4 style="color:#1B5E3F;">Recepții</h4>
+    <table class="doc-table">
+      <thead><tr><th>Data</th><th>Produs</th><th>Cantitate</th><th>Preț</th><th>Sumă</th></tr></thead>
+      <tbody>${receiptRows || '<tr><td colspan="5">Nicio recepție</td></tr>'}</tbody>
+      <tfoot><tr><td colspan="2">TOTAL</td><td>${formatNumber(t.totalQuantity)}</td><td></td><td>${moneyRo(t.totalReceipts)} MDL</td></tr></tfoot>
+    </table>
+    <h4 style="color:#1B5E3F;">Achitări</h4>
+    <table class="doc-table">
+      <thead><tr><th>Data</th><th>Tip plată</th><th>Referință</th><th>Sumă</th></tr></thead>
+      <tbody>${paymentRows || '<tr><td colspan="4">Nicio achitare</td></tr>'}</tbody>
+      <tfoot><tr><td colspan="3">TOTAL ACHITAT</td><td>${moneyRo(t.totalPaid)} MDL</td></tr></tfoot>
+    </table>
+    <div class="doc-total">SOLD FINAL: ${balanceText}</div>
+    <div class="doc-sign"><div>Furnizor</div><div>Reprezentant AgroProfit+</div></div>`;
+}
+
+// Build invoice / certificate / purchase act from a delivery + config
+function findPartnerByName(name) {
+  return (currentConfig?.partners || []).find((p) => String(p.name).trim().toLowerCase() === String(name || "").trim().toLowerCase()) || null;
+}
+
+function buildInvoicePrintHtml(delivery) {
+  const buyer = findPartnerByName(delivery.customer);
+  const qty = Number(delivery.netWeight > 0 ? delivery.netWeight : delivery.deliveredQuantity || 0);
+  const unitPrice = Number(delivery.priceLei || 0);
+  const total = qty * unitPrice;
+  const cur = delivery.currency && delivery.currency !== "MDL" ? delivery.currency : "MDL";
+  const unitPriceForeign = Number(delivery.priceForeign || 0);
+  return `${docHeader()}
+    <div class="doc-title">Factură / Invoice</div>
+    <div class="doc-subtitle">Nr. ${delivery.invoiceNumber || "—"} · ${formatDateShort(delivery.createdAt || delivery.deliveredAt)}</div>
+    <div class="doc-parties">
+      <div class="doc-party"><h4>Vânzător</h4><div><b>${delivery.seller || "AgroProfit+"}</b></div></div>
+      <div class="doc-party"><h4>Cumpărător</h4><div><b>${delivery.customer || "-"}</b></div>${buyer?.idno ? `<div>IDNO: ${buyer.idno}</div>` : ""}${buyer?.address ? `<div>${buyer.address}</div>` : ""}</div>
+    </div>
+    <table class="doc-table">
+      <thead><tr><th>Produs</th><th>Cantitate</th><th>Preț (lei)</th>${cur !== "MDL" ? `<th>Preț (${cur})</th>` : ""}<th>Total (lei)</th></tr></thead>
+      <tbody><tr><td>${delivery.product}</td><td>${formatNumber(qty)} t</td><td>${moneyRo(unitPrice)}</td>${cur !== "MDL" ? `<td>${moneyRo(unitPriceForeign)} ${cur}</td>` : ""}<td>${moneyRo(total)}</td></tr></tbody>
+      <tfoot><tr><td colspan="${cur !== "MDL" ? 4 : 3}">TOTAL</td><td>${moneyRo(total)} MDL</td></tr></tfoot>
+    </table>
+    ${delivery.contractNumber ? `<div style="font-size:12px;">Contract: ${delivery.contractNumber} ${delivery.contractDate ? "din " + formatDateShort(delivery.contractDate) : ""}</div>` : ""}
+    ${delivery.vehicle ? `<div style="font-size:12px;">Mașină: ${delivery.vehicle}</div>` : ""}
+    <div class="doc-sign"><div>Vânzător</div><div>Cumpărător</div></div>`;
+}
+
+function buildPurchaseActPrintHtml(delivery) {
+  // Act de achizitie is based on the source receipt's supplier
+  const receipt = (receiptsCache || []).find((r) => Number(r.id) === Number(delivery.receiptId));
+  const supplier = receipt ? findPartnerByName(receipt.supplier) : null;
+  const qty = Number(delivery.netWeight > 0 ? delivery.netWeight : delivery.deliveredQuantity || 0);
+  const price = Number(receipt?.price || 0);
+  const total = Number(receipt?.preliminaryPayableAmount || qty * price);
+  return `${docHeader()}
+    <div class="doc-title">Act de achiziție</div>
+    <div class="doc-subtitle">${formatDateShort(delivery.createdAt)} · Recepție #${delivery.receiptId}</div>
+    <div class="doc-party" style="margin-bottom:14px;">
+      <h4>Furnizor</h4>
+      <div><b>${receipt?.supplier || "-"}</b></div>
+      ${supplier?.idno ? `<div>IDNO: ${supplier.idno}</div>` : ""}
+      ${supplier?.address ? `<div>${supplier.address}</div>` : ""}
+      ${supplier?.bankName ? `<div>Banca: ${supplier.bankName} · IBAN: ${supplier.iban || "-"}</div>` : ""}
+    </div>
+    <table class="doc-table">
+      <thead><tr><th>Produs</th><th>Cantitate</th><th>Preț</th><th>Sumă</th></tr></thead>
+      <tbody><tr><td>${delivery.product}</td><td>${formatNumber(qty)} t</td><td>${moneyRo(price)}</td><td>${moneyRo(total)}</td></tr></tbody>
+      <tfoot><tr><td colspan="3">TOTAL</td><td>${moneyRo(total)} MDL</td></tr></tfoot>
+    </table>
+    <div class="doc-sign"><div>Furnizor</div><div>Achizitor AgroProfit+</div></div>`;
+}
+
+function buildCertificatePrintHtml(delivery) {
+  // Find the most relevant lab report for the product
+  const lab = (currentConfig?.labReports || [])
+    .filter((l) => l.active !== false && String(l.product).trim().toLowerCase() === String(delivery.product).trim().toLowerCase())
+    .sort((a, b) => new Date(b.reportDate || 0) - new Date(a.reportDate || 0))[0]
+    || (currentConfig?.labReports || [])[0];
+  if (!lab) {
+    return `${docHeader()}<div class="doc-title">Certificat de calitate</div>
+      <p style="text-align:center;color:#b00;">Nu există date de laborator pentru produsul „${delivery.product}". Adaugă-le în Nomenclator → Date laborator.</p>`;
+  }
+  const rows = [
+    ["Denumirea produsului", lab.product],
+    ["Țara de origine", lab.originCountry],
+    ["Anul recoltei", lab.harvestYear],
+    ["Umiditate, %", lab.humidity],
+    ["Aflatoxina B1", lab.aflatoxinB1],
+    ["Impurități totale, %", lab.impuritiesTotal],
+    ["Impurități diverse, %", lab.impuritiesDiverse],
+    ["Boabe sparte, %", lab.brokenGrains],
+    ["Boabe încolțite, %", lab.sproutedGrains],
+    ["Boabe defecte, %", lab.defectiveGrains],
+    ["Destinația produsului", lab.destination]
+  ].filter(([, v]) => v !== "" && v !== undefined && v !== null)
+   .map(([k, v]) => `<div><b>${k}:</b> ${v}</div>`).join("");
+  return `${docHeader()}
+    <div class="doc-title">Certificat de calitate</div>
+    <div class="doc-subtitle">Raport de încercări nr. ${lab.reportNumber || "—"}${lab.reportDate ? " din " + formatDateShort(lab.reportDate) : ""}</div>
+    <div class="doc-grid">${rows}</div>
+    ${lab.issuedBy ? `<div style="margin-top:14px;font-size:12px;">Eliberat de: <b>${lab.issuedBy}</b>${lab.contactPhone ? " · tel: " + lab.contactPhone : ""}</div>` : ""}
+    <div class="doc-sign"><div>Laborator</div><div>AgroProfit+</div></div>`;
+}
+
+function printDeliveryDocument(deliveryId, docType) {
+  const delivery = (deliveriesCache || []).find((d) => Number(d.id) === Number(deliveryId));
+  if (!delivery) return;
+  let html = "";
+  let title = "";
+  if (docType === "invoice") { html = buildInvoicePrintHtml(delivery); title = `Factura ${delivery.invoiceNumber || delivery.id}`; }
+  else if (docType === "act") { html = buildPurchaseActPrintHtml(delivery); title = `Act achizitie ${delivery.id}`; }
+  else if (docType === "certificate") { html = buildCertificatePrintHtml(delivery); title = `Certificat calitate ${delivery.id}`; }
+  if (html) openPrintWindow(html, title);
+}
+
+// ---- Act de verificare furnizor (Etapa 7) ----
+let lastStatement = null;
+
+async function generateSupplierStatement() {
+  const partnerSelect = document.getElementById("statement-partner-select");
+  const fromEl = document.getElementById("statement-date-from");
+  const toEl = document.getElementById("statement-date-to");
+  const resultEl = document.getElementById("statement-result");
+  const actionsEl = document.getElementById("statement-actions");
+  if (!partnerSelect || !resultEl) return;
+
+  const partnerId = partnerSelect.value;
+  if (!partnerId) {
+    resultEl.innerHTML = '<p class="empty-state">Selecteaza un furnizor.</p>';
+    if (actionsEl) actionsEl.hidden = true;
+    return;
+  }
+
+  resultEl.innerHTML = '<p class="empty-state">Se generează…</p>';
+  const params = new URLSearchParams({ partnerId });
+  if (fromEl && fromEl.value) params.set("from", fromEl.value);
+  if (toEl && toEl.value) params.set("to", toEl.value);
+
+  try {
+    const res = await fetch(`/api/reports/supplier-statement?${params.toString()}`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || "Eroare la generare.");
+    }
+    const data = await res.json();
+    lastStatement = data;
+    renderSupplierStatement(data);
+    if (actionsEl) actionsEl.hidden = false;
+  } catch (err) {
+    resultEl.innerHTML = `<p class="empty-state">${err.message}</p>`;
+    if (actionsEl) actionsEl.hidden = true;
+  }
+}
+
+function renderSupplierStatement(data) {
+  const resultEl = document.getElementById("statement-result");
+  if (!resultEl) return;
+  const t = data.totals;
+  const p = data.partner;
+
+  const receiptRows = data.receipts.length
+    ? data.receipts.map((r) => `
+        <tr>
+          <td>#${r.id}</td>
+          <td>${formatDateShort(r.date)}</td>
+          <td>${r.product}</td>
+          <td>${formatNumber(r.quantity)} ${r.unit}</td>
+          <td>${currency.format(r.price)}</td>
+          <td>${currency.format(r.amount)}</td>
+        </tr>`).join("")
+    : '<tr><td colspan="6" class="empty-state">Nicio recepție în perioadă.</td></tr>';
+
+  const paymentRows = data.payments.length
+    ? data.payments.map((pm) => `
+        <tr>
+          <td>#${pm.id}</td>
+          <td>${formatDateShort(pm.date)}</td>
+          <td>${pm.paymentType || "-"}</td>
+          <td>${pm.reference || "-"}</td>
+          <td>${currency.format(pm.amount)}</td>
+        </tr>`).join("")
+    : '<tr><td colspan="5" class="empty-state">Nicio achitare în perioadă.</td></tr>';
+
+  const balanceColor = t.balance > 0 ? "var(--danger)" : t.balance < 0 ? "var(--accent-bright)" : "var(--muted)";
+  const balanceText = t.balance > 0
+    ? `Datorie către furnizor: ${currency.format(t.balance)}`
+    : t.balance < 0
+      ? `Avans (furnizorul ne datorează): ${currency.format(Math.abs(t.balance))}`
+      : "Sold zero — achitat integral";
+
+  resultEl.innerHTML = `
+    <div class="statement-partner">
+      <h3>${p.name}</h3>
+      <div class="statement-partner-meta">
+        ${p.idno ? `IDNO: ${p.idno} · ` : ""}${p.fiscalProfile || ""}
+        ${p.address ? `<br>Adresa: ${p.address}` : ""}
+        ${p.bankName || p.iban ? `<br>Banca: ${p.bankName || "-"} · IBAN: ${p.iban || "-"}` : ""}
+      </div>
+    </div>
+
+    <h4 class="statement-sub">Recepții</h4>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>ID</th><th>Data</th><th>Produs</th><th>Cantitate</th><th>Preț</th><th>Sumă</th></tr></thead>
+        <tbody>${receiptRows}</tbody>
+        <tfoot><tr class="totals-row"><td colspan="3">TOTAL recepții (${data.receipts.length})</td><td>${formatNumber(t.totalQuantity)}</td><td></td><td>${currency.format(t.totalReceipts)}</td></tr></tfoot>
+      </table>
+    </div>
+
+    <h4 class="statement-sub">Achitări</h4>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>ID</th><th>Data</th><th>Tip plată</th><th>Referință</th><th>Sumă</th></tr></thead>
+        <tbody>${paymentRows}</tbody>
+        <tfoot><tr class="totals-row"><td colspan="4">TOTAL achitat (${data.payments.length})</td><td>${currency.format(t.totalPaid)}</td></tr></tfoot>
+      </table>
+    </div>
+
+    <div class="statement-balance" style="border-color:${balanceColor};color:${balanceColor};">
+      <span>SOLD FINAL</span>
+      <strong>${balanceText}</strong>
+    </div>
+  `;
+}
+
+function printSupplierStatement() {
+  if (!lastStatement) return;
+  const html = buildStatementPrintHtml(lastStatement);
+  openPrintWindow(html, `Act de verificare - ${lastStatement.partner.name}`);
+}
+
 // Refresh the data behind a view so lists are always fresh on open
 async function refreshViewData(view) {
   try {
@@ -3183,6 +3510,17 @@ document.querySelectorAll(".view-tab").forEach((button) => {
     // Always pull fresh data when the user opens a section
     refreshViewData(button.dataset.view);
   });
+});
+
+// Act de verificare buttons (Etapa 7)
+document.getElementById("statement-generate-btn")?.addEventListener("click", generateSupplierStatement);
+document.getElementById("statement-print-btn")?.addEventListener("click", printSupplierStatement);
+
+// Delivery document print buttons (Etapa 6) — event delegation
+document.getElementById("deliveries-body")?.addEventListener("click", (event) => {
+  const btn = event.target.closest(".doc-print-btn");
+  if (!btn) return;
+  printDeliveryDocument(btn.dataset.id, btn.dataset.print);
 });
 
 // Expand/collapse sidebar groups (e.g. Nomenclator)

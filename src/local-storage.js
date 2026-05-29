@@ -1248,6 +1248,102 @@ async function listAuditLogs() {
   return (state.auditLogs || []).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 }
 
+// Act de verificare: full statement for one supplier (Etapa 7)
+async function getSupplierStatement(partnerId, fromDate, toDate) {
+  const state = readReceiptsState();
+  const config = readConfigState();
+  const partner = (config.partners || []).find((p) => Number(p.id) === Number(partnerId));
+  if (!partner) {
+    throw new Error("Furnizorul selectat nu exista.");
+  }
+
+  const from = fromDate ? String(fromDate).slice(0, 10) : "";
+  const to = toDate ? String(toDate).slice(0, 10) : "";
+  const inRange = (iso) => {
+    const day = String(iso || "").slice(0, 10);
+    if (!day) return true;
+    if (from && day < from) return false;
+    if (to && day > to) return false;
+    return true;
+  };
+
+  // Receptii de la acest furnizor
+  const receipts = (state.receipts || [])
+    .filter((r) => Number(r.supplierId) === Number(partnerId))
+    .filter((r) => inRange(r.createdAt || r.receivedAt))
+    .map((r) => {
+      const net = Number(r.provisionalNetQuantity ?? r.quantity ?? 0);
+      const price = Number(r.price ?? r.unitPrice ?? 0);
+      const amount = Number(r.preliminaryPayableAmount ?? net * price);
+      return {
+        id: r.id,
+        date: r.createdAt || r.receivedAt || "",
+        product: r.product || "",
+        quantity: net,
+        unit: r.unit || "t",
+        price,
+        amount
+      };
+    })
+    .sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  // Plati catre acest furnizor (dupa nume sau dupa supplierId pe tranzactie)
+  const payments = (state.transactions || [])
+    .filter((t) => t.direction === "payment")
+    .filter((t) => {
+      const byId = t.supplierId && Number(t.supplierId) === Number(partnerId);
+      const byName = t.partner && partner.name && String(t.partner).trim().toLowerCase() === String(partner.name).trim().toLowerCase();
+      return byId || byName;
+    })
+    .filter((t) => inRange(t.createdAt || t.transactedAt))
+    .map((t) => ({
+      id: t.id,
+      date: t.createdAt || t.transactedAt || "",
+      amount: Number(t.amount || 0),
+      paymentType: t.paymentType || "",
+      reference: t.receiptId ? `Receptie #${t.receiptId}` : (t.referenceType || "")
+    }))
+    .sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  const totalReceipts = receipts.reduce((s, r) => s + r.amount, 0);
+  const totalQuantity = receipts.reduce((s, r) => s + r.quantity, 0);
+  const totalPaid = payments.reduce((s, p) => s + p.amount, 0);
+  const balance = totalReceipts - totalPaid; // >0 datorie catre furnizor, <0 avans
+
+  // Totals per product
+  const byProduct = {};
+  receipts.forEach((r) => {
+    const key = r.product || "—";
+    if (!byProduct[key]) byProduct[key] = { quantity: 0, amount: 0 };
+    byProduct[key].quantity += r.quantity;
+    byProduct[key].amount += r.amount;
+  });
+
+  return {
+    partner: {
+      id: partner.id,
+      name: partner.name,
+      idno: partner.idno || "",
+      address: partner.address || "",
+      phone: partner.phone || "",
+      fiscalProfile: partner.fiscalProfile || "",
+      bankName: partner.bankName || "",
+      iban: partner.iban || ""
+    },
+    period: { from, to },
+    receipts,
+    payments,
+    byProduct,
+    totals: {
+      totalReceipts,
+      totalQuantity,
+      totalPaid,
+      balance,
+      balanceLabel: balance > 0 ? "datorie" : balance < 0 ? "avans" : "achitat"
+    }
+  };
+}
+
 async function createProcessing(payload) {
   const state = readReceiptsState();
   const processing = {
@@ -2800,6 +2896,7 @@ module.exports = {
   getReceiptDefaults,
   getStats,
   getStockSummary,
+  getSupplierStatement,
   listAuditLogs,
   listComplaints,
   listDeliveries,
