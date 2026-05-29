@@ -499,6 +499,23 @@ function sanitizeNumber(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+// Generate a collision-proof next id based on the highest existing id,
+// NOT on array length (length+1 collides after deletions and causes
+// records to overwrite each other in the UI).
+function nextId(list) {
+  if (!Array.isArray(list) || !list.length) {
+    return 1;
+  }
+  let max = 0;
+  for (const item of list) {
+    const id = Number(item && item.id);
+    if (Number.isFinite(id) && id > max) {
+      max = id;
+    }
+  }
+  return max + 1;
+}
+
 function requiredText(value, label) {
   const normalized = String(value || "").trim();
 
@@ -773,7 +790,7 @@ function createAuditEntry(state, payload) {
   }
 
   const entry = {
-    id: state.auditLogs.length + 1,
+    id: nextId(state.auditLogs),
     entityType: payload.entityType,
     entityId: payload.entityId ? Number(payload.entityId) : null,
     action: payload.action,
@@ -1048,7 +1065,7 @@ async function listPartnerAdvances() {
 
 async function createOpeningDocument(payload) {
   const state = readReceiptsState();
-  const documentId = (state.openingDocuments?.length || 0) + 1;
+  const documentId = nextId(state.openingDocuments);
   const openingDocument = {
     id: documentId,
     documentDate: requiredText(payload.documentDate, "Data documentului"),
@@ -1196,7 +1213,7 @@ async function listAuditLogs() {
 async function createProcessing(payload) {
   const state = readReceiptsState();
   const processing = {
-    id: (state.processings?.length || 0) + 1,
+    id: nextId(state.processings),
     receiptId: Number(payload.receiptId),
     product: payload.product,
     sourceLocation: payload.sourceLocation || "",
@@ -1246,7 +1263,7 @@ async function createProcessing(payload) {
 async function createTransaction(payload) {
   const state = readReceiptsState();
   const transaction = {
-    id: (state.transactions?.length || 0) + 1,
+    id: nextId(state.transactions),
     referenceType:
       payload.referenceType === "delivery"
         ? "delivery"
@@ -1301,7 +1318,7 @@ async function createTransaction(payload) {
           if (!Array.isArray(state.partnerAdvances)) {
             state.partnerAdvances = [];
           }
-          const advanceId = (state.partnerAdvances.length || 0) + 1;
+          const advanceId = nextId(state.partnerAdvances);
           state.partnerAdvances.push({
             id: advanceId,
             partnerId: transaction.partnerId,
@@ -1450,7 +1467,7 @@ async function applyAdvanceCredit(payload = {}) {
   }
 
   const transaction = {
-    id: (state.transactions?.length || 0) + 1,
+    id: nextId(state.transactions),
     referenceType: "receipt",
     receiptId: targetReceiptId,
     deliveryId: null,
@@ -1613,7 +1630,7 @@ async function createDelivery(payload) {
   }
 
   const delivery = {
-    id: (state.deliveries?.length || 0) + 1,
+    id: nextId(state.deliveries),
     receiptId: Number(payload.receiptId),
     customerId: payload.customerId ? Number(payload.customerId) : null,
     customer: payload.customer || "",
@@ -1769,7 +1786,7 @@ async function createComplaint(payload) {
   }
 
   const complaint = {
-    id: (state.complaints?.length || 0) + 1,
+    id: nextId(state.complaints),
     deliveryId: Number(payload.deliveryId),
     customer: delivery.customer,
     product: delivery.product,
@@ -1935,7 +1952,7 @@ async function updateComplaint(id, payload = {}) {
     const receipt = delivery ? state.receipts.find((item) => item.id === delivery.receiptId) : null;
 
     const compensatory = {
-      id: (state.transactions?.length || 0) + 1,
+      id: nextId(state.transactions),
       referenceType: receipt ? "receipt" : "delivery",
       receiptId: receipt ? receipt.id : null,
       deliveryId: delivery ? delivery.id : null,

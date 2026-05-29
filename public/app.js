@@ -2842,10 +2842,37 @@ function getEntityItem(entity, id) {
   return currentConfig[entity].find((item) => String(item.id) === String(id));
 }
 
+// Refresh the data behind a view so lists are always fresh on open
+async function refreshViewData(view) {
+  try {
+    if (view === "receptii") {
+      await Promise.all([loadReceipts(), loadDailyReport()]);
+    } else if (view === "procesare") {
+      await Promise.all([loadProcessings(), loadReceipts()]);
+    } else if (view === "livrari") {
+      await Promise.all([loadDeliveries(), loadReceipts()]);
+    } else if (view === "reclamatii") {
+      await Promise.all([loadComplaints(), loadDeliveries()]);
+    } else if (view === "financiar") {
+      await Promise.all([loadTransactions(), loadReceipts(), loadDeliveries()]);
+    } else if (view === "stoc") {
+      await loadStocks();
+    } else if (view === "acasa") {
+      await Promise.all([loadDailyReport(), loadAuditLogs()]);
+    } else if (view === "audit") {
+      await loadAuditLogs();
+    }
+  } catch (err) {
+    console.warn("refreshViewData failed:", err && err.message);
+  }
+}
+
 document.querySelectorAll(".view-tab").forEach((button) => {
   button.addEventListener("click", () => {
     setView(button.dataset.view);
     closeSidebarDrawer();
+    // Always pull fresh data when the user opens a section
+    refreshViewData(button.dataset.view);
   });
 });
 
