@@ -1640,6 +1640,11 @@ async function createDelivery(payload) {
     contractNumber: payload.contractNumber || "",
     contractDate: payload.contractDate || "",
     contractPrice: sanitizeNumber(payload.contractPrice),
+    // Câmpuri de facturare (introduse de contabil) — Etapa 4
+    seller: payload.seller || "",
+    priceLei: sanitizeNumber(payload.priceLei),
+    priceForeign: sanitizeNumber(payload.priceForeign),
+    currency: String(payload.currency || "MDL").trim().toUpperCase() || "MDL",
     plannedQuantity,
     deliveredQuantity: 0,
     grossWeight: 0,
@@ -1839,15 +1844,43 @@ async function updateDelivery(id, payload = {}) {
   const reason = requiredChangeReason(payload.changeReason);
   const oldValue = {
     note: delivery.note,
-    invoiceNumber: delivery.invoiceNumber
+    invoiceNumber: delivery.invoiceNumber,
+    seller: delivery.seller,
+    priceLei: delivery.priceLei,
+    priceForeign: delivery.priceForeign,
+    currency: delivery.currency,
+    contractNumber: delivery.contractNumber,
+    contractDate: delivery.contractDate,
+    vehicle: delivery.vehicle
   };
 
   if (payload.note !== undefined) {
     delivery.note = String(payload.note || "").trim();
   }
-
   if (payload.invoiceNumber !== undefined) {
     delivery.invoiceNumber = String(payload.invoiceNumber || "").trim();
+  }
+  // Câmpuri de facturare editabile de contabil — Etapa 4
+  if (payload.seller !== undefined) {
+    delivery.seller = String(payload.seller || "").trim();
+  }
+  if (payload.priceLei !== undefined) {
+    delivery.priceLei = sanitizeNumber(payload.priceLei);
+  }
+  if (payload.priceForeign !== undefined) {
+    delivery.priceForeign = sanitizeNumber(payload.priceForeign);
+  }
+  if (payload.currency !== undefined) {
+    delivery.currency = String(payload.currency || "MDL").trim().toUpperCase() || "MDL";
+  }
+  if (payload.contractNumber !== undefined) {
+    delivery.contractNumber = String(payload.contractNumber || "").trim();
+  }
+  if (payload.contractDate !== undefined) {
+    delivery.contractDate = String(payload.contractDate || "").trim();
+  }
+  if (payload.vehicle !== undefined) {
+    delivery.vehicle = String(payload.vehicle || "").trim();
   }
 
   delivery.updatedAt = new Date().toISOString();
@@ -1861,7 +1894,14 @@ async function updateDelivery(id, payload = {}) {
     oldValue,
     newValue: {
       note: delivery.note,
-      invoiceNumber: delivery.invoiceNumber
+      invoiceNumber: delivery.invoiceNumber,
+      seller: delivery.seller,
+      priceLei: delivery.priceLei,
+      priceForeign: delivery.priceForeign,
+      currency: delivery.currency,
+      contractNumber: delivery.contractNumber,
+      contractDate: delivery.contractDate,
+      vehicle: delivery.vehicle
     }
   });
 

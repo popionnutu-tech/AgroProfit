@@ -967,10 +967,7 @@ function renderReceiptTotals(rows) {
     .join(" · ");
   receiptsFootEl.innerHTML = `
     <tr class="totals-row">
-      <td colspan="4">TOTAL (${rows.length}) — ${perProduct}</td>
-      <td>${formatNumber(totalNet)}</td>
-      <td>${currency.format(totalPay)}</td>
-      <td colspan="3"></td>
+      <td colspan="10">TOTAL (${rows.length} recepții) &nbsp;·&nbsp; Net: <b>${formatNumber(totalNet)}</b> &nbsp;·&nbsp; Plată prelim: <b>${currency.format(totalPay)}</b> &nbsp;·&nbsp; ${perProduct}</td>
     </tr>
   `;
 }
@@ -1044,10 +1041,7 @@ function renderProcessingTotals(rows) {
     .join("  ·  ");
   processingsFootEl.innerHTML = `
     <tr class="totals-row">
-      <td colspan="5">TOTAL (${rows.length}) — ${perProduct}</td>
-      <td>${formatNumber(totProcessed)}</td>
-      <td>${formatNumber(totWaste)}</td>
-      <td>${formatNumber(totFinal)}</td>
+      <td colspan="8">TOTAL (${rows.length}) &nbsp;·&nbsp; Procesat: <b>${formatNumber(totProcessed)}</b> · Deșeu: <b>${formatNumber(totWaste)}</b> · Rămas: <b>${formatNumber(totFinal)}</b> &nbsp;·&nbsp; ${perProduct}</td>
     </tr>
   `;
 }
@@ -1105,8 +1099,7 @@ function renderTransactionTotals(rows) {
   });
   transactionsFootEl.innerHTML = `
     <tr class="totals-row">
-      <td colspan="5">TOTAL (${rows.length}) — Numerar: ${currency.format(cashTotal)} · Transfer: ${currency.format(transferTotal)}</td>
-      <td>↑${currency.format(totalCollections)} ↓${currency.format(totalPayments)}</td>
+      <td colspan="7">TOTAL (${rows.length}) &nbsp;·&nbsp; Numerar: <b>${currency.format(cashTotal)}</b> · Transfer: <b>${currency.format(transferTotal)}</b> &nbsp;·&nbsp; Încasări: <b>${currency.format(totalCollections)}</b> · Plăți: <b>${currency.format(totalPayments)}</b></td>
     </tr>
   `;
 }
@@ -1135,6 +1128,11 @@ function deliveryStatusBadge(status) {
 
 function renderDeliveries(deliveries) {
   const canEditStatuses = canAccess("delivery-write");
+  // Financial columns (vanzator, masina, pret) hidden for operators (no finance access)
+  const deliveriesTable = document.getElementById("deliveries-table");
+  if (deliveriesTable) {
+    deliveriesTable.classList.toggle("hide-fin", !canAccess("finance"));
+  }
   const filtered = deliveries.filter((item) =>
     withinDateRange(item, ["createdAt", "deliveredAt"], deliveryDateFromEl, deliveryDateToEl)
   );
@@ -1150,14 +1148,20 @@ function renderDeliveries(deliveries) {
             .join(" ")
         : "";
       const qty = item.netWeight > 0 ? item.netWeight : item.deliveredQuantity;
+      const priceLabel = item.priceForeign && item.currency && item.currency !== "MDL"
+        ? `${formatNumber(item.priceForeign)} ${item.currency}`
+        : (item.priceLei ? `${formatNumber(item.priceLei)} MDL` : "-");
       return `
         <tr>
           <td>#${item.id}</td>
           <td>${formatDateShort(item.createdAt || item.deliveredAt)}</td>
           <td>#${item.receiptId}</td>
           <td>${item.customer}</td>
+          <td class="col-fin">${item.seller || "-"}</td>
           <td>${item.product}</td>
           <td>${formatNumber(qty)}</td>
+          <td class="col-fin">${item.vehicle || "-"}</td>
+          <td class="col-fin">${priceLabel}</td>
           <td>
             <div>${item.invoiceNumber || "-"}</div>
             <div>${deliveryStatusBadge(status)}</div>
@@ -1191,8 +1195,7 @@ function renderDeliveryTotals(rows) {
     .join(" · ");
   deliveriesFootEl.innerHTML = `
     <tr class="totals-row">
-      <td colspan="5">TOTAL (${rows.length}) — ${perProduct}</td>
-      <td>${formatNumber(totalQty)}</td>
+      <td colspan="10">TOTAL (${rows.length} livrări) &nbsp;·&nbsp; Cantitate: <b>${formatNumber(totalQty)}</b> &nbsp;·&nbsp; ${perProduct}</td>
     </tr>
   `;
 }

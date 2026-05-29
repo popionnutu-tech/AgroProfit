@@ -238,7 +238,7 @@ app.get(
 
 app.post("/api/deliveries", requireRoles(["operator", "manager", "admin"]), createDeliveryHandler);
 
-app.patch("/api/deliveries/:id", requireRoles(["operator", "manager", "admin"]), async (req, res) => {
+app.patch("/api/deliveries/:id", requireRoles(["operator", "manager", "admin", "accountant", "accountant-sef"]), async (req, res) => {
   return updateDeliveryHandler(req, res, req.params.id);
 });
 

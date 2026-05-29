@@ -1424,6 +1424,11 @@ thead th {
   font-size: 0.85rem;
 }
 
+/* Hide financial columns for operators (Etapa 4) */
+.hide-fin .col-fin {
+  display: none;
+}
+
 .table-wrap tfoot .totals-row td {
   background: rgba(27, 94, 63, 0.07);
   border-top: 2px solid rgba(27, 94, 63, 0.2);

@@ -827,16 +827,16 @@
               <div></div>
             </div>
 
-            <details class="optional-fields">
-              <summary>Detalii optionale</summary>
+            <details class="optional-fields" data-access="finance,delivery-write">
+              <summary>Date pentru factură (contabil)</summary>
               <div class="split">
                 <label>
-                  Vehicul
-                  <input name="vehicle" placeholder="Ex: AG-102" />
+                  Vânzător
+                  <input name="seller" placeholder="Denumire vânzător" />
                 </label>
                 <label>
-                  Invoice / factura
-                  <input name="invoiceNumber" placeholder="Invoice / Factura" />
+                  Invoice / factură
+                  <input name="invoiceNumber" placeholder="Nr. invoice / factură" />
                 </label>
               </div>
 
@@ -853,14 +853,35 @@
 
               <div class="split">
                 <label>
-                  Pret contract
-                  <input name="contractPrice" type="number" min="0" step="0.01" />
+                  Preț (lei)
+                  <input name="priceLei" type="number" min="0" step="0.01" placeholder="MDL / unitate" />
                 </label>
                 <label>
-                  Observatii
-                  <input name="note" placeholder="Comentariu livrare" />
+                  Preț valută
+                  <input name="priceForeign" type="number" min="0" step="0.01" placeholder="EUR / USD" />
                 </label>
               </div>
+
+              <div class="split">
+                <label>
+                  Valuta
+                  <select name="currency">
+                    <option value="MDL">MDL</option>
+                    <option value="EUR">EUR</option>
+                    <option value="USD">USD</option>
+                    <option value="RON">RON</option>
+                  </select>
+                </label>
+                <label>
+                  Mașină (nr.)
+                  <input name="vehicle" placeholder="Ex: AG-102" />
+                </label>
+              </div>
+
+              <label>
+                Observații
+                <input name="note" placeholder="Comentariu livrare" />
+              </label>
             </details>
 
             <section class="estimate-panel">
@@ -897,15 +918,18 @@
               <label>Pana la<input type="date" id="delivery-date-to" /></label>
             </div>
             <div class="table-wrap">
-              <table>
+              <table id="deliveries-table">
                 <thead>
                   <tr>
                     <th>ID</th>
                     <th>Data</th>
                     <th>Receptie</th>
                     <th>Cumparator</th>
+                    <th class="col-fin">Vanzator</th>
                     <th>Produs</th>
                     <th>Cantitate</th>
+                    <th class="col-fin">Masina</th>
+                    <th class="col-fin">Pret</th>
                     <th>Invoice</th>
                   </tr>
                 </thead>
