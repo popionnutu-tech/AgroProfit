@@ -415,6 +415,15 @@ function persistConfig(state) {
   }
 }
 
+// Pe serverless (Vercel), instanta poate ingheta imediat dupa raspuns, inainte ca
+// salvarea debounce-uita in Supabase KV sa apuce sa ruleze => scrierea se pierde.
+// De aceea fortam flush-ul salvarilor in asteptare inainte ca functia sa se incheie.
+async function flushPendingWrites() {
+  if (USE_SUPABASE && kvBackend && typeof kvBackend.flushAndWait === "function") {
+    await kvBackend.flushAndWait();
+  }
+}
+
 function readReceiptsState() {
   ensureInitialized();
   const state = { ...defaultReceiptsState, ...receiptsCache };
@@ -3098,6 +3107,7 @@ function runMigrationIfNeeded() {
 
 module.exports = {
   initStorage,
+  flushPendingWrites,
   applyAdvanceCredit,
   appendAuditLog,
   closeReceipt,
