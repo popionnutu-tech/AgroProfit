@@ -700,6 +700,8 @@ function createStockSummary(receipts, deliveries = [], openingDocuments = []) {
   }
 
   for (const item of receipts) {
+    // Anulat (canceled) receipts must NOT count towards stock.
+    if (item.status === "Anulat") continue;
     const location = item.location || "Fara locatie";
     const key = `${location}::${item.product}`;
     const fallbackQuantity = Number(item.quantity || 0);
