@@ -280,7 +280,7 @@
           <div class="panel-head">
             <h2>Filtre receptii</h2>
           </div>
-          <div class="split">
+          <div class="filter-grid">
             <label>
               Filtru dupa status
               <select id="receipt-status-filter">
@@ -302,6 +302,14 @@
                 <option value="">Toate produsele</option>
               </select>
             </label>
+            <label>
+              Perioada de la
+              <input type="date" id="receipt-date-from" />
+            </label>
+            <label>
+              Pana la
+              <input type="date" id="receipt-date-to" />
+            </label>
           </div>
         </section>
 
@@ -309,7 +317,7 @@
           <div class="panel-head">
             <h2>Filtre procesari</h2>
           </div>
-          <div class="split">
+          <div class="filter-grid">
             <label>
               Filtru dupa tip
               <select id="processing-type-filter">
@@ -321,6 +329,14 @@
               <select id="processing-receipt-filter">
                 <option value="">Toate receptiile</option>
               </select>
+            </label>
+            <label>
+              Perioada de la
+              <input type="date" id="processing-date-from" />
+            </label>
+            <label>
+              Pana la
+              <input type="date" id="processing-date-to" />
             </label>
           </div>
         </section>
@@ -541,16 +557,19 @@
                 <thead>
                   <tr>
                     <th>ID</th>
+                    <th>Data</th>
                     <th>Produs</th>
                     <th>Furnizor</th>
                     <th>Brut / net</th>
                     <th>Locatie</th>
                     <th>Plata prelim.</th>
+                    <th>Data plata</th>
                     <th>Status</th>
                     <th>Sursa</th>
                   </tr>
                 </thead>
                 <tbody id="receipts-body"></tbody>
+                <tfoot id="receipts-foot"></tfoot>
               </table>
             </div>
           </section>
@@ -641,6 +660,7 @@
                 <thead>
                   <tr>
                     <th>ID</th>
+                    <th>Data</th>
                     <th>Produs</th>
                     <th>Receptie</th>
                     <th>Tip</th>
@@ -650,6 +670,7 @@
                   </tr>
                 </thead>
                 <tbody id="processings-body"></tbody>
+                <tfoot id="processings-foot"></tfoot>
               </table>
             </div>
           </section>
@@ -755,11 +776,16 @@
               <h2>Tranzactii recente</h2>
               <p>Plati si incasari inregistrate in sistem</p>
             </div>
+            <div class="inline-date-filter">
+              <label>De la<input type="date" id="transaction-date-from" /></label>
+              <label>Pana la<input type="date" id="transaction-date-to" /></label>
+            </div>
             <div class="table-wrap">
               <table>
                 <thead>
                     <tr>
                       <th>ID</th>
+                      <th>Data</th>
                       <th>Referinta</th>
                       <th>Partener</th>
                       <th>Tip</th>
@@ -768,6 +794,7 @@
                   </tr>
                 </thead>
                 <tbody id="transactions-body"></tbody>
+                <tfoot id="transactions-foot"></tfoot>
               </table>
             </div>
           </section>
@@ -864,11 +891,16 @@
               <h2>Livrari recente</h2>
               <p>Iesiri reale din stoc si legatura cu contractul</p>
             </div>
+            <div class="inline-date-filter">
+              <label>De la<input type="date" id="delivery-date-from" /></label>
+              <label>Pana la<input type="date" id="delivery-date-to" /></label>
+            </div>
             <div class="table-wrap">
               <table>
                 <thead>
                   <tr>
                     <th>ID</th>
+                    <th>Data</th>
                     <th>Receptie</th>
                     <th>Cumparator</th>
                     <th>Produs</th>
@@ -877,6 +909,7 @@
                   </tr>
                 </thead>
                 <tbody id="deliveries-body"></tbody>
+                <tfoot id="deliveries-foot"></tfoot>
               </table>
             </div>
           </section>

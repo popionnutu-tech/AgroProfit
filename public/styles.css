@@ -1394,6 +1394,53 @@ thead th {
   }
 }
 
+/* ====== Filters + table totals (Etapa 2) ====== */
+.filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+}
+
+.inline-date-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.inline-date-filter label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.inline-date-filter input[type="date"] {
+  width: auto;
+  padding: 6px 10px;
+  border-radius: 10px;
+  font-size: 0.85rem;
+}
+
+.table-wrap tfoot .totals-row td {
+  background: rgba(27, 94, 63, 0.07);
+  border-top: 2px solid rgba(27, 94, 63, 0.2);
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--accent-deep);
+  padding: 9px 12px;
+  letter-spacing: 0.02em;
+}
+
+@media (max-width: 640px) {
+  .inline-date-filter input[type="date"] {
+    font-size: 16px;
+  }
+}
+
 /* ====== DASHBOARD (variant A: hero + sparklines + activity feed) ====== */
 .dashboard {
   margin: 0 0 20px;

@@ -78,8 +78,20 @@ const stockSummaryEl = document.getElementById("stock-summary");
 const silosGridEl = document.getElementById("silos-grid");
 const receiptStatusFilterEl = document.getElementById("receipt-status-filter");
 const receiptProductFilterEl = document.getElementById("receipt-product-filter");
+const receiptDateFromEl = document.getElementById("receipt-date-from");
+const receiptDateToEl = document.getElementById("receipt-date-to");
+const receiptsFootEl = document.getElementById("receipts-foot");
 const processingTypeFilterEl = document.getElementById("processing-type-filter");
 const processingReceiptFilterEl = document.getElementById("processing-receipt-filter");
+const processingDateFromEl = document.getElementById("processing-date-from");
+const processingDateToEl = document.getElementById("processing-date-to");
+const processingsFootEl = document.getElementById("processings-foot");
+const deliveryDateFromEl = document.getElementById("delivery-date-from");
+const deliveryDateToEl = document.getElementById("delivery-date-to");
+const deliveriesFootEl = document.getElementById("deliveries-foot");
+const transactionDateFromEl = document.getElementById("transaction-date-from");
+const transactionDateToEl = document.getElementById("transaction-date-to");
+const transactionsFootEl = document.getElementById("transactions-foot");
 const transactionsBodyEl = document.getElementById("transactions-body");
 const transactionFormEl = document.getElementById("transaction-form");
 const transactionMessageEl = document.getElementById("transaction-message");
@@ -810,12 +822,39 @@ function statusOptions(current) {
   });
 }
 
+// ---- Date-range filtering + totals helpers (Etapa 2) ----
+function formatDateShort(iso) {
+  if (!iso) return "-";
+  const s = String(iso);
+  // yyyy-mm-dd -> dd.mm.yyyy
+  const datePart = s.slice(0, 10);
+  const m = datePart.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return m ? `${m[3]}.${m[2]}.${m[1]}` : datePart;
+}
+
+function withinDateRange(item, dateFields, fromEl, toEl) {
+  const from = fromEl && fromEl.value ? fromEl.value : "";
+  const to = toEl && toEl.value ? toEl.value : "";
+  if (!from && !to) return true;
+  // Find the first available date field on the item
+  let raw = "";
+  for (const f of dateFields) {
+    if (item[f]) { raw = String(item[f]); break; }
+  }
+  const day = raw.slice(0, 10);
+  if (!day) return true; // no date on record — don't hide it
+  if (from && day < from) return false;
+  if (to && day > to) return false;
+  return true;
+}
+
 function renderReceipts(receipts) {
   const canEditStatuses = canAccess("receipt-write");
   const filteredReceipts = receipts.filter((item) => {
     const statusMatch = !receiptStatusFilterEl.value || item.status === receiptStatusFilterEl.value;
     const productMatch = !receiptProductFilterEl.value || item.product === receiptProductFilterEl.value;
-    return statusMatch && productMatch;
+    const dateMatch = withinDateRange(item, ["createdAt", "receivedAt"], receiptDateFromEl, receiptDateToEl);
+    return statusMatch && productMatch && dateMatch;
   });
 
   bodyEl.innerHTML = filteredReceipts
@@ -823,11 +862,13 @@ function renderReceipts(receipts) {
       return `
         <tr>
           <td>#${item.id}</td>
+          <td>${formatDateShort(item.createdAt || item.receivedAt)}</td>
           <td>${item.product}</td>
           <td>${item.supplier}</td>
           <td>${formatNumber(item.grossQuantity || item.quantity)} / ${formatNumber(item.provisionalNetQuantity || item.quantity)} ${item.unit}</td>
           <td>${item.location || "-"}</td>
           <td>${currency.format(Number(item.preliminaryPayableAmount || 0))}</td>
+          <td>${formatDateShort(item.paymentDate || item.paidAt)}</td>
           <td>
             <select class="status" data-id="${item.id}" ${canEditStatuses ? "" : "disabled"}>
               ${statusOptions(item.status).join("")}
@@ -838,6 +879,40 @@ function renderReceipts(receipts) {
       `;
     })
     .join("");
+
+  // Totals footer (grouped by product)
+  if (receiptsFootEl) {
+    renderReceiptTotals(filteredReceipts);
+  }
+}
+
+function renderReceiptTotals(rows) {
+  if (!rows.length) {
+    receiptsFootEl.innerHTML = "";
+    return;
+  }
+  const byProduct = {};
+  let totalNet = 0;
+  let totalPay = 0;
+  rows.forEach((item) => {
+    const net = Number(item.provisionalNetQuantity || item.quantity || 0);
+    const pay = Number(item.preliminaryPayableAmount || 0);
+    totalNet += net;
+    totalPay += pay;
+    const key = item.product || "—";
+    byProduct[key] = (byProduct[key] || 0) + net;
+  });
+  const perProduct = Object.entries(byProduct)
+    .map(([prod, qty]) => `${prod}: ${formatNumber(qty)}`)
+    .join(" · ");
+  receiptsFootEl.innerHTML = `
+    <tr class="totals-row">
+      <td colspan="4">TOTAL (${rows.length}) — ${perProduct}</td>
+      <td>${formatNumber(totalNet)}</td>
+      <td>${currency.format(totalPay)}</td>
+      <td colspan="3"></td>
+    </tr>
+  `;
 }
 
 function renderProcessings(processings) {
@@ -847,7 +922,8 @@ function renderProcessings(processings) {
       !processingTypeFilterEl.value || item.processingType === processingTypeFilterEl.value;
     const receiptMatch =
       !processingReceiptFilterEl.value || String(item.receiptId) === processingReceiptFilterEl.value;
-    return typeMatch && receiptMatch;
+    const dateMatch = withinDateRange(item, ["createdAt", "processedAt"], processingDateFromEl, processingDateToEl);
+    return typeMatch && receiptMatch && dateMatch;
   });
 
   processingsBodyEl.innerHTML = filteredProcessings
@@ -855,6 +931,7 @@ function renderProcessings(processings) {
       (item) => `
         <tr>
           <td>#${item.id}</td>
+          <td>${formatDateShort(item.createdAt || item.processedAt)}</td>
           <td>${item.product}</td>
           <td>#${item.receiptId}</td>
           <td>${item.processingType}</td>
@@ -873,15 +950,59 @@ function renderProcessings(processings) {
       `
     )
     .join("");
+
+  if (processingsFootEl) {
+    renderProcessingTotals(filteredProcessings);
+  }
+}
+
+function renderProcessingTotals(rows) {
+  if (!rows.length) {
+    processingsFootEl.innerHTML = "";
+    return;
+  }
+  // Total per product: processed, waste, remaining (final net)
+  const byProduct = {};
+  let totProcessed = 0;
+  let totWaste = 0;
+  let totFinal = 0;
+  rows.forEach((item) => {
+    const proc = Number(item.processedQuantity || 0);
+    const waste = Number(item.confirmedWaste || 0);
+    const fin = Number(item.finalNetQuantity || 0);
+    totProcessed += proc;
+    totWaste += waste;
+    totFinal += fin;
+    const key = item.product || "—";
+    if (!byProduct[key]) byProduct[key] = { proc: 0, waste: 0, fin: 0 };
+    byProduct[key].proc += proc;
+    byProduct[key].waste += waste;
+    byProduct[key].fin += fin;
+  });
+  const perProduct = Object.entries(byProduct)
+    .map(([prod, v]) => `${prod}: ${formatNumber(v.proc)} proc / ${formatNumber(v.waste)} deșeu / ${formatNumber(v.fin)} rămas`)
+    .join("  ·  ");
+  processingsFootEl.innerHTML = `
+    <tr class="totals-row">
+      <td colspan="5">TOTAL (${rows.length}) — ${perProduct}</td>
+      <td>${formatNumber(totProcessed)}</td>
+      <td>${formatNumber(totWaste)}</td>
+      <td>${formatNumber(totFinal)}</td>
+    </tr>
+  `;
 }
 
 function renderTransactions(transactions) {
   const canEditStatuses = canAccess("finance-write");
-  transactionsBodyEl.innerHTML = transactions
+  const filtered = transactions.filter((item) =>
+    withinDateRange(item, ["createdAt", "transactedAt"], transactionDateFromEl, transactionDateToEl)
+  );
+  transactionsBodyEl.innerHTML = filtered
     .map(
       (item) => `
         <tr>
           <td>#${item.id}</td>
+          <td>${formatDateShort(item.createdAt || item.transactedAt)}</td>
           <td>${item.referenceType === "delivery" ? `Livrare #${item.deliveryId}` : `Receptie #${item.receiptId}`}</td>
           <td>${item.partner}</td>
           <td>${item.direction === "collection" ? "Incasare" : "Plata"}</td>
@@ -899,6 +1020,35 @@ function renderTransactions(transactions) {
       `
     )
     .join("");
+
+  if (transactionsFootEl) {
+    renderTransactionTotals(filtered);
+  }
+}
+
+function renderTransactionTotals(rows) {
+  if (!rows.length) {
+    transactionsFootEl.innerHTML = "";
+    return;
+  }
+  let totalCollections = 0;
+  let totalPayments = 0;
+  let cashTotal = 0;
+  let transferTotal = 0;
+  rows.forEach((item) => {
+    const amt = Number(item.amount || 0);
+    if (item.direction === "collection") totalCollections += amt;
+    else totalPayments += amt;
+    const pt = String(item.paymentType || "").toLowerCase();
+    if (pt.includes("numerar") || pt.includes("cash")) cashTotal += amt;
+    else if (pt.includes("transfer")) transferTotal += amt;
+  });
+  transactionsFootEl.innerHTML = `
+    <tr class="totals-row">
+      <td colspan="5">TOTAL (${rows.length}) — Numerar: ${currency.format(cashTotal)} · Transfer: ${currency.format(transferTotal)}</td>
+      <td>↑${currency.format(totalCollections)} ↓${currency.format(totalPayments)}</td>
+    </tr>
+  `;
 }
 
 const DELIVERY_TRANSITIONS = {
@@ -925,7 +1075,10 @@ function deliveryStatusBadge(status) {
 
 function renderDeliveries(deliveries) {
   const canEditStatuses = canAccess("delivery-write");
-  deliveriesBodyEl.innerHTML = deliveries
+  const filtered = deliveries.filter((item) =>
+    withinDateRange(item, ["createdAt", "deliveredAt"], deliveryDateFromEl, deliveryDateToEl)
+  );
+  deliveriesBodyEl.innerHTML = filtered
     .map((item) => {
       const status = item.status || "Proiect";
       const allowed = DELIVERY_TRANSITIONS[status] || [];
@@ -940,6 +1093,7 @@ function renderDeliveries(deliveries) {
       return `
         <tr>
           <td>#${item.id}</td>
+          <td>${formatDateShort(item.createdAt || item.deliveredAt)}</td>
           <td>#${item.receiptId}</td>
           <td>${item.customer}</td>
           <td>${item.product}</td>
@@ -953,6 +1107,34 @@ function renderDeliveries(deliveries) {
       `;
     })
     .join("");
+
+  if (deliveriesFootEl) {
+    renderDeliveryTotals(filtered);
+  }
+}
+
+function renderDeliveryTotals(rows) {
+  if (!rows.length) {
+    deliveriesFootEl.innerHTML = "";
+    return;
+  }
+  const byProduct = {};
+  let totalQty = 0;
+  rows.forEach((item) => {
+    const qty = Number(item.netWeight > 0 ? item.netWeight : item.deliveredQuantity || 0);
+    totalQty += qty;
+    const key = item.product || "—";
+    byProduct[key] = (byProduct[key] || 0) + qty;
+  });
+  const perProduct = Object.entries(byProduct)
+    .map(([prod, qty]) => `${prod}: ${formatNumber(qty)}`)
+    .join(" · ");
+  deliveriesFootEl.innerHTML = `
+    <tr class="totals-row">
+      <td colspan="5">TOTAL (${rows.length}) — ${perProduct}</td>
+      <td>${formatNumber(totalQty)}</td>
+    </tr>
+  `;
 }
 
 function renderComplaints(complaints) {
@@ -2939,8 +3121,16 @@ formEl.elements.quantity.addEventListener("input", renderReceiptEstimate);
 formEl.elements.price.addEventListener("input", renderReceiptEstimate);
 receiptStatusFilterEl.addEventListener("change", () => renderReceipts(receiptsCache));
 receiptProductFilterEl.addEventListener("change", () => renderReceipts(receiptsCache));
+receiptDateFromEl?.addEventListener("change", () => renderReceipts(receiptsCache));
+receiptDateToEl?.addEventListener("change", () => renderReceipts(receiptsCache));
 processingTypeFilterEl.addEventListener("change", () => renderProcessings(processingsCache));
 processingReceiptFilterEl.addEventListener("change", () => renderProcessings(processingsCache));
+processingDateFromEl?.addEventListener("change", () => renderProcessings(processingsCache));
+processingDateToEl?.addEventListener("change", () => renderProcessings(processingsCache));
+deliveryDateFromEl?.addEventListener("change", () => renderDeliveries(deliveriesCache));
+deliveryDateToEl?.addEventListener("change", () => renderDeliveries(deliveriesCache));
+transactionDateFromEl?.addEventListener("change", () => renderTransactions(transactionsCache));
+transactionDateToEl?.addEventListener("change", () => renderTransactions(transactionsCache));
 processingReceiptSelect.addEventListener("change", renderProcessingEstimate);
 processedQuantityInput.addEventListener("input", renderProcessingEstimate);
 confirmedWasteInput.addEventListener("input", renderProcessingEstimate);
