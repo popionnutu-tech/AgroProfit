@@ -97,7 +97,7 @@ const SYSTEM_ROLE_CAPABILITIES = {
 };
 
 const SYSTEM_ROLES = [
-  { id: 1, code: "operator", name: "Operator receptie", permissions: "receptie, procesare, deliveries, complaints, stocks", system: true },
+  { id: 1, code: "operator", name: "Operator receptie", permissions: "receptie, procesare, livrari, stocuri", system: true },
   { id: 2, code: "manager", name: "Manager", permissions: "operations, finance, reports, audit", system: true },
   { id: 3, code: "accountant", name: "Contabil", permissions: "finance, complaints, invoice adjust, opening, reports", system: true },
   { id: 4, code: "admin", name: "Administrator sistem", permissions: "setup, users, security, operations", system: true },
