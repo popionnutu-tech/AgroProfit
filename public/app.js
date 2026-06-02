@@ -821,6 +821,83 @@ function renderStockSummary(summary) {
     .join("");
 }
 
+// Modul F: mișcarea stocului pe perioadă (stoc inițial / recepții / livrări / stoc final)
+function renderStockPeriod() {
+  const body = document.getElementById("stock-period-body");
+  if (!body) return;
+  const fromEl = document.getElementById("stock-period-from");
+  const toEl = document.getElementById("stock-period-to");
+  const from = fromEl && fromEl.value ? fromEl.value : "";
+  const to = toEl && toEl.value ? toEl.value : "";
+
+  const dayOf = (iso) => String(iso || "").slice(0, 10);
+  const products = new Set();
+
+  // Opening stock (counts as stoc inițial, always before any period)
+  const opening = {};
+  (openingDocumentsCache || []).forEach((doc) => {
+    (doc.stockItems || []).forEach((s) => {
+      const p = s.product || "—";
+      products.add(p);
+      opening[p] = (opening[p] || 0) + Number(s.quantity || 0);
+    });
+  });
+
+  // Receipts (skip Anulat)
+  const recBefore = {}, recIn = {};
+  (receiptsCache || []).forEach((r) => {
+    if (r.status === "Anulat") return;
+    const p = r.product || "—";
+    products.add(p);
+    const qty = Number(r.provisionalNetQuantity || r.quantity || 0);
+    const day = dayOf(r.createdAt || r.receivedAt);
+    if (from && day < from) recBefore[p] = (recBefore[p] || 0) + qty;
+    else if ((!from || day >= from) && (!to || day <= to)) recIn[p] = (recIn[p] || 0) + qty;
+    else if (!from && (!to || day <= to)) recIn[p] = (recIn[p] || 0) + qty;
+  });
+
+  // Deliveries
+  const delBefore = {}, delIn = {};
+  (deliveriesCache || []).forEach((d) => {
+    if (d.status === "Anulat") return;
+    const p = d.product || "—";
+    products.add(p);
+    const qty = deliveryDisplayQuantity(d);
+    const day = dayOf(d.createdAt || d.deliveredAt);
+    if (from && day < from) delBefore[p] = (delBefore[p] || 0) + qty;
+    else if ((!from || day >= from) && (!to || day <= to)) delIn[p] = (delIn[p] || 0) + qty;
+    else if (!from && (!to || day <= to)) delIn[p] = (delIn[p] || 0) + qty;
+  });
+
+  const rows = Array.from(products).sort((a, b) => String(a).localeCompare(String(b), "ro"));
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="5" class="empty-state">Nu există date pentru perioada aleasă.</td></tr>';
+    return;
+  }
+  let tInit = 0, tRec = 0, tDel = 0, tFin = 0;
+  body.innerHTML = rows.map((p) => {
+    const init = (opening[p] || 0) + (recBefore[p] || 0) - (delBefore[p] || 0);
+    const rec = recIn[p] || 0;
+    const del = delIn[p] || 0;
+    const fin = init + rec - del;
+    tInit += init; tRec += rec; tDel += del; tFin += fin;
+    return `<tr>
+      <td>${p}</td>
+      <td>${formatNumber(init)}</td>
+      <td>${formatNumber(rec)}</td>
+      <td>${formatNumber(del)}</td>
+      <td><b>${formatNumber(fin)}</b></td>
+    </tr>`;
+  }).join("") + `
+    <tr class="totals-row">
+      <td>TOTAL</td>
+      <td>${formatNumber(tInit)}</td>
+      <td>${formatNumber(tRec)}</td>
+      <td>${formatNumber(tDel)}</td>
+      <td>${formatNumber(tFin)}</td>
+    </tr>`;
+}
+
 function renderAutomationStatus(status) {
   if (!automationStatusSummaryEl || !automationAudienceBodyEl) {
     return;
@@ -4039,7 +4116,8 @@ async function refreshViewData(view) {
     } else if (view === "financiar") {
       await Promise.all([loadTransactions(), loadReceipts(), loadDeliveries()]);
     } else if (view === "stoc") {
-      await loadStocks();
+      await Promise.all([loadStocks(), loadReceipts(), loadDeliveries()]);
+      renderStockPeriod();
     } else if (view === "acasa") {
       await Promise.all([loadDailyReport(), loadAuditLogs()]);
     } else if (view === "audit") {
@@ -4146,6 +4224,10 @@ bodyEl?.addEventListener("click", (event) => {
   if (!btn) return;
   prefillReceiptPayment(btn.dataset.achita);
 });
+
+// Stock period filter (Modul F)
+document.getElementById("stock-period-from")?.addEventListener("change", renderStockPeriod);
+document.getElementById("stock-period-to")?.addEventListener("change", renderStockPeriod);
 processingTypeFilterEl.addEventListener("change", () => renderProcessings(processingsCache));
 processingProductFilterEl?.addEventListener("change", () => renderProcessings(processingsCache));
 processingDateFromEl?.addEventListener("change", () => renderProcessings(processingsCache));

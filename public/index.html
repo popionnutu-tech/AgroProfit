@@ -825,6 +825,31 @@
           </div>
         </section>
 
+        <section class="panel" data-view="stoc">
+          <div class="panel-head">
+            <h2>Mișcare stoc pe perioadă</h2>
+            <p>Stoc inițial, recepții, livrări și stoc final pe fiecare produs, pentru intervalul ales</p>
+          </div>
+          <div class="inline-date-filter">
+            <label>De la<input type="date" id="stock-period-from" /></label>
+            <label>Pana la<input type="date" id="stock-period-to" /></label>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Produs</th>
+                  <th>Stoc inițial (t)</th>
+                  <th>Recepții (t)</th>
+                  <th>Livrări (t)</th>
+                  <th>Stoc final (t)</th>
+                </tr>
+              </thead>
+              <tbody id="stock-period-body"></tbody>
+            </table>
+          </div>
+        </section>
+
         <section class="grid finance-grid" data-access="finance" data-view="financiar">
           <form class="panel form-panel" id="transaction-form">
             <div class="panel-head">
