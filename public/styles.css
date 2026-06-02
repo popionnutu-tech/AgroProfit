@@ -1538,6 +1538,46 @@ dialog.billing-dialog .form-actions { display: flex; gap: 12px; margin-top: 16px
   color: #fff;
 }
 
+/* Print dropdown menu (Modul E) */
+.print-menu {
+  position: relative;
+  display: inline-block;
+}
+.print-menu > summary {
+  list-style: none;
+  cursor: pointer;
+  display: inline-block;
+}
+.print-menu > summary::-webkit-details-marker { display: none; }
+.print-menu-list {
+  position: absolute;
+  z-index: 30;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(15, 61, 39, 0.16);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 160px;
+}
+.print-menu-list .doc-print-btn {
+  text-align: left;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  padding: 7px 10px;
+}
+.print-menu-list .doc-print-btn:hover {
+  background: rgba(27, 94, 63, 0.1);
+  color: var(--accent-deep);
+}
+
 /* Act de verificare (Etapa 7) */
 .statement-result {
   margin-top: 16px;

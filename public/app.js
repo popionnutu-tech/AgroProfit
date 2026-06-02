@@ -1371,9 +1371,18 @@ function renderDeliveries(deliveries) {
             <div class="action-row">${buttons}</div>
             ${canAccess("finance") ? `<div class="doc-print-row">
               <button type="button" class="cell-btn cell-btn-primary" data-action="edit-billing" data-id="${item.id}">Date factură</button>
-              <button type="button" class="doc-print-btn" data-print="invoice" data-id="${item.id}">Factură</button>
-              <button type="button" class="doc-print-btn" data-print="certificate" data-id="${item.id}">Certificat</button>
-              <button type="button" class="doc-print-btn" data-print="act" data-id="${item.id}">Act achiziție</button>
+              <details class="print-menu">
+                <summary class="doc-print-btn">Tipar ▾</summary>
+                <div class="print-menu-list">
+                  <button type="button" class="doc-print-btn" data-print="bon" data-id="${item.id}">Bon de cântar</button>
+                  <button type="button" class="doc-print-btn" data-print="certificate" data-id="${item.id}">Certificat calitate</button>
+                  <button type="button" class="doc-print-btn" data-print="cmr" data-id="${item.id}">CMR</button>
+                  <button type="button" class="doc-print-btn" data-print="invoice" data-id="${item.id}">Invoice</button>
+                  <button type="button" class="doc-print-btn" data-print="imputernicire" data-id="${item.id}">Împuternicire</button>
+                  <button type="button" class="doc-print-btn" data-print="declaratie" data-id="${item.id}">Declarație</button>
+                  <button type="button" class="doc-print-btn" data-print="act" data-id="${item.id}">Act achiziție</button>
+                </div>
+              </details>
             </div>` : ""}
           </td>
         </tr>
@@ -3697,26 +3706,32 @@ function findPartnerByName(name) {
 }
 
 function buildInvoicePrintHtml(delivery) {
-  const buyer = findPartnerByName(delivery.customer);
-  const qty = Number(delivery.netWeight > 0 ? delivery.netWeight : delivery.deliveredQuantity || 0);
-  const unitPrice = Number(delivery.priceLei || 0);
-  const total = qty * unitPrice;
+  const seller = getSellerPartner(delivery);
+  const buyer = getBuyerPartner(delivery);
+  const qty = deliveryQtyTonnes(delivery);
   const cur = delivery.currency && delivery.currency !== "MDL" ? delivery.currency : "MDL";
   const unitPriceForeign = Number(delivery.priceForeign || 0);
+  const unitPriceLei = Number(delivery.priceLei || 0);
+  // suma = tone × preț (în valuta facturii dacă există, altfel lei)
+  const isForeign = cur !== "MDL" && unitPriceForeign > 0;
+  const unitPrice = isForeign ? unitPriceForeign : unitPriceLei;
+  const total = qty * unitPrice;
+  const totalLei = qty * unitPriceLei;
+  const code = getProductCode(delivery.product);
   return `${docHeader()}
-    <div class="doc-title">Factură / Invoice</div>
-    <div class="doc-subtitle">Nr. ${delivery.invoiceNumber || "—"} · ${formatDateShort(delivery.createdAt || delivery.deliveredAt)}</div>
+    <div class="doc-title">Invoice / Factură</div>
+    <div class="doc-subtitle">Nr. ${delivery.invoiceNumber || "—"} · ${formatDateShort(delivery.invoiceDate || delivery.createdAt)}${delivery.contractNumber ? " · Contract " + delivery.contractNumber : ""}</div>
     <div class="doc-parties">
-      <div class="doc-party"><h4>Vânzător</h4><div><b>${delivery.seller || "AgroProfit+"}</b></div></div>
-      <div class="doc-party"><h4>Cumpărător</h4><div><b>${delivery.customer || "-"}</b></div>${buyer?.idno ? `<div>IDNO: ${buyer.idno}</div>` : ""}${buyer?.address ? `<div>${buyer.address}</div>` : ""}</div>
+      <div class="doc-party"><h4>Exportator (vânzător)</h4><div><b>${delivery.seller || seller?.name || "-"}</b></div>${seller?.idno ? `<div>IDNO: ${seller.idno}</div>` : ""}${seller?.address ? `<div>${seller.address}</div>` : ""}${seller?.iban ? `<div>IBAN: ${seller.iban}</div>` : ""}</div>
+      <div class="doc-party"><h4>Destinatar (cumpărător)</h4><div><b>${delivery.customer || buyer?.name || "-"}</b></div>${buyer?.idno ? `<div>IDNO: ${buyer.idno}</div>` : ""}${buyer?.address ? `<div>${buyer.address}</div>` : ""}</div>
     </div>
+    <div class="doc-grid"><div><b>AUTO (mașină):</b> ${delivery.vehicle || "-"}</div><div><b>Valuta:</b> ${cur}</div></div>
     <table class="doc-table">
-      <thead><tr><th>Produs</th><th>Cantitate</th><th>Preț (lei)</th>${cur !== "MDL" ? `<th>Preț (${cur})</th>` : ""}<th>Total (lei)</th></tr></thead>
-      <tbody><tr><td>${delivery.product}</td><td>${formatNumber(qty)} t</td><td>${moneyRo(unitPrice)}</td>${cur !== "MDL" ? `<td>${moneyRo(unitPriceForeign)} ${cur}</td>` : ""}<td>${moneyRo(total)}</td></tr></tbody>
-      <tfoot><tr><td colspan="${cur !== "MDL" ? 4 : 3}">TOTAL</td><td>${moneyRo(total)} MDL</td></tr></tfoot>
+      <thead><tr><th>Denumirea mărfii</th><th>Greutate (t)</th><th>Preț în ${cur}</th><th>Sumă în ${cur}</th></tr></thead>
+      <tbody><tr><td>${code ? code + " - " : ""}${delivery.product}</td><td>${formatNumber(qty)}</td><td>${moneyRo(unitPrice)}</td><td>${moneyRo(total)}</td></tr></tbody>
+      <tfoot><tr><td colspan="3">TOTAL pe invoice</td><td>${moneyRo(total)} ${cur}</td></tr></tfoot>
     </table>
-    ${delivery.contractNumber ? `<div style="font-size:12px;">Contract: ${delivery.contractNumber} ${delivery.contractDate ? "din " + formatDateShort(delivery.contractDate) : ""}</div>` : ""}
-    ${delivery.vehicle ? `<div style="font-size:12px;">Mașină: ${delivery.vehicle}</div>` : ""}
+    ${isForeign ? `<div style="font-size:12px;text-align:right;">Echivalent în lei (curs ${moneyRo(delivery.exchangeRate || 0)}): <b>${moneyRo(totalLei)} MDL</b></div>` : ""}
     <div class="doc-sign"><div>Vânzător</div><div>Cumpărător</div></div>`;
 }
 
@@ -3777,6 +3792,106 @@ function buildCertificatePrintHtml(delivery) {
     <div class="doc-sign"><div>Laborator</div><div>AgroProfit+</div></div>`;
 }
 
+// Helpers for delivery print docs (Modul E)
+function getSellerPartner(delivery) {
+  if (delivery.sellerId) {
+    const byId = (currentConfig?.partners || []).find((p) => Number(p.id) === Number(delivery.sellerId));
+    if (byId) return byId;
+  }
+  return findPartnerByName(delivery.seller);
+}
+function getBuyerPartner(delivery) {
+  if (delivery.customerId) {
+    const byId = (currentConfig?.partners || []).find((p) => Number(p.id) === Number(delivery.customerId));
+    if (byId) return byId;
+  }
+  return findPartnerByName(delivery.customer);
+}
+function getProductCode(productName) {
+  const p = (currentConfig?.products || []).find((x) => String(x.name).trim().toLowerCase() === String(productName || "").trim().toLowerCase());
+  return p?.code || "";
+}
+function deliveryQtyTonnes(delivery) {
+  return Number(delivery.netWeight > 0 ? delivery.netWeight : delivery.deliveredQuantity || delivery.plannedQuantity || 0);
+}
+
+function buildBonCantarHtml(delivery) {
+  const seller = getSellerPartner(delivery);
+  const buyer = getBuyerPartner(delivery);
+  const qty = deliveryQtyTonnes(delivery);
+  return `${docHeader()}
+    <div class="doc-title">Bon de cântar</div>
+    <div class="doc-subtitle">Nr. ${delivery.id} · ${formatDateShort(delivery.invoiceDate || delivery.createdAt)}</div>
+    <div class="doc-parties">
+      <div class="doc-party"><h4>Furnizor (vânzător)</h4><div><b>${delivery.seller || seller?.name || "-"}</b></div>${seller?.idno ? `<div>IDNO: ${seller.idno}</div>` : ""}</div>
+      <div class="doc-party"><h4>Client</h4><div><b>${delivery.customer || buyer?.name || "-"}</b></div>${buyer?.idno ? `<div>IDNO: ${buyer.idno}</div>` : ""}</div>
+    </div>
+    <div class="doc-grid">
+      <div><b>Autovehicul:</b> ${delivery.vehicle || "-"}</div>
+      <div><b>Produs:</b> ${delivery.product}</div>
+      <div><b>Masă brută:</b> ${formatNumber(delivery.grossWeight || 0)} t</div>
+      <div><b>Masă camion (tară):</b> ${formatNumber(delivery.tareWeight || 0)} t</div>
+      <div><b>Masă netă:</b> ${formatNumber(qty)} t</div>
+      <div><b>Data:</b> ${formatDateShort(delivery.invoiceDate || delivery.createdAt)}</div>
+    </div>
+    <div class="doc-sign"><div>Cântăritor</div><div>Șofer</div></div>`;
+}
+
+function buildCmrHtml(delivery) {
+  const seller = getSellerPartner(delivery);
+  const buyer = getBuyerPartner(delivery);
+  const qty = deliveryQtyTonnes(delivery);
+  return `${docHeader()}
+    <div class="doc-title">CMR — Scrisoare de transport</div>
+    <div class="doc-subtitle">Nr. ${delivery.invoiceNumber || delivery.id} · ${formatDateShort(delivery.invoiceDate || delivery.createdAt)}</div>
+    <div class="doc-parties">
+      <div class="doc-party"><h4>Expeditor (vânzător)</h4><div><b>${delivery.seller || seller?.name || "-"}</b></div>${seller?.address ? `<div>${seller.address}</div>` : ""}</div>
+      <div class="doc-party"><h4>Destinatar (cumpărător)</h4><div><b>${delivery.customer || buyer?.name || "-"}</b></div>${buyer?.address ? `<div>${buyer.address}</div>` : ""}</div>
+    </div>
+    <div class="doc-grid">
+      <div><b>Marfă:</b> ${getProductCode(delivery.product) ? getProductCode(delivery.product) + " - " : ""}${delivery.product}</div>
+      <div><b>Greutate netă:</b> ${formatNumber(qty)} t</div>
+      <div><b>Autovehicul:</b> ${delivery.vehicle || "-"}</div>
+      <div><b>Contract:</b> ${delivery.contractNumber || "-"}</div>
+    </div>
+    <div class="doc-sign"><div>Expeditor</div><div>Transportator</div></div>
+    <div class="doc-sign" style="margin-top:20px;"><div>Destinatar</div><div></div></div>`;
+}
+
+function buildImputernicireHtml(delivery) {
+  const seller = getSellerPartner(delivery);
+  const buyer = getBuyerPartner(delivery);
+  const qty = deliveryQtyTonnes(delivery);
+  return `${docHeader()}
+    <div class="doc-title">Împuternicire</div>
+    <div class="doc-subtitle">${formatDateShort(delivery.invoiceDate || delivery.createdAt)}</div>
+    <p style="font-size:13px;line-height:1.7;margin:16px 0;">
+      Subscrisa <b>${delivery.seller || seller?.name || "________________"}</b>${seller?.idno ? ` (IDNO ${seller.idno})` : ""},
+      reprezentată prin administrator <b>________________________</b>,
+      împuternicește societatea <b>${delivery.customer || buyer?.name || "________________"}</b>${buyer?.idno ? ` (IDNO ${buyer.idno})` : ""},
+      reprezentată prin administrator <b>________________________</b>,
+      pentru transportul mărfii conform unității de transport <b>${delivery.vehicle || "____________"}</b>,
+      în cantitate de <b>${formatNumber(qty)} tone</b> de <b>${delivery.product}</b>,
+      conform datelor din invoice nr. ${delivery.invoiceNumber || "______"} din ${formatDateShort(delivery.invoiceDate || delivery.createdAt)}.
+    </p>
+    <div class="doc-sign"><div>Administrator vânzător</div><div>Administrator cumpărător</div></div>`;
+}
+
+function buildDeclaratieHtml(delivery) {
+  const seller = getSellerPartner(delivery);
+  const buyer = getBuyerPartner(delivery);
+  return `${docHeader()}
+    <div class="doc-title">Declarație</div>
+    <div class="doc-subtitle">${formatDateShort(delivery.invoiceDate || delivery.createdAt)}</div>
+    <p style="font-size:13px;line-height:1.7;margin:16px 0;">
+      Subscrisa <b>${delivery.seller || seller?.name || "________________"}</b>${seller?.idno ? ` (IDNO ${seller.idno})` : ""}${seller?.address ? `, cu sediul în ${seller.address}` : ""},
+      declară că marfa <b>${delivery.product}</b> livrată conform contractului nr. <b>${delivery.contractNumber || "______"}</b>
+      către <b>${delivery.customer || buyer?.name || "________________"}</b>${buyer?.idno ? ` (IDNO ${buyer.idno})` : ""}
+      corespunde condițiilor de calitate și provine din surse legale.
+    </p>
+    <div class="doc-sign"><div>Vânzător</div><div></div></div>`;
+}
+
 function printDeliveryDocument(deliveryId, docType) {
   const delivery = (deliveriesCache || []).find((d) => Number(d.id) === Number(deliveryId));
   if (!delivery) return;
@@ -3785,7 +3900,13 @@ function printDeliveryDocument(deliveryId, docType) {
   if (docType === "invoice") { html = buildInvoicePrintHtml(delivery); title = `Factura ${delivery.invoiceNumber || delivery.id}`; }
   else if (docType === "act") { html = buildPurchaseActPrintHtml(delivery); title = `Act achizitie ${delivery.id}`; }
   else if (docType === "certificate") { html = buildCertificatePrintHtml(delivery); title = `Certificat calitate ${delivery.id}`; }
+  else if (docType === "bon") { html = buildBonCantarHtml(delivery); title = `Bon cantar ${delivery.id}`; }
+  else if (docType === "cmr") { html = buildCmrHtml(delivery); title = `CMR ${delivery.id}`; }
+  else if (docType === "imputernicire") { html = buildImputernicireHtml(delivery); title = `Imputernicire ${delivery.id}`; }
+  else if (docType === "declaratie") { html = buildDeclaratieHtml(delivery); title = `Declaratie ${delivery.id}`; }
   if (html) openPrintWindow(html, title);
+  // Close the print dropdown after choosing
+  document.querySelectorAll(".print-menu[open]").forEach((d) => d.removeAttribute("open"));
 }
 
 // ---- Act de verificare furnizor (Etapa 7) ----
