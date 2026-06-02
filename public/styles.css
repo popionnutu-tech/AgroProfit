@@ -1499,6 +1499,15 @@ dialog.billing-dialog .form-actions { display: flex; gap: 12px; margin-top: 16px
   display: none;
 }
 
+/* #16: la operator (fara coloane financiare) tabelul de livrari incape pe un ecran */
+#deliveries-table.hide-fin {
+  font-size: 0.88rem;
+}
+#deliveries-table.hide-fin th,
+#deliveries-table.hide-fin td {
+  padding: 7px 9px;
+}
+
 /* Reclamație cu sumă diminuată (Modul D) */
 .complaint-minus {
   color: var(--danger);

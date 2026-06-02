@@ -698,16 +698,7 @@ function listOpeningDebtItemsFromDocuments(openingDocuments = []) {
 
 function createStockSummary(receipts, deliveries = [], openingDocuments = [], transfers = [], processings = []) {
   const stockByLocation = new Map();
-  // Livrarile se scad pe PRODUS (nu pe locatia inghetata a receptiei), pentru ca
-  // produsul poate fi mutat intre cilindri prin procesare/transfer dupa receptie.
-  const deliveredByProduct = new Map();
   const openingStockItems = openingDocuments.flatMap((item) => item.stockItems || []);
-
-  for (const item of deliveries) {
-    const qty = Number(item.deliveredQuantity || 0);
-    if (qty <= 0) continue;
-    deliveredByProduct.set(item.product, (deliveredByProduct.get(item.product) || 0) + qty);
-  }
 
   for (const item of openingStockItems) {
     const location = item.location || "Fara locatie";
@@ -826,19 +817,32 @@ function createStockSummary(receipts, deliveries = [], openingDocuments = [], tr
     deliveredQuantity: 0
   }));
 
-  // Scadem cantitatea livrata din stocul produsului, pe locatiile unde se afla
-  // (cele mai pline intai). Astfel livrarea iese din cilindrul real, nu din locatia veche.
-  for (const [product, deliveredTotal] of deliveredByProduct) {
-    let remaining = deliveredTotal;
-    const locs = byLocation
-      .filter((i) => i.product === product && i.quantity > 0)
-      .sort((a, b) => b.quantity - a.quantity);
-    for (const loc of locs) {
-      if (remaining <= 0) break;
-      const take = Math.min(loc.quantity, remaining);
-      loc.quantity -= take;
-      loc.deliveredQuantity += take;
+  // Scadem fiecare livrare livrata: intai din locatia aleasa la livrare, apoi din
+  // celelalte locatii ale produsului (cele mai pline intai) daca acolo nu ajunge —
+  // astfel poarta (pe locatie) si scaderea coincid, dar ramane robust daca produsul
+  // a fost mutat intre timp prin procesare/transfer.
+  for (const d of deliveries) {
+    let remaining = Number(d.deliveredQuantity || 0);
+    if (remaining <= 0) continue;
+    const product = d.product;
+    const primary = byLocation.find((i) => i.location === d.location && i.product === product);
+    if (primary && primary.quantity > 0) {
+      const take = Math.min(primary.quantity, remaining);
+      primary.quantity -= take;
+      primary.deliveredQuantity += take;
       remaining -= take;
+    }
+    if (remaining > 0) {
+      const others = byLocation
+        .filter((i) => i.product === product && i !== primary && i.quantity > 0)
+        .sort((a, b) => b.quantity - a.quantity);
+      for (const loc of others) {
+        if (remaining <= 0) break;
+        const take = Math.min(loc.quantity, remaining);
+        loc.quantity -= take;
+        loc.deliveredQuantity += take;
+        remaining -= take;
+      }
     }
   }
 
@@ -1984,34 +1988,89 @@ async function updateTransaction(id, payload = {}) {
 
 async function createDelivery(payload) {
   const state = readReceiptsState();
-  const receipt = state.receipts.find((item) => item.id === Number(payload.receiptId));
 
-  if (!receipt) {
+  // Doua moduri: pe receptie (vechi) sau pe PRODUS + cilindru sursa (nou, #14).
+  const receipt = payload.receiptId
+    ? state.receipts.find((item) => item.id === Number(payload.receiptId))
+    : null;
+  if (payload.receiptId && !receipt) {
     throw new Error("Receptia selectata nu exista.");
   }
-
-  if (receipt.status === "Inchis") {
+  if (receipt && receipt.status === "Inchis") {
     throw new Error("Receptia este inchisa. Nu se poate crea livrare.");
   }
 
-  const availableQuantity = getReceiptAvailableQuantity(state, payload.receiptId);
-  const plannedQuantity = sanitizeNumber(payload.plannedQuantity ?? payload.deliveredQuantity);
+  const config = readConfigState();
+  const productName = receipt
+    ? receipt.product
+    : payload.product ||
+      (config.products.find((p) => Number(p.id) === Number(payload.productId)) || {}).name ||
+      "";
+  const sourceLocation = receipt
+    ? receipt.location || ""
+    : payload.sourceLocation ||
+      (config.storageLocations.find((l) => Number(l.id) === Number(payload.sourceLocationId)) || {}).name ||
+      "";
 
-  if (plannedQuantity <= 0) {
-    throw new Error("Cantitatea planificata trebuie sa fie mai mare ca zero.");
+  if (!productName) {
+    throw new Error("Selecteaza produsul de livrat.");
+  }
+  if (!sourceLocation) {
+    throw new Error("Selecteaza cilindrul / locatia sursa.");
   }
 
-  if (plannedQuantity > availableQuantity) {
-    throw new Error("Cantitatea planificata depaseste stocul disponibil pentru receptie.");
+  // Masa: brut − tara = net (daca sunt introduse), altfel cantitatea directa.
+  const grossWeight = sanitizeNumber(payload.grossWeight);
+  const tareWeight = sanitizeNumber(payload.tareWeight);
+  const netFromMass = grossWeight > 0 ? Math.max(grossWeight - tareWeight, 0) : 0;
+  const plannedQuantity = sanitizeNumber(
+    payload.plannedQuantity ?? (netFromMass > 0 ? netFromMass : payload.deliveredQuantity)
+  );
+
+  if (plannedQuantity <= 0) {
+    throw new Error("Cantitatea de livrare trebuie sa fie mai mare ca zero.");
+  }
+
+  if (receipt) {
+    const availableQuantity = getReceiptAvailableQuantity(state, payload.receiptId);
+    if (plannedQuantity > availableQuantity) {
+      throw new Error("Cantitatea planificata depaseste stocul disponibil pentru receptie.");
+    }
+  } else {
+    // #14: plafon pe stocul produsului in locatia sursa.
+    const summary = await getStockSummary();
+    const inStock = Number(
+      (summary.byLocation.find(
+        (i) => i.location === sourceLocation && i.product === productName
+      ) || {}).quantity || 0
+    );
+    // Rezervare: livrarile pe produs inca nelivrate (deliveredQuantity 0) nu au scazut
+    // inca stocul, dar sunt deja promise — le scadem ca sa nu promitem mai mult decat exista.
+    const reservedPending = (state.deliveries || [])
+      .filter(
+        (d) =>
+          !d.receiptId &&
+          d.product === productName &&
+          d.location === sourceLocation &&
+          Number(d.deliveredQuantity || 0) === 0 &&
+          ["Proiect", "Confirmat", "Redeschis"].includes(d.status)
+      )
+      .reduce((sum, d) => sum + Number(d.plannedQuantity || 0), 0);
+    const available = inStock - reservedPending;
+    if (plannedQuantity > available) {
+      throw new Error(
+        `Stoc insuficient pentru ${productName} in ${sourceLocation}: disponibil ${available} t (din ${inStock} t, rezervat ${reservedPending} t), cerut ${plannedQuantity} t.`
+      );
+    }
   }
 
   const delivery = {
     id: nextId(state.deliveries),
-    receiptId: Number(payload.receiptId),
+    receiptId: receipt ? Number(payload.receiptId) : null,
     customerId: payload.customerId ? Number(payload.customerId) : null,
     customer: payload.customer || "",
-    product: receipt.product,
-    location: receipt.location || "",
+    product: productName,
+    location: sourceLocation,
     vehicle: payload.vehicle || "",
     contractNumber: payload.contractNumber || "",
     contractDate: payload.contractDate || "",
@@ -2027,9 +2086,9 @@ async function createDelivery(payload) {
     invoiceDate: payload.invoiceDate || "",
     plannedQuantity,
     deliveredQuantity: 0,
-    grossWeight: 0,
-    tareWeight: 0,
-    netWeight: 0,
+    grossWeight,
+    tareWeight,
+    netWeight: netFromMass,
     quantityAtDelivery: 0,
     // Marcaj: livrarea a fost introdusa in kg. Vechile livrari nu au acest camp -> afisate in tone.
     enteredUnit: payload.enteredUnit === "kg" ? "kg" : "tone",
@@ -2050,7 +2109,7 @@ async function createDelivery(payload) {
   }
 
   state.deliveries.push(delivery);
-  recalcReceiptDeliveryState(state, receipt.id);
+  if (receipt) recalcReceiptDeliveryState(state, receipt.id);
 
   createAuditEntry(state, {
     entityType: "delivery",

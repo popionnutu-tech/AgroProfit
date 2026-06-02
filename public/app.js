@@ -127,11 +127,14 @@ const transactionTargetEl = document.getElementById("transaction-target");
 const transactionStatusEl = document.getElementById("transaction-status");
 const deliveryFormEl = document.getElementById("delivery-form");
 const deliveryMessageEl = document.getElementById("delivery-message");
-const deliveryReceiptSelect = document.getElementById("delivery-receipt-select");
+const deliveryProductSelect = document.getElementById("delivery-product-select");
+const deliverySourceSelect = document.getElementById("delivery-source-select");
 const deliveryCustomerSelect = document.getElementById("delivery-customer-select");
-const deliveryQuantityInput = document.getElementById("delivery-quantity-input");
-const deliveryLocationEl = document.getElementById("delivery-location");
+const deliveryGrossInput = document.getElementById("delivery-gross-input");
+const deliveryTareInput = document.getElementById("delivery-tare-input");
+const deliveryVehicleInput = document.getElementById("delivery-vehicle-input");
 const deliveryAvailableEl = document.getElementById("delivery-available");
+const deliveryNetEl = document.getElementById("delivery-net");
 const deliveryStatusPreviewEl = document.getElementById("delivery-status");
 const deliveriesBodyEl = document.getElementById("deliveries-body");
 const deliveryBillingDialog = document.getElementById("delivery-billing-dialog");
@@ -945,7 +948,11 @@ function renderStockPeriod() {
     bucket(procBefore, procIn, p, dayOf(pr.createdAt), loss);
   });
 
-  const rows = Array.from(products).sort((a, b) => String(a).localeCompare(String(b), "ro"));
+  const prodFilterEl = document.getElementById("stock-period-product");
+  const prodFilter = prodFilterEl ? prodFilterEl.value : "";
+  const rows = Array.from(products)
+    .filter((p) => !prodFilter || p === prodFilter)
+    .sort((a, b) => String(a).localeCompare(String(b), "ro"));
   if (!rows.length) {
     body.innerHTML = '<tr><td colspan="6" class="empty-state">Nu există date pentru perioada aleasă.</td></tr>';
     return;
@@ -1526,7 +1533,7 @@ function renderDeliveries(deliveries) {
         <tr>
           <td>#${item.id}</td>
           <td>${formatDateShort(item.createdAt || item.deliveredAt)}</td>
-          <td>#${item.receiptId}</td>
+          <td>${item.location || (item.receiptId ? `#${item.receiptId}` : "-")}</td>
           <td>${item.customer}</td>
           <td class="col-fin">${item.seller || "-"}</td>
           <td>${item.product}</td>
@@ -1893,7 +1900,8 @@ function renderReceiptSelectors(config) {
     processingType: processingTypeSelect.value,
     processingUserId: processingUserSelect.value,
     paymentType: transactionPaymentTypeSelect.value,
-    deliveryReceiptId: deliveryReceiptSelect.value,
+    deliveryProduct: deliveryProductSelect.value,
+    deliverySource: deliverySourceSelect.value,
     deliveryCustomerId: deliveryCustomerSelect.value,
     complaintDeliveryId: complaintDeliverySelect.value
   };
@@ -1994,19 +2002,20 @@ function renderReceiptSelectors(config) {
     "Selecteaza tipul de plata",
     (item) => item.name
   );
+  // Livrare pe PRODUS + cilindru sursa (#14): nu mai pe lot de receptie.
   renderSelectOptions(
-    deliveryReceiptSelect,
-    receiptsCache.filter(
-      (item) =>
-        Number(
-          item.availableQuantity ??
-            item.finalNetQuantity ??
-            item.provisionalNetQuantity ??
-            item.quantity
-        ) > 0
-    ),
-    (item) => `#${item.id} - ${item.product} - ${item.location || "-"}`,
-    "Selecteaza receptia"
+    deliveryProductSelect,
+    config.products,
+    (item) => item.name,
+    "Selecteaza produs",
+    (item) => item.name
+  );
+  renderSelectOptions(
+    deliverySourceSelect,
+    config.storageLocations,
+    (item) => item.name,
+    "Din cilindru / locatie",
+    (item) => item.name
   );
   renderSelectOptions(
     deliveryCustomerSelect,
@@ -2032,21 +2041,9 @@ function renderReceiptSelectors(config) {
   );
   setSelectValue(processingUserSelect, [currentSelections.processingUserId, currentSessionUser?.id, operators[0]?.id]);
   setSelectValue(transactionPaymentTypeSelect, [currentSelections.paymentType, activePaymentType?.name]);
-  setSelectValue(
-    deliveryReceiptSelect,
-    [
-      currentSelections.deliveryReceiptId,
-      receiptsCache.find(
-        (item) =>
-          Number(
-            item.availableQuantity ??
-              item.finalNetQuantity ??
-              item.provisionalNetQuantity ??
-              item.quantity
-          ) > 0
-      )?.id
-    ]
-  );
+  setSelectValue(deliveryProductSelect, [currentSelections.deliveryProduct, config.products[0]?.name]);
+  setSelectValue(deliverySourceSelect, [currentSelections.deliverySource, config.storageLocations[0]?.name]);
+  renderDeliveryPreview();
   setSelectValue(deliveryCustomerSelect, [currentSelections.deliveryCustomerId, customers[0]?.id]);
   setSelectValue(complaintDeliverySelect, [currentSelections.complaintDeliveryId, deliveriesCache[0]?.id]);
 
@@ -2100,6 +2097,17 @@ function renderFilterOptions() {
       '<option value="">Toate produsele</option>',
       ...procProducts.map((name) => `<option value="${name}">${name}</option>`)
     ].join("");
+  }
+
+  // #15a: filtru dupa produs la "Miscare stoc pe perioada".
+  const stockPeriodProductEl = document.getElementById("stock-period-product");
+  if (stockPeriodProductEl) {
+    const prev = stockPeriodProductEl.value;
+    stockPeriodProductEl.innerHTML = [
+      '<option value="">Toate produsele</option>',
+      ...productNames.map((name) => `<option value="${name}">${name}</option>`)
+    ].join("");
+    stockPeriodProductEl.value = productNames.includes(prev) ? prev : "";
   }
 }
 
@@ -3218,16 +3226,23 @@ function validateTransactionForm(formData) {
 }
 
 function validateDeliveryForm(formData) {
-  if (!formData.get("receiptId")) {
-    return "Selecteaza receptia sursa.";
+  if (!formData.get("product")) {
+    return "Selecteaza produsul de livrat.";
+  }
+
+  if (!formData.get("sourceLocation")) {
+    return "Selecteaza cilindrul / locatia sursa.";
   }
 
   if (!formData.get("customerId")) {
     return "Selecteaza cumparatorul.";
   }
 
-  if (Number(formData.get("deliveredQuantity") || 0) <= 0) {
-    return "Cantitatea livrata trebuie sa fie mai mare ca zero.";
+  const gross = Number(formData.get("grossWeight") || 0);
+  const tare = Number(formData.get("tareWeight") || 0);
+  const net = gross > 0 ? Math.max(gross - tare, 0) : Number(formData.get("deliveredQuantity") || 0);
+  if (net <= 0) {
+    return "Introdu masa (brut > tară) sau cantitatea livrată.";
   }
 
   return "";
@@ -3311,7 +3326,8 @@ function resetDeliveryForm(mode = "save") {
     if (el) el.value = value;
   };
   const preservedValues = {
-    receiptId: preserveContext ? deliveryReceiptSelect.value : "",
+    product: preserveContext ? deliveryProductSelect.value : "",
+    sourceLocation: preserveContext ? deliverySourceSelect.value : "",
     customerId: preserveContext ? deliveryCustomerSelect.value : "",
     contractNumber: preserveContext ? fieldValue("contractNumber") : "",
     contractDate: preserveContext ? fieldValue("contractDate") : ""
@@ -3323,19 +3339,21 @@ function resetDeliveryForm(mode = "save") {
   }
 
   if (preserveContext) {
-    setSelectValue(deliveryReceiptSelect, [preservedValues.receiptId]);
+    setSelectValue(deliveryProductSelect, [preservedValues.product]);
+    setSelectValue(deliverySourceSelect, [preservedValues.sourceLocation]);
     setSelectValue(deliveryCustomerSelect, [preservedValues.customerId]);
     setField("contractNumber", preservedValues.contractNumber || "");
     setField("contractDate", preservedValues.contractDate || "");
   }
 
-  setField("deliveredQuantity", "");
+  setField("grossWeight", "");
+  setField("tareWeight", "");
   setField("vehicle", "");
   setField("invoiceNumber", "");
   setField("note", "");
   renderDeliveryPreview();
-  const qtyEl = deliveryFormEl.elements.deliveredQuantity;
-  if (qtyEl) qtyEl.focus();
+  const grossEl = deliveryFormEl.elements.grossWeight;
+  if (grossEl) grossEl.focus();
 }
 
 async function createOpeningDocument(formData) {
@@ -3539,10 +3557,14 @@ function getSelectedDeliveryForTransaction() {
   return deliveriesCache.find((item) => String(item.id) === String(transactionReferenceSelect.value));
 }
 
-function getSelectedReceiptForDelivery() {
-  return receiptsCache.find(
-    (item) => String(item.id) === String(deliveryReceiptSelect.value)
+function getDeliveryAvailable() {
+  const product = deliveryProductSelect.value;
+  const source = deliverySourceSelect.value;
+  if (!product || !source || !lastStockSummary) return 0;
+  const row = (lastStockSummary.byLocation || []).find(
+    (i) => i.location === source && i.product === product
   );
+  return Number(row?.quantity || 0);
 }
 
 function renderTransactionPreview() {
@@ -3587,31 +3609,15 @@ function renderTransactionPreview() {
 }
 
 function renderDeliveryPreview() {
-  const receipt = getSelectedReceiptForDelivery();
-
-  if (!receipt) {
-    deliveryLocationEl.textContent = "-";
-    deliveryAvailableEl.textContent = `${formatNumber(0)} kg`;
-    deliveryStatusPreviewEl.textContent = "Nelivrat";
-    return;
+  const available = getDeliveryAvailable();
+  const gross = Number(deliveryGrossInput?.value || 0);
+  const tare = Number(deliveryTareInput?.value || 0);
+  const netKg = Math.max(gross - tare, 0);
+  if (deliveryAvailableEl) {
+    deliveryAvailableEl.textContent = `${formatNumber(available)} t (${formatNumber(available * 1000)} kg)`;
+    deliveryAvailableEl.style.color = netKg / 1000 > available ? "#b3261e" : "";
   }
-
-  const availableQuantity = Number(
-    receipt.availableQuantity ??
-      receipt.finalNetQuantity ??
-      receipt.provisionalNetQuantity ??
-      receipt.quantity ??
-      0
-  );
-
-  deliveryLocationEl.textContent = receipt.location || "-";
-  // Disponibil: in kg daca receptia sursa a fost introdusa in kg, altfel in tone
-  deliveryAvailableEl.textContent = formatQtyByEntry(availableQuantity, receipt);
-  deliveryStatusPreviewEl.textContent = receipt.deliveryStatus || "Nelivrat";
-
-  if (!deliveryQuantityInput.value) {
-    deliveryQuantityInput.value = availableQuantity > 0 ? String(availableQuantity) : "";
-  }
+  if (deliveryNetEl) deliveryNetEl.textContent = `${formatNumber(netKg)} kg`;
 }
 
 async function createTransaction(formData) {
@@ -3649,7 +3655,13 @@ async function createTransaction(formData) {
 
 async function createDelivery(formData) {
   const payload = Object.fromEntries(formData.entries());
-  // Cantitatea livrata se introduce in kg; intern (stoc, disponibil) e in tone.
+  // Masa (brut/tara) se introduce in kg; intern (stoc) e in tone. Net = brut − tara.
+  if (payload.grossWeight) {
+    payload.grossWeight = String(Number(payload.grossWeight || 0) / 1000);
+  }
+  if (payload.tareWeight) {
+    payload.tareWeight = String(Number(payload.tareWeight || 0) / 1000);
+  }
   if (payload.deliveredQuantity) {
     payload.deliveredQuantity = String(Number(payload.deliveredQuantity || 0) / 1000);
   }
@@ -4120,7 +4132,15 @@ function printDeliveryDocument(deliveryId, docType) {
   let html = "";
   let title = "";
   if (docType === "invoice") { html = buildInvoicePrintHtml(delivery); title = `Factura ${delivery.invoiceNumber || delivery.id}`; }
-  else if (docType === "act") { html = buildPurchaseActPrintHtml(delivery); title = `Act achizitie ${delivery.id}`; }
+  else if (docType === "act") {
+    // Actul de achizitie documenteaza cumpararea de la un furnizor (receptie). Livrarile pe
+    // produs nu au o receptie/furnizor unic, deci documentul nu se poate genera.
+    if (!delivery.receiptId) {
+      alert("Actul de achiziție este disponibil doar pentru livrări legate de o recepție (cu furnizor).");
+      return;
+    }
+    html = buildPurchaseActPrintHtml(delivery); title = `Act achizitie ${delivery.id}`;
+  }
   else if (docType === "certificate") { html = buildCertificatePrintHtml(delivery); title = `Certificat calitate ${delivery.id}`; }
   else if (docType === "bon") { html = buildBonCantarHtml(delivery); title = `Bon cantar ${delivery.id}`; }
   else if (docType === "cmr") { html = buildCmrHtml(delivery); title = `CMR ${delivery.id}`; }
@@ -4373,6 +4393,7 @@ bodyEl?.addEventListener("click", (event) => {
 // Stock period filter (Modul F)
 document.getElementById("stock-period-from")?.addEventListener("change", renderStockPeriod);
 document.getElementById("stock-period-to")?.addEventListener("change", renderStockPeriod);
+document.getElementById("stock-period-product")?.addEventListener("change", renderStockPeriod);
 processingTypeFilterEl.addEventListener("change", () => renderProcessings(processingsCache));
 processingProductFilterEl?.addEventListener("change", () => renderProcessings(processingsCache));
 processingDateFromEl?.addEventListener("change", () => renderProcessings(processingsCache));
@@ -4406,10 +4427,10 @@ transactionReferenceSelect.addEventListener("change", () => {
 openReceiptStatusFilterEl.addEventListener("change", renderOpenJournal);
 openDeliveryStatusFilterEl.addEventListener("change", renderOpenJournal);
 openPartnerFilterEl.addEventListener("input", renderOpenJournal);
-deliveryReceiptSelect.addEventListener("change", () => {
-  deliveryQuantityInput.value = "";
-  renderDeliveryPreview();
-});
+deliveryProductSelect.addEventListener("change", renderDeliveryPreview);
+deliverySourceSelect.addEventListener("change", renderDeliveryPreview);
+deliveryGrossInput.addEventListener("input", renderDeliveryPreview);
+deliveryTareInput.addEventListener("input", renderDeliveryPreview);
 addOpeningStockButton.addEventListener("click", () => {
   const product = currentConfig.products.find(
     (item) => String(item.id) === String(openingStockProductEl.value)

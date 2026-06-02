@@ -837,6 +837,7 @@
           <div class="inline-date-filter">
             <label>De la<input type="date" id="stock-period-from" /></label>
             <label>Pana la<input type="date" id="stock-period-to" /></label>
+            <label>Produs<select id="stock-period-product"><option value="">Toate produsele</option></select></label>
           </div>
           <div class="table-wrap">
             <table>
@@ -966,51 +967,57 @@
               </div>
             <input type="hidden" name="status" value="Confirmat" />
 
-            <label>
-              Receptie sursa
-              <select name="receiptId" id="delivery-receipt-select" required></select>
-            </label>
+            <div class="split">
+              <label>
+                Produs
+                <select name="product" id="delivery-product-select" required></select>
+              </label>
+              <label>
+                Din cilindru / locatie
+                <select name="sourceLocation" id="delivery-source-select" required></select>
+              </label>
+            </div>
 
             <label>
               Cumparator
               <select name="customerId" id="delivery-customer-select" required></select>
             </label>
 
+            <label>
+              Mașină (nr.)
+              <input name="vehicle" id="delivery-vehicle-input" list="vehicles-datalist" placeholder="Ex: AG-102" />
+              <datalist id="vehicles-datalist"></datalist>
+              <small class="field-hint">Numărul mașinii care a încărcat.</small>
+            </label>
+
             <div class="split">
               <label>
-                Cantitate livrată (kg)
-                <input name="deliveredQuantity" id="delivery-quantity-input" type="number" min="0" step="1" required placeholder="ex: 40000" />
+                Masă brută (kg)
+                <input name="grossWeight" id="delivery-gross-input" type="number" min="0" step="1" placeholder="camion + marfă" />
               </label>
-              <div></div>
+              <label>
+                Masă camion / tară (kg)
+                <input name="tareWeight" id="delivery-tare-input" type="number" min="0" step="1" placeholder="camion gol" />
+              </label>
             </div>
 
-            <details class="optional-fields">
-              <summary>Detalii livrare (mașină, observații)</summary>
-              <div class="split">
-                <label>
-                  Mașină (nr.)
-                  <input name="vehicle" list="vehicles-datalist" placeholder="Ex: AG-102" />
-                  <datalist id="vehicles-datalist"></datalist>
-                </label>
-                <label>
-                  Observații
-                  <input name="note" placeholder="Comentariu livrare" />
-                </label>
-              </div>
-              <p class="field-hint" data-access="finance">Datele pentru factură (vânzător, preț, valută, curs) se completează din butonul „Date factură" din lista de livrări recente.</p>
-            </details>
+            <label>
+              Observații
+              <input name="note" placeholder="Comentariu livrare" />
+            </label>
+            <p class="field-hint" data-access="finance">Datele pentru factură (vânzător, preț, valută, curs) se completează din butonul „Date factură" din lista de livrări recente.</p>
 
             <section class="estimate-panel">
               <div class="estimate-card">
-                <span>Locatie</span>
-                <strong id="delivery-location">-</strong>
-              </div>
-              <div class="estimate-card">
-                <span>Disponibil</span>
+                <span>Disponibil în sursă</span>
                 <strong id="delivery-available">0</strong>
               </div>
               <div class="estimate-card estimate-card-accent">
-                <span>Status livrare</span>
+                <span>Masă netă (livrată)</span>
+                <strong id="delivery-net">0</strong>
+              </div>
+              <div class="estimate-card">
+                <span>Status</span>
                 <strong id="delivery-status">Nelivrat</strong>
               </div>
             </section>
@@ -1039,7 +1046,7 @@
                   <tr>
                     <th>ID</th>
                     <th>Data</th>
-                    <th>Receptie</th>
+                    <th>Sursă</th>
                     <th>Cumparator</th>
                     <th class="col-fin">Vanzator</th>
                     <th>Produs</th>
