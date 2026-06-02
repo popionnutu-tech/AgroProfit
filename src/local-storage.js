@@ -1884,11 +1884,15 @@ async function createDelivery(payload) {
     contractNumber: payload.contractNumber || "",
     contractDate: payload.contractDate || "",
     contractPrice: sanitizeNumber(payload.contractPrice),
-    // Câmpuri de facturare (introduse de contabil) — Etapa 4
+    // Câmpuri de facturare (introduse de contabil) — Etapa 4 + Modul B
     seller: payload.seller || "",
-    priceLei: sanitizeNumber(payload.priceLei),
+    sellerId: payload.sellerId ? Number(payload.sellerId) : null,
     priceForeign: sanitizeNumber(payload.priceForeign),
     currency: String(payload.currency || "MDL").trim().toUpperCase() || "MDL",
+    exchangeRate: sanitizeNumber(payload.exchangeRate) || (String(payload.currency || "MDL").toUpperCase() === "MDL" ? 1 : 0),
+    // priceLei calculat din preț valută × curs (sau direct dacă MDL)
+    priceLei: sanitizeNumber(payload.priceForeign) * (sanitizeNumber(payload.exchangeRate) || (String(payload.currency || "MDL").toUpperCase() === "MDL" ? 1 : 0)) || sanitizeNumber(payload.priceLei),
+    invoiceDate: payload.invoiceDate || "",
     plannedQuantity,
     deliveredQuantity: 0,
     grossWeight: 0,
@@ -2119,6 +2123,15 @@ async function updateDelivery(id, payload = {}) {
   if (payload.currency !== undefined) {
     delivery.currency = String(payload.currency || "MDL").trim().toUpperCase() || "MDL";
   }
+  if (payload.exchangeRate !== undefined) {
+    delivery.exchangeRate = sanitizeNumber(payload.exchangeRate);
+  }
+  if (payload.sellerId !== undefined) {
+    delivery.sellerId = payload.sellerId ? Number(payload.sellerId) : null;
+  }
+  if (payload.invoiceDate !== undefined) {
+    delivery.invoiceDate = String(payload.invoiceDate || "").trim();
+  }
   if (payload.contractNumber !== undefined) {
     delivery.contractNumber = String(payload.contractNumber || "").trim();
   }
@@ -2127,6 +2140,18 @@ async function updateDelivery(id, payload = {}) {
   }
   if (payload.vehicle !== undefined) {
     delivery.vehicle = String(payload.vehicle || "").trim();
+  }
+  // Recompute priceLei = preț valută × curs (if both present)
+  if (payload.priceForeign !== undefined || payload.exchangeRate !== undefined) {
+    const pf = Number(delivery.priceForeign || 0);
+    const rate = Number(delivery.exchangeRate || (delivery.currency === "MDL" ? 1 : 0));
+    if (pf > 0 && rate > 0) {
+      delivery.priceLei = pf * rate;
+    } else if (payload.priceLei !== undefined) {
+      delivery.priceLei = sanitizeNumber(payload.priceLei);
+    }
+  } else if (payload.priceLei !== undefined) {
+    delivery.priceLei = sanitizeNumber(payload.priceLei);
   }
 
   delivery.updatedAt = new Date().toISOString();

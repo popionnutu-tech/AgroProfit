@@ -1356,20 +1356,41 @@ function renderDeliveryTotals(rows) {
     deliveriesFootEl.innerHTML = "";
     return;
   }
+  // Modul B: totaluri cu sumă în valută și în lei, pe produs
   const byProduct = {};
   let totalQty = 0;
+  let totalLei = 0;
+  const totalForeignByCur = {};
   rows.forEach((item) => {
     const qty = deliveryDisplayQuantity(item);
     totalQty += qty;
+    const lei = qty * Number(item.priceLei || 0);
+    const cur = item.currency || "MDL";
+    const foreign = qty * Number(item.priceForeign || 0);
+    totalLei += lei;
+    if (cur !== "MDL") totalForeignByCur[cur] = (totalForeignByCur[cur] || 0) + foreign;
     const key = item.product || "—";
-    byProduct[key] = (byProduct[key] || 0) + qty;
+    if (!byProduct[key]) byProduct[key] = { qty: 0, lei: 0, foreign: {} };
+    byProduct[key].qty += qty;
+    byProduct[key].lei += lei;
+    if (cur !== "MDL") byProduct[key].foreign[cur] = (byProduct[key].foreign[cur] || 0) + foreign;
   });
+  const fin = canAccess("finance");
+  const foreignStr = Object.entries(totalForeignByCur).map(([c, v]) => `${formatNumber(v)} ${c}`).join(" + ");
   const perProduct = Object.entries(byProduct)
-    .map(([prod, qty]) => `${prod}: ${formatNumber(qty)} t`)
-    .join(" · ");
+    .map(([prod, v]) => {
+      const fStr = Object.entries(v.foreign).map(([c, val]) => `${formatNumber(val)} ${c}`).join(" + ");
+      return fin
+        ? `${prod}: ${formatNumber(v.qty)} t${fStr ? " / " + fStr : ""} / ${currency.format(v.lei)}`
+        : `${prod}: ${formatNumber(v.qty)} t`;
+    })
+    .join("  ·  ");
+  const finPart = fin
+    ? `&nbsp;·&nbsp; ${foreignStr ? "Valută: <b>" + foreignStr + "</b> · " : ""}Lei: <b>${currency.format(totalLei)}</b>`
+    : "";
   deliveriesFootEl.innerHTML = `
     <tr class="totals-row">
-      <td colspan="10">TOTAL (${rows.length} livrări) &nbsp;·&nbsp; Cantitate: <b>${formatNumber(totalQty)} t</b> &nbsp;·&nbsp; ${perProduct}</td>
+      <td colspan="10">TOTAL (${rows.length} livrări) &nbsp;·&nbsp; Cantitate: <b>${formatNumber(totalQty)} t</b>${finPart}<br>${perProduct}</td>
     </tr>
   `;
 }
@@ -4377,22 +4398,39 @@ if (deliveryBillingDialog && deliveryBillingForm) {
     const delivery = deliveriesCache.find((item) => String(item.id) === String(id));
     if (!delivery) return;
     const f = deliveryBillingForm;
+    // Populate seller select from nomenclator (partners)
+    const sellerSelect = document.getElementById("billing-seller-select");
+    if (sellerSelect) {
+      const partners = (currentConfig?.partners || []);
+      sellerSelect.innerHTML = '<option value="">— alege vânzător —</option>' +
+        partners.map((p) => `<option value="${p.id}">${p.name}</option>`).join("");
+      if (delivery.sellerId) sellerSelect.value = String(delivery.sellerId);
+    }
     f.elements.id.value = delivery.id;
-    f.elements.seller.value = delivery.seller || "";
     f.elements.invoiceNumber.value = delivery.invoiceNumber || "";
+    f.elements.invoiceDate.value = delivery.invoiceDate || "";
     f.elements.contractNumber.value = delivery.contractNumber || "";
     f.elements.contractDate.value = delivery.contractDate || "";
-    f.elements.priceLei.value = delivery.priceLei || "";
     f.elements.priceForeign.value = delivery.priceForeign || "";
+    f.elements.exchangeRate.value = delivery.exchangeRate || "";
     f.elements.currency.value = delivery.currency || "MDL";
     f.elements.vehicle.value = delivery.vehicle || "";
     f.elements.note.value = delivery.note || "";
+    updateBillingPriceLei();
     const idLabel = document.getElementById("billing-delivery-id");
     if (idLabel) idLabel.textContent = `#${delivery.id}`;
     const msg = document.getElementById("billing-message");
     if (msg) msg.textContent = "";
     deliveryBillingDialog.showModal();
   });
+
+  // Live calculation: preț lei = preț valută × curs
+  const billingPriceForeign = document.getElementById("billing-price-foreign");
+  const billingExchangeRate = document.getElementById("billing-exchange-rate");
+  const billingCurrencySelect = document.getElementById("billing-currency-select");
+  billingPriceForeign?.addEventListener("input", updateBillingPriceLei);
+  billingExchangeRate?.addEventListener("input", updateBillingPriceLei);
+  billingCurrencySelect?.addEventListener("change", updateBillingPriceLei);
 
   const billingCancelBtn = document.getElementById("billing-cancel-btn");
   if (billingCancelBtn) {
@@ -4403,13 +4441,20 @@ if (deliveryBillingDialog && deliveryBillingForm) {
     event.preventDefault();
     const f = deliveryBillingForm;
     const id = f.elements.id.value;
+    const sellerSelect = document.getElementById("billing-seller-select");
+    const sellerId = sellerSelect ? sellerSelect.value : "";
+    const sellerName = sellerSelect && sellerSelect.selectedIndex >= 0
+      ? sellerSelect.options[sellerSelect.selectedIndex].text.replace("— alege vânzător —", "")
+      : "";
     const payload = {
-      seller: f.elements.seller.value,
+      sellerId: sellerId || null,
+      seller: sellerName,
       invoiceNumber: f.elements.invoiceNumber.value,
+      invoiceDate: f.elements.invoiceDate.value,
       contractNumber: f.elements.contractNumber.value,
       contractDate: f.elements.contractDate.value,
-      priceLei: f.elements.priceLei.value,
       priceForeign: f.elements.priceForeign.value,
+      exchangeRate: f.elements.exchangeRate.value,
       currency: f.elements.currency.value,
       vehicle: f.elements.vehicle.value,
       note: f.elements.note.value,
@@ -4426,6 +4471,15 @@ if (deliveryBillingDialog && deliveryBillingForm) {
       if (msg) msg.textContent = error.message;
     }
   });
+}
+
+function updateBillingPriceLei() {
+  const pf = Number(document.getElementById("billing-price-foreign")?.value || 0);
+  const rate = Number(document.getElementById("billing-exchange-rate")?.value || 0);
+  const cur = document.getElementById("billing-currency-select")?.value || "MDL";
+  const lei = cur === "MDL" ? pf : pf * rate;
+  const el = document.getElementById("billing-price-lei");
+  if (el) el.textContent = currency.format(lei || 0);
 }
 
 complaintsBodyEl.addEventListener("change", async (event) => {

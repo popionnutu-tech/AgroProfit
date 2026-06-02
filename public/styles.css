@@ -1471,6 +1471,21 @@ dialog.billing-dialog .form-actions { display: flex; gap: 12px; margin-top: 16px
   display: none;
 }
 
+/* Billing modal computed price (Modul B) */
+.billing-computed {
+  background: rgba(27, 94, 63, 0.06);
+  border: 1px solid rgba(27, 94, 63, 0.16);
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+  margin: 2px 0;
+}
+.billing-computed strong {
+  color: var(--accent-deep);
+  font-size: 1rem;
+}
+
 /* Payment status badges (Modul Achitări) */
 .pay-badge {
   display: inline-block;
