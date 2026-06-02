@@ -1579,6 +1579,19 @@ dialog.billing-dialog .form-actions { display: flex; gap: 12px; margin-top: 16px
   letter-spacing: 0.02em;
 }
 
+.table-wrap tfoot .totals-sub td {
+  background: rgba(27, 94, 63, 0.03);
+  border-top: 1px solid rgba(27, 94, 63, 0.1);
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.table-wrap tfoot .totals-neproc td {
+  background: rgba(176, 136, 40, 0.1);
+  border-top: 1px solid rgba(176, 136, 40, 0.2);
+  color: var(--accent-2);
+}
+
 @media (max-width: 640px) {
   .inline-date-filter input[type="date"] {
     font-size: 16px;

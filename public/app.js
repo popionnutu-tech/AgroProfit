@@ -100,7 +100,7 @@ const unprocessedStockBodyEl = document.getElementById("unprocessed-stock-body")
 const eodBanner = document.getElementById("eod-processing-banner");
 const eodConfirmBtn = document.getElementById("eod-confirm-btn");
 const processingTypeFilterEl = document.getElementById("processing-type-filter");
-const processingReceiptFilterEl = document.getElementById("processing-receipt-filter");
+const processingProductFilterEl = document.getElementById("processing-product-filter");
 const processingDateFromEl = document.getElementById("processing-date-from");
 const processingDateToEl = document.getElementById("processing-date-to");
 const processingsFootEl = document.getElementById("processings-foot");
@@ -1135,10 +1135,10 @@ function renderProcessings(processings) {
   const filteredProcessings = processings.filter((item) => {
     const typeMatch =
       !processingTypeFilterEl.value || item.processingType === processingTypeFilterEl.value;
-    const receiptMatch =
-      !processingReceiptFilterEl.value || String(item.receiptId) === processingReceiptFilterEl.value;
+    const productMatch =
+      !processingProductFilterEl || !processingProductFilterEl.value || item.product === processingProductFilterEl.value;
     const dateMatch = withinDateRange(item, ["createdAt", "processedAt"], processingDateFromEl, processingDateToEl);
-    return typeMatch && receiptMatch && dateMatch;
+    return typeMatch && productMatch && dateMatch;
   });
 
   processingsBodyEl.innerHTML = filteredProcessings
@@ -1177,7 +1177,7 @@ function renderProcessingTotals(rows) {
     processingsFootEl.innerHTML = "";
     return;
   }
-  // Total per product: processed, waste, remaining (final net)
+  // Total per product: processed, waste, remaining (Modul C)
   const byProduct = {};
   let totProcessed = 0;
   let totWaste = 0;
@@ -1195,14 +1195,49 @@ function renderProcessingTotals(rows) {
     byProduct[key].waste += waste;
     byProduct[key].fin += fin;
   });
-  const perProduct = Object.entries(byProduct)
-    .map(([prod, v]) => `${prod}: ${formatNumber(v.proc)} proc / ${formatNumber(v.waste)} deșeu / ${formatNumber(v.fin)} rămas`)
-    .join("  ·  ");
-  processingsFootEl.innerHTML = `
+
+  // Cantitate neprocesată = net recepționat (fără Anulat) − procesat, pe produs
+  const receivedByProduct = {};
+  (receiptsCache || []).forEach((r) => {
+    if (r.status === "Anulat") return;
+    const key = r.product || "—";
+    receivedByProduct[key] = (receivedByProduct[key] || 0) + Number(r.provisionalNetQuantity || r.quantity || 0);
+  });
+
+  // General total row
+  let html = `
     <tr class="totals-row">
-      <td colspan="9">TOTAL (${rows.length}) &nbsp;·&nbsp; Procesat: <b>${formatNumber(totProcessed)}</b> · Deșeu: <b>${formatNumber(totWaste)}</b> · Rămas: <b>${formatNumber(totFinal)}</b> &nbsp;·&nbsp; ${perProduct}</td>
-    </tr>
-  `;
+      <td colspan="5">TOTAL GENERAL (${rows.length} procesări)</td>
+      <td>${formatNumber(totProcessed)}</td>
+      <td>${formatNumber(totWaste)}</td>
+      <td>${formatNumber(totFinal)}</td>
+    </tr>`;
+  // One row per product
+  Object.entries(byProduct).forEach(([prod, v]) => {
+    html += `
+      <tr class="totals-row totals-sub">
+        <td colspan="5">${prod}</td>
+        <td>${formatNumber(v.proc)}</td>
+        <td>${formatNumber(v.waste)}</td>
+        <td>${formatNumber(v.fin)}</td>
+      </tr>`;
+  });
+  // Neprocesat row(s)
+  const neprocList = Object.entries(receivedByProduct)
+    .map(([prod, received]) => {
+      const procesat = (byProduct[prod] && byProduct[prod].proc) || 0;
+      const neproc = Math.max(received - procesat, 0);
+      return neproc > 0.001 ? `${prod}: ${formatNumber(neproc)} t` : null;
+    })
+    .filter(Boolean)
+    .join(" · ");
+  if (neprocList) {
+    html += `
+      <tr class="totals-row totals-neproc">
+        <td colspan="8">Neprocesat (recepționat dar încă neprocesat): ${neprocList}</td>
+      </tr>`;
+  }
+  processingsFootEl.innerHTML = html;
 }
 
 function renderTransactions(transactions) {
@@ -1850,10 +1885,16 @@ function renderFilterOptions() {
     ...processingTypes.map((name) => `<option value="${name}">${name}</option>`)
   ].join("");
 
-  processingReceiptFilterEl.innerHTML = [
-    '<option value="">Toate receptiile</option>',
-    ...processingReceipts.map((id) => `<option value="${id}">#${id}</option>`)
-  ].join("");
+  // Filtru dupa produs la procesare (Modul C) — produse din procesari sau din receptii
+  if (processingProductFilterEl) {
+    const procProducts = Array.from(
+      new Set([...processingsCache.map((p) => p.product), ...productNames].filter(Boolean))
+    ).sort((a, b) => String(a).localeCompare(String(b), "ro"));
+    processingProductFilterEl.innerHTML = [
+      '<option value="">Toate produsele</option>',
+      ...procProducts.map((name) => `<option value="${name}">${name}</option>`)
+    ].join("");
+  }
 }
 
 // Column schema for each Nomenclator entity (Excel/1C-style table view)
@@ -3973,7 +4014,7 @@ bodyEl?.addEventListener("click", (event) => {
   prefillReceiptPayment(btn.dataset.achita);
 });
 processingTypeFilterEl.addEventListener("change", () => renderProcessings(processingsCache));
-processingReceiptFilterEl.addEventListener("change", () => renderProcessings(processingsCache));
+processingProductFilterEl?.addEventListener("change", () => renderProcessings(processingsCache));
 processingDateFromEl?.addEventListener("change", () => renderProcessings(processingsCache));
 processingDateToEl?.addEventListener("change", () => renderProcessings(processingsCache));
 deliveryDateFromEl?.addEventListener("change", () => renderDeliveries(deliveriesCache));
