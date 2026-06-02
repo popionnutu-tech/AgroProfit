@@ -2,7 +2,6 @@ const {
   createProcessing,
   getConfig,
   listProcessings,
-  listReceipts,
   updateProcessing
 } = require("./storage");
 const { getActorLabel } = require("./auth");
@@ -35,20 +34,16 @@ async function createProcessingHandler(req, res) {
   const body = getBody(req);
   const actor = getActorLabel(req);
 
-  if (!body.receiptId || !body.processingType || !body.processedQuantity) {
+  const hasProduct = body.product || body.productId;
+  const hasSource = body.sourceLocation || body.sourceLocationId;
+  if (!hasProduct || !hasSource || !body.processingType || !body.processedQuantity) {
     return sendJson(res, 400, {
-      error: "Campurile receiptId, processingType si processedQuantity sunt obligatorii."
+      error: "Campurile produs, locatie sursa, tip procesare si cantitate sunt obligatorii."
     });
   }
 
   try {
-    const [receipts, config] = await Promise.all([listReceipts(), getConfig()]);
-    const receipt = receipts.find((item) => item.id === Number(body.receiptId));
-
-    if (!receipt) {
-      return sendJson(res, 404, { error: "Receptia nu a fost gasita." });
-    }
-
+    const config = await getConfig();
     const processingType = config.processingTypes.find(
       (item) => item.name === body.processingType && item.active
     );
@@ -57,22 +52,15 @@ async function createProcessingHandler(req, res) {
       return sendJson(res, 400, { error: "Tipul de procesare nu este valid." });
     }
 
-    const processedQuantity = Number(body.processedQuantity || 0);
-    const confirmedWaste = Number(body.confirmedWaste || 0);
-    const finalNetQuantity = Math.max(processedQuantity - confirmedWaste, 0);
-
     const processing = await createProcessing({
       ...body,
-      product: receipt.product,
-      sourceLocation: receipt.location,
-      createdBy: actor,
-      finalNetQuantity
+      createdBy: actor
     });
 
     return sendJson(res, 201, processing);
   } catch (error) {
     console.error("Failed to create processing:", error.message);
-    return sendJson(res, 500, { error: "Nu am putut salva procesarea." });
+    return sendJson(res, 400, { error: error.message || "Nu am putut salva procesarea." });
   }
 }
 

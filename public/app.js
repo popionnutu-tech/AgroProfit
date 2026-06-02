@@ -68,15 +68,19 @@ const estimateImpurityNormEl = document.getElementById("estimate-impurity-norm")
 const estimateNetEl = document.getElementById("estimate-net");
 const estimateServicesEl = document.getElementById("estimate-services");
 const estimatePayableEl = document.getElementById("estimate-payable");
-const processingReceiptSelect = document.getElementById("processing-receipt-select");
+const processingProductSelect = document.getElementById("processing-product-select");
+const processingSourceSelect = document.getElementById("processing-source-select");
+const processingDestSelect = document.getElementById("processing-dest-select");
 const processingTypeSelect = document.getElementById("processing-type-select");
 const processingUserSelect = document.getElementById("processing-user-select");
 const processedQuantityInput = document.getElementById("processed-quantity-input");
 const confirmedWasteInput = document.getElementById("confirmed-waste-input");
-const processingSourceEl = document.getElementById("processing-source");
-const processingProvisionalNetEl = document.getElementById("processing-provisional-net");
+const processingInitialHumidityInput = document.getElementById("processing-initial-humidity");
+const processingFinalHumidityInput = document.getElementById("processing-final-humidity");
+const processingAvailableEl = document.getElementById("processing-available");
+const processingWaterEl = document.getElementById("processing-water");
 const processingFinalNetEl = document.getElementById("processing-final-net");
-const processingLotInput = document.getElementById("processing-lot-input");
+const processingInlucruBtn = document.getElementById("processing-inlucru-btn");
 const transferFormEl = document.getElementById("transfer-form");
 const transferProductSelect = document.getElementById("transfer-product-select");
 const transferFromSelect = document.getElementById("transfer-from-select");
@@ -900,48 +904,65 @@ function renderStockPeriod() {
     });
   });
 
-  // Receipts (skip Anulat)
+  const inPeriod = (day) => (!from || day >= from) && (!to || day <= to);
   const recBefore = {}, recIn = {};
+  const procBefore = {}, procIn = {};
+  const delBefore = {}, delIn = {};
+  const bucket = (beforeObj, inObj, p, day, qty) => {
+    if (!(qty > 0)) return;
+    if (from && day < from) beforeObj[p] = (beforeObj[p] || 0) + qty;
+    else if (inPeriod(day)) inObj[p] = (inObj[p] || 0) + qty;
+  };
+
+  // Receptii (cantitate bruta de intrare) + pierderi de la procesarile vechi (receptie procesata)
   (receiptsCache || []).forEach((r) => {
     if (r.status === "Anulat") return;
     const p = r.product || "—";
     products.add(p);
-    const qty = Number(r.provisionalNetQuantity || r.quantity || 0);
+    const provNet = Number(r.provisionalNetQuantity || r.quantity || 0);
     const day = dayOf(r.createdAt || r.receivedAt);
-    if (from && day < from) recBefore[p] = (recBefore[p] || 0) + qty;
-    else if ((!from || day >= from) && (!to || day <= to)) recIn[p] = (recIn[p] || 0) + qty;
-    else if (!from && (!to || day <= to)) recIn[p] = (recIn[p] || 0) + qty;
+    bucket(recBefore, recIn, p, day, provNet);
+    const finalNet = r.finalNetQuantity != null ? Number(r.finalNetQuantity) : provNet;
+    bucket(procBefore, procIn, p, day, Math.max(provNet - finalNet, 0));
   });
 
-  // Deliveries
-  const delBefore = {}, delIn = {};
+  // Livrari: doar ce a iesit REAL din stoc (deliveredQuantity = statut Livrat),
+  // ca sa coincida cu stocul real.
   (deliveriesCache || []).forEach((d) => {
     if (d.status === "Anulat") return;
     const p = d.product || "—";
     products.add(p);
-    const qty = deliveryDisplayQuantity(d);
-    const day = dayOf(d.createdAt || d.deliveredAt);
-    if (from && day < from) delBefore[p] = (delBefore[p] || 0) + qty;
-    else if ((!from || day >= from) && (!to || day <= to)) delIn[p] = (delIn[p] || 0) + qty;
-    else if (!from && (!to || day <= to)) delIn[p] = (delIn[p] || 0) + qty;
+    bucket(delBefore, delIn, p, dayOf(d.deliveredAt || d.createdAt), Number(d.deliveredQuantity || 0));
+  });
+
+  // Pierderi la procesarile noi (model miscare): intrare − iesire = deseu + apa.
+  (processingsCache || []).forEach((pr) => {
+    if (!pr || pr.movement !== true) return;
+    if (pr.status === "Anulat" || pr.status === "In lucru") return;
+    const p = pr.product || "—";
+    products.add(p);
+    const loss = Math.max(Number(pr.processedQuantity || 0) - Number(pr.outputQuantity ?? pr.finalNetQuantity ?? 0), 0);
+    bucket(procBefore, procIn, p, dayOf(pr.createdAt), loss);
   });
 
   const rows = Array.from(products).sort((a, b) => String(a).localeCompare(String(b), "ro"));
   if (!rows.length) {
-    body.innerHTML = '<tr><td colspan="5" class="empty-state">Nu există date pentru perioada aleasă.</td></tr>';
+    body.innerHTML = '<tr><td colspan="6" class="empty-state">Nu există date pentru perioada aleasă.</td></tr>';
     return;
   }
-  let tInit = 0, tRec = 0, tDel = 0, tFin = 0;
+  let tInit = 0, tRec = 0, tProc = 0, tDel = 0, tFin = 0;
   body.innerHTML = rows.map((p) => {
-    const init = (opening[p] || 0) + (recBefore[p] || 0) - (delBefore[p] || 0);
+    const init = (opening[p] || 0) + (recBefore[p] || 0) - (delBefore[p] || 0) - (procBefore[p] || 0);
     const rec = recIn[p] || 0;
+    const proc = procIn[p] || 0;
     const del = delIn[p] || 0;
-    const fin = init + rec - del;
-    tInit += init; tRec += rec; tDel += del; tFin += fin;
+    const fin = init + rec - proc - del;
+    tInit += init; tRec += rec; tProc += proc; tDel += del; tFin += fin;
     return `<tr>
       <td>${p}</td>
       <td>${formatNumber(init)}</td>
       <td>${formatNumber(rec)}</td>
+      <td>${formatNumber(proc)}</td>
       <td>${formatNumber(del)}</td>
       <td><b>${formatNumber(fin)}</b></td>
     </tr>`;
@@ -950,6 +971,7 @@ function renderStockPeriod() {
       <td>TOTAL</td>
       <td>${formatNumber(tInit)}</td>
       <td>${formatNumber(tRec)}</td>
+      <td>${formatNumber(tProc)}</td>
       <td>${formatNumber(tDel)}</td>
       <td>${formatNumber(tFin)}</td>
     </tr>`;
@@ -1240,26 +1262,39 @@ function checkEndOfDayProcessing() {
 }
 
 // Stoc neprocesat pe produs: receptii care inca nu au fost procesate.
+// Stoc neprocesat = cat s-a receptionat minus cat s-a dat la procesare, pe produs.
 function renderUnprocessedStock() {
   if (!unprocessedStockBodyEl) return;
-  const byProduct = {};
+  const received = {};
+  const counts = {};
   receiptsCache.forEach((r) => {
-    if (r.status === "Procesata" || r.status === "Anulat") return;
-    const net = Number(r.provisionalNetQuantity ?? r.quantity ?? 0);
+    if (r.status === "Anulat") return;
     const key = r.product || "—";
-    if (!byProduct[key]) byProduct[key] = { tons: 0, count: 0 };
-    byProduct[key].tons += net;
-    byProduct[key].count += 1;
+    received[key] = (received[key] || 0) + Number(r.provisionalNetQuantity ?? r.quantity ?? 0);
+    counts[key] = (counts[key] || 0) + 1;
   });
-  const rows = Object.entries(byProduct).sort((a, b) => b[1].tons - a[1].tons);
+  const processed = {};
+  (processingsCache || []).forEach((p) => {
+    if (!p || p.status === "Anulat" || p.status === "In lucru") return;
+    const key = p.product || "—";
+    processed[key] = (processed[key] || 0) + Number(p.processedQuantity || 0);
+  });
+  const rows = Object.keys(received)
+    .map((prod) => ({
+      prod,
+      tons: Math.max(received[prod] - (processed[prod] || 0), 0),
+      count: counts[prod] || 0
+    }))
+    .filter((r) => r.tons > 0.0001)
+    .sort((a, b) => b.tons - a.tons);
   if (!rows.length) {
     unprocessedStockBodyEl.innerHTML = '<tr><td colspan="4">Tot stocul recepționat este procesat.</td></tr>';
     return;
   }
   unprocessedStockBodyEl.innerHTML = rows
     .map(
-      ([prod, v]) =>
-        `<tr><td>${prod}</td><td>${formatNumber(v.tons)} t</td><td>${formatNumber(v.tons * 1000)} kg</td><td>${v.count}</td></tr>`
+      (v) =>
+        `<tr><td>${v.prod}</td><td>${formatNumber(v.tons)} t</td><td>${formatNumber(v.tons * 1000)} kg</td><td>${v.count}</td></tr>`
     )
     .join("");
 }
@@ -1282,15 +1317,15 @@ function renderProcessings(processings) {
           <td>#${item.id}</td>
           <td>${formatDateShort(item.createdAt || item.processedAt)}</td>
           <td>${item.product}</td>
-          <td>${item.lot || "-"}</td>
-          <td>#${item.receiptId}</td>
+          <td>${item.sourceLocation || "-"}</td>
+          <td>${item.destLocation || item.sourceLocation || "-"}</td>
           <td>${item.processingType}</td>
           <td>${formatNumber(item.processedQuantity)}</td>
           <td>${formatNumber(item.confirmedWaste)}</td>
           <td>
-            <div>${formatNumber(item.finalNetQuantity)}</div>
+            <div>${formatNumber(item.outputQuantity ?? item.finalNetQuantity)}</div>
             <select class="processing-status" data-id="${item.id}" ${canEditStatuses ? "" : "disabled"}>
-              ${["Confirmat", "Inchis", "Anulat", "Redeschis"].map((status) => {
+              ${["Confirmat", "In lucru", "Inchis", "Anulat", "Redeschis"].map((status) => {
                 const selected = item.status === status ? "selected" : "";
                 return `<option value="${status}" ${selected}>${status}</option>`;
               }).join("")}
@@ -1852,7 +1887,9 @@ function renderReceiptSelectors(config) {
     productId: productSelect.value,
     locationId: locationSelect.value,
     receivedBy: userSelect.value,
-    processingReceiptId: processingReceiptSelect.value,
+    processingProduct: processingProductSelect.value,
+    processingSource: processingSourceSelect.value,
+    processingDest: processingDestSelect.value,
     processingType: processingTypeSelect.value,
     processingUserId: processingUserSelect.value,
     paymentType: transactionPaymentTypeSelect.value,
@@ -1909,19 +1946,34 @@ function renderReceiptSelectors(config) {
   setSelectValue(openingDebtPartnerEl, [openingDebtPartnerEl.value, config.partners[0]?.id]);
   syncUnitByProduct();
 
-  const processingReceiptOptions = receiptsCache.filter((item) => item.status !== "Procesata");
-  renderSelectOptions(
-    processingReceiptSelect,
-    processingReceiptOptions,
-    (item) => `#${item.id} - ${item.product} - ${item.supplier}`,
-    processingReceiptOptions.length ? "Selecteaza receptia" : "Nu există recepții disponibile — adaugă mai întâi o recepție"
+  // Procesare pe produs: produs + cilindru sursa + cilindru destinatie (1-4).
+  const cylinders = config.storageLocations.filter(
+    (item) => String(item.type || "").toLowerCase() === "cilindru"
   );
-  if (processingReceiptSelect) {
-    processingReceiptSelect.disabled = !processingReceiptOptions.length;
-    processingReceiptSelect.title = processingReceiptOptions.length
-      ? "Alege lotul de recepție pe care îl procesezi"
-      : "Mai întâi creează o recepție din meniul Recepții";
-  }
+  renderSelectOptions(
+    processingProductSelect,
+    config.products,
+    (item) => item.name,
+    "Selecteaza produs",
+    (item) => item.name
+  );
+  renderSelectOptions(
+    processingSourceSelect,
+    config.storageLocations,
+    (item) => item.name,
+    "Din cilindru / locatie",
+    (item) => item.name
+  );
+  renderSelectOptions(
+    processingDestSelect,
+    cylinders,
+    (item) => item.name,
+    "Rămâne în sursă",
+    (item) => item.name
+  );
+  // Optiunea goala = produsul ramane in cilindrul sursa (ex: la curatire fara mutare).
+  const destPlaceholder = processingDestSelect.querySelector('option[value=""]');
+  if (destPlaceholder) destPlaceholder.disabled = false;
   renderSelectOptions(
     processingTypeSelect,
     config.processingTypes.filter((item) => item.active),
@@ -1970,8 +2022,10 @@ function renderReceiptSelectors(config) {
   );
 
   const activePaymentType = config.paymentTypes.find((item) => item.active);
-  setSelectValue(processingReceiptSelect, [currentSelections.processingReceiptId, processingReceiptOptions[0]?.id]);
-  autofillProcessingLot();
+  setSelectValue(processingProductSelect, [currentSelections.processingProduct, config.products[0]?.name]);
+  setSelectValue(processingSourceSelect, [currentSelections.processingSource, config.storageLocations[0]?.name]);
+  setSelectValue(processingDestSelect, [currentSelections.processingDest]);
+  renderProcessingEstimate();
   setSelectValue(
     processingTypeSelect,
     [currentSelections.processingType, config.processingTypes.find((item) => item.active)?.name]
@@ -2026,9 +2080,6 @@ function renderFilterOptions() {
   const processingTypes = Array.from(
     new Set(processingsCache.map((item) => item.processingType))
   ).sort((a, b) => a.localeCompare(b, "ro"));
-  const processingReceipts = Array.from(new Set(processingsCache.map((item) => item.receiptId))).sort(
-    (a, b) => a - b
-  );
 
   receiptProductFilterEl.innerHTML = [
     '<option value="">Toate produsele</option>',
@@ -2835,7 +2886,28 @@ function updateTransferAvailableHint() {
     (item) => item.location === fromLoc.name && item.product === product.name
   );
   const available = Number(row?.quantity || 0);
-  transferAvailableHintEl.textContent = `Disponibil în ${fromLoc.name}: ${formatNumber(available)} ${product.unit || "tone"}`;
+  let html = `Disponibil în ${fromLoc.name}: ${formatNumber(available)} ${product.unit || "tone"}`;
+  // #12: avertizare destinatie — alt produs in cilindru sau capacitate.
+  const toLoc = currentConfig.storageLocations.find(
+    (item) => String(item.id) === String(transferToSelect.value)
+  );
+  if (toLoc) {
+    const destItems = (lastStockSummary.byLocation || []).filter(
+      (item) => item.location === toLoc.name && Number(item.quantity || 0) > 0
+    );
+    const other = String(toLoc.type || "").toLowerCase() === "cilindru"
+      ? destItems.find((item) => item.product !== product.name)
+      : null;
+    const destCurrent = destItems.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+    const cap = Number(toLoc.capacity || 0);
+    if (other) {
+      html += `<br><span class="transfer-warn">⚠ În ${toLoc.name} este deja ${other.product} — un cilindru = un singur produs.</span>`;
+    } else if (cap > 0) {
+      const liber = Math.max(cap - destCurrent, 0);
+      html += `<br><span class="field-hint">Mai încap în ${toLoc.name}: ${formatNumber(liber)} / ${formatNumber(cap)} t</span>`;
+    }
+  }
+  transferAvailableHintEl.innerHTML = html;
 }
 
 async function loadTransactions() {
@@ -3289,53 +3361,67 @@ async function createOpeningDocument(formData) {
   }
 }
 
-function getSelectedReceiptForProcessing() {
-  return receiptsCache.find(
-    (item) => String(item.id) === String(processingReceiptSelect.value)
+function getProcessingAvailable() {
+  const product = processingProductSelect.value;
+  const source = processingSourceSelect.value;
+  if (!product || !source || !lastStockSummary) return 0;
+  const row = (lastStockSummary.byLocation || []).find(
+    (i) => i.location === source && i.product === product
   );
+  return Number(row?.quantity || 0);
 }
 
 function renderProcessingEstimate() {
-  const receipt = getSelectedReceiptForProcessing();
+  const available = getProcessingAvailable();
   const processedQuantity = Number(processedQuantityInput.value || 0);
   const confirmedWaste = Number(confirmedWasteInput.value || 0);
-  const finalNet = Math.max(processedQuantity - confirmedWaste, 0);
+  const initialHum = Number(processingInitialHumidityInput?.value || 0);
+  const finalHum = Number(processingFinalHumidityInput?.value || 0);
+  const water =
+    initialHum > 0 && finalHum > 0
+      ? Math.max((processedQuantity * (initialHum - finalHum)) / 100, 0)
+      : 0;
+  const finalNet = Math.max(processedQuantity - confirmedWaste - water, 0);
 
-  processingSourceEl.textContent = receipt?.location || "-";
-  processingProvisionalNetEl.textContent = formatNumber(receipt?.provisionalNetQuantity || 0);
-  processingFinalNetEl.textContent = formatNumber(finalNet);
-}
-
-// Completeaza lotul automat din produs + data primirii (editabil de operator).
-let lastAutoProcessingLot = "";
-function autofillProcessingLot() {
-  if (!processingLotInput) return;
-  const receipt = getSelectedReceiptForProcessing();
-  if (!receipt) return;
-  const auto = `${receipt.product || ""} ${formatDateShort(receipt.createdAt || receipt.receivedAt)}`.trim();
-  if (!processingLotInput.value || processingLotInput.value === lastAutoProcessingLot) {
-    processingLotInput.value = auto;
+  if (processingAvailableEl) {
+    processingAvailableEl.textContent = formatNumber(available);
+    processingAvailableEl.style.color = processedQuantity > available ? "#b3261e" : "";
   }
-  lastAutoProcessingLot = auto;
+  if (processingWaterEl) processingWaterEl.textContent = formatNumber(Number(water.toFixed(3)));
+  if (processingFinalNetEl) processingFinalNetEl.textContent = formatNumber(Number(finalNet.toFixed(3)));
 }
 
-async function createProcessing(formData) {
-  const receipt = getSelectedReceiptForProcessing();
+// Prefill umiditate initiala din ultima receptie a produsului in locatia sursa.
+function autofillProcessingInitialHumidity() {
+  if (!processingInitialHumidityInput || processingInitialHumidityInput.value) return;
+  const product = processingProductSelect.value;
+  const source = processingSourceSelect.value;
+  if (!product || !source) return;
+  const match = receiptsCache
+    .filter((r) => r.product === product && r.location === source && r.status !== "Anulat")
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0];
+  if (match && Number(match.humidity) > 0) {
+    processingInitialHumidityInput.value = match.humidity;
+  }
+}
+
+async function createProcessing(formData, status) {
   const operator = currentConfig.users.find(
     (item) => String(item.id) === String(formData.get("operator"))
   );
 
   const payload = {
-    receiptId: formData.get("receiptId"),
-    product: receipt?.product || "",
-    lot: formData.get("lot") || "",
+    product: formData.get("product"),
+    sourceLocation: formData.get("sourceLocation"),
+    destLocation: formData.get("destLocation") || "",
     processingType: formData.get("processingType"),
     processedQuantity: formData.get("processedQuantity"),
     confirmedWaste: formData.get("confirmedWaste"),
+    initialHumidity: formData.get("initialHumidity"),
     finalHumidity: formData.get("finalHumidity"),
     operator: operator?.name || "",
     note: formData.get("note"),
-    sourceLocation: receipt?.location || ""
+    status: status === "In lucru" ? "In lucru" : "Confirmat"
   };
 
   const response = await fetch("/api/processings", {
@@ -4295,12 +4381,19 @@ deliveryDateFromEl?.addEventListener("change", () => renderDeliveries(deliveries
 deliveryDateToEl?.addEventListener("change", () => renderDeliveries(deliveriesCache));
 transactionDateFromEl?.addEventListener("change", () => renderTransactions(transactionsCache));
 transactionDateToEl?.addEventListener("change", () => renderTransactions(transactionsCache));
-processingReceiptSelect.addEventListener("change", () => {
-  autofillProcessingLot();
+processingProductSelect.addEventListener("change", () => {
+  autofillProcessingInitialHumidity();
   renderProcessingEstimate();
 });
+processingSourceSelect.addEventListener("change", () => {
+  autofillProcessingInitialHumidity();
+  renderProcessingEstimate();
+});
+processingDestSelect.addEventListener("change", renderProcessingEstimate);
 processedQuantityInput.addEventListener("input", renderProcessingEstimate);
 confirmedWasteInput.addEventListener("input", renderProcessingEstimate);
+processingInitialHumidityInput.addEventListener("input", renderProcessingEstimate);
+processingFinalHumidityInput.addEventListener("input", renderProcessingEstimate);
 transactionReferenceTypeSelect.addEventListener("change", () => {
   renderTransactionReferenceOptions();
   syncTransactionDirection();
@@ -4484,15 +4577,16 @@ processingFormEl.addEventListener("keydown", (event) => {
   }
 });
 
-processingFormEl.addEventListener("submit", async (event) => {
-  event.preventDefault();
+async function saveProcessing(status) {
   processingMessageEl.textContent = "Se salveaza...";
-
   try {
-    await createProcessing(new FormData(processingFormEl));
+    await createProcessing(new FormData(processingFormEl), status);
     processingFormEl.reset();
     renderProcessingEstimate();
-    processingMessageEl.textContent = "Procesarea a fost salvata.";
+    processingMessageEl.textContent =
+      status === "In lucru"
+        ? "Procesarea a fost salvata «in lucru». Reia mai tarziu pentru a confirma."
+        : "Procesarea a fost salvata.";
     await Promise.all([
       loadReceipts(),
       loadProcessings(),
@@ -4506,7 +4600,19 @@ processingFormEl.addEventListener("submit", async (event) => {
   } catch (error) {
     processingMessageEl.textContent = error.message;
   }
+}
+
+processingFormEl.addEventListener("submit", (event) => {
+  event.preventDefault();
+  saveProcessing("Confirmat");
 });
+
+if (processingInlucruBtn) {
+  processingInlucruBtn.addEventListener("click", () => {
+    if (!processingFormEl.reportValidity()) return;
+    saveProcessing("In lucru");
+  });
+}
 
 // Confirmarea de la finele zilei ca nu s-a procesat nimic
 if (eodConfirmBtn) {
@@ -4525,6 +4631,7 @@ if (eodConfirmBtn) {
 if (transferFormEl) {
   transferProductSelect.addEventListener("change", updateTransferAvailableHint);
   transferFromSelect.addEventListener("change", updateTransferAvailableHint);
+  transferToSelect.addEventListener("change", updateTransferAvailableHint);
 
   transferFormEl.addEventListener("keydown", (event) => {
     if (

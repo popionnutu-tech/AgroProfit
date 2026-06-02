@@ -703,6 +703,14 @@ button {
   font-weight: 500;
 }
 
+.transfer-warn {
+  display: inline-block;
+  margin-top: 4px;
+  color: #b3261e;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
 .form-actions {
   display: flex;
   gap: 12px;
