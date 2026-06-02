@@ -474,7 +474,8 @@ function renderStats(stats) {
   const newReceipts = Number((stats.byStatus && stats.byStatus.Noua) || 0);
   setDashText("dash-value-receipts", formatNumber(totalReceipts));
   setDashText("dash-meta-receipts", formatNumber(newReceipts));
-  setDashText("dash-value-quantity", formatNumber(stats.totalQuantity || 0));
+  // Cantitate = stocul curent la momentul de fata (nu suma istorica a receptiilor).
+  setDashText("dash-value-quantity", formatNumber(stats.stockTotal ?? stats.totalQuantity ?? 0));
   // dash-hero-delta: simple textual hint
   const deltaEl = document.getElementById("dash-hero-delta");
   if (deltaEl) {
@@ -552,16 +553,67 @@ function renderDeliveryStats(stats) {
 }
 
 function renderAuditStats(stats) {
-  if (!stats.audit) return;
-  setDashText("dash-meta-modifications", formatNumber(stats.audit.recentAuditLogs || 0));
+  if (stats.audit) {
+    setDashText("dash-meta-modifications", formatNumber(stats.audit.recentAuditLogs || 0));
+  }
+  // Lenta de activitate se afiseaza si pentru rolurile fara audit (ex: operator).
   renderDashFeed();
+}
+
+// Activitate din ultimele 24h construita din datele pe care le vede utilizatorul
+// (receptii / procesari / livrari). Folosita cand nu exista jurnal de audit (ex: operator).
+function buildRecentActivity() {
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  const within = (d) => {
+    const t = Date.parse(d || "");
+    return !Number.isNaN(t) && t >= cutoff;
+  };
+  const events = [];
+  (Array.isArray(receiptsCache) ? receiptsCache : []).forEach((r) => {
+    if (!within(r.createdAt)) return;
+    events.push({
+      action: "create",
+      entityType: "Recepție",
+      entityId: r.id,
+      reason: `Recepție · ${r.product || ""} ${formatQtyByEntry(r.provisionalNetQuantity || r.quantity, r)}`.trim(),
+      createdAt: r.createdAt,
+      user: r.supplier || r.receivedBy || ""
+    });
+  });
+  (Array.isArray(processingsCache) ? processingsCache : []).forEach((p) => {
+    if (!within(p.createdAt)) return;
+    events.push({
+      action: "update",
+      entityType: "Procesare",
+      entityId: p.id,
+      reason: `Procesare · ${p.product || ""} ${p.processingType || ""}`.trim(),
+      createdAt: p.createdAt,
+      user: p.operator || ""
+    });
+  });
+  (Array.isArray(deliveriesCache) ? deliveriesCache : []).forEach((d) => {
+    if (!within(d.createdAt)) return;
+    events.push({
+      action: /anul/i.test(d.status || "") ? "cancel" : "create",
+      entityType: "Livrare",
+      entityId: d.id,
+      reason: `Livrare · ${d.product || ""} (${d.status || ""})`.trim(),
+      createdAt: d.createdAt,
+      user: d.customer || ""
+    });
+  });
+  return events
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+    .slice(0, 6);
 }
 
 // Render the activity feed in dashboard from audit logs cache
 function renderDashFeed() {
   const body = document.getElementById("dash-feed-body");
   if (!body) return;
-  const items = (Array.isArray(auditLogsCache) ? auditLogsCache : []).slice(0, 6);
+  let items = (Array.isArray(auditLogsCache) ? auditLogsCache : []).slice(0, 6);
+  // Operatorul nu are acces la jurnalul de audit -> aratam activitatea reala din ultimele 24h.
+  if (!items.length) items = buildRecentActivity();
   if (!items.length) {
     body.innerHTML = '<p class="dash-feed-empty">Nu sunt evenimente recente.</p>';
     return;
@@ -748,7 +800,8 @@ function renderStockByProduct(data) {
     grandTotal += qty;
     const existing = byProduct.get(product) || { qty: 0, locations: new Set() };
     existing.qty += qty;
-    if (item.location) existing.locations.add(item.location);
+    // Numai locatiile cu stoc real (qty>0) — ca lista sa coincida cu silozurile de sus.
+    if (item.location && qty > 0) existing.locations.add(item.location);
     byProduct.set(product, existing);
   }
 
@@ -761,12 +814,16 @@ function renderStockByProduct(data) {
     .sort((a, b) => b[1].qty - a[1].qty)
     .map(([product, info]) => {
       const palette = getProductPalette(product);
+      const locNames = Array.from(info.locations).sort((a, b) =>
+        String(a).localeCompare(String(b), "ro", { numeric: true })
+      );
+      const locLabel = locNames.length ? locNames.join(", ") : "—";
       return `
         <tr>
           <td><span class="sbp-dot" style="background:${palette.fill};border-color:${palette.edge};"></span>${product}</td>
           <td>${formatNumber(info.qty)} t</td>
           <td>${formatNumber(info.qty * 1000)} kg</td>
-          <td>${info.locations.size} ${info.locations.size === 1 ? "cilindru" : "cilindri"}</td>
+          <td title="${locNames.length} ${locNames.length === 1 ? "cilindru" : "cilindri"}">${locLabel}</td>
         </tr>
       `;
     })
@@ -1150,15 +1207,15 @@ function renderReceiptTotals(rows) {
   const fin = canAccess("finance");
   const perProduct = Object.entries(byProduct)
     .map(([prod, v]) => fin
-      ? `${prod}: ${formatNumber(v.net)} t / plată ${currency.format(v.pay)} / achitat ${currency.format(v.paid)}`
-      : `${prod}: ${formatNumber(v.net)} t`)
+      ? `${prod}: ${formatNumber(v.net)} t (${formatNumber(v.net * 1000)} kg) / plată ${currency.format(v.pay)} / achitat ${currency.format(v.paid)}`
+      : `${prod}: ${formatNumber(v.net)} t (${formatNumber(v.net * 1000)} kg)`)
     .join("  ·  ");
   const finPart = fin
     ? `&nbsp;·&nbsp; Plată: <b>${currency.format(totalPay)}</b> · Achitat: <b>${currency.format(totalPaid)}</b> · Rest: <b>${currency.format(Math.max(totalPay - totalPaid, 0))}</b>`
     : "";
   receiptsFootEl.innerHTML = `
     <tr class="totals-row">
-      <td colspan="13">TOTAL (${rows.length} recepții) &nbsp;·&nbsp; Net: <b>${formatNumber(totalNet)} t</b>${finPart}<br>${perProduct}</td>
+      <td colspan="13">TOTAL (${rows.length} recepții) &nbsp;·&nbsp; Net: <b>${formatNumber(totalNet)} t (${formatNumber(totalNet * 1000)} kg)</b>${finPart}<br>${perProduct}</td>
     </tr>
   `;
 }
@@ -1439,10 +1496,10 @@ function renderDeliveries(deliveries) {
           <td class="col-fin">${item.seller || "-"}</td>
           <td>${item.product}</td>
           <td>${formatQtyByEntry(qty, item)}</td>
-          <td class="col-fin">${item.vehicle || "-"}</td>
+          <td>${item.vehicle || "-"}</td>
           <td class="col-fin">${priceLabel}</td>
           <td>
-            <div>${item.invoiceNumber || "-"}</div>
+            <div class="col-fin">${item.invoiceNumber || "-"}</div>
             ${item.note ? `<div class="row-note">${item.note}</div>` : ""}
             <div>${deliveryStatusBadge(status)}</div>
             <div class="action-row">${buttons}</div>
@@ -2716,6 +2773,7 @@ async function loadProcessings() {
   renderProcessings(data.processings);
   renderFilterOptions();
   checkEndOfDayProcessing();
+  renderDashFeed();
 }
 
 async function loadStocks() {
@@ -2804,6 +2862,7 @@ async function loadDeliveries() {
   deliveriesCache = data.deliveries;
   renderDeliveries(data.deliveries);
   renderOpenJournal();
+  renderDashFeed();
   if (currentConfig) {
     renderReceiptSelectors(currentConfig);
   }
@@ -4411,6 +4470,17 @@ openingDocumentFormEl.addEventListener("submit", async (event) => {
     }
   } catch (error) {
     openingDocumentMessageEl.textContent = error.message;
+  }
+});
+
+// Enter intr-un camp NU mai salveaza procesarea din greseala (doar butonul Salveaza procesarea).
+processingFormEl.addEventListener("keydown", (event) => {
+  if (
+    event.key === "Enter" &&
+    event.target.tagName !== "TEXTAREA" &&
+    event.target.tagName !== "BUTTON"
+  ) {
+    event.preventDefault();
   }
 });
 

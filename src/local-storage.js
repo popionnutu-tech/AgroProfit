@@ -2423,6 +2423,7 @@ async function createQuickSupplier(name, changedBy) {
     role: "furnizor",
     fiscalProfile: "Persoana fizica",
     status: "temporar",
+    allowDuplicateName: true,
     changeReason: "Furnizor temporar adaugat de operator la receptie",
     changedBy: changedBy || "operator"
   });
@@ -2552,8 +2553,12 @@ async function getStats() {
   const complaints = await listComplaints();
   const auditLogs = await listAuditLogs();
   const partnerAdvances = await listPartnerAdvances();
+  const transfers = await listTransfers();
+  // Stoc curent (la momentul de fata), nu suma istorica a receptiilor.
+  const stockSummary = createStockSummary(receipts, deliveries, openingDocuments, transfers);
   return {
     ...createReceiptSummary(receipts),
+    stockTotal: stockSummary.totals.totalQuantity,
     opening: createOpeningSummary(openingDocuments),
     processing: createProcessingSummary(processings),
     finance: createTransactionSummary(transactions),
@@ -2741,7 +2746,9 @@ async function createConfigEntry(entity, payload) {
 
   // Nu permitem doi furnizori/parteneri cu acelasi nume.
   // IDNO-ul diferentiaza persoane reale cu acelasi nume.
-  if (entity === "partners") {
+  // Exceptie: operatorul poate adauga rapid o persoana fizica temporara la receptie
+  // chiar daca exista deja un nume identic (contabilul diferentiaza/uneste mai tarziu).
+  if (entity === "partners" && !payload.allowDuplicateName) {
     const sameName = state.partners.filter(
       (item) =>
         String(item.name || "").trim().toLowerCase() ===
