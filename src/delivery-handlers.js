@@ -38,23 +38,29 @@ async function createDeliveryHandler(req, res) {
   const actor = getActorLabel(req);
 
   const plannedQuantity = body.plannedQuantity ?? body.deliveredQuantity;
-  if (!body.receiptId || !body.customerId || !plannedQuantity) {
+  const hasMass = Number(body.grossWeight || 0) > 0;
+  const hasSource =
+    body.receiptId ||
+    ((body.product || body.productId) && (body.sourceLocation || body.sourceLocationId));
+  if (!body.customerId || !hasSource || (!plannedQuantity && !hasMass)) {
     return sendJson(res, 400, {
-      error: "Campurile receiptId, customerId si plannedQuantity sunt obligatorii."
+      error: "Completeaza cumparator, produs + cilindru sursa si cantitatea (sau masa brut/tara)."
     });
   }
 
   try {
-    const [receipts, config] = await Promise.all([listReceipts(), getConfig()]);
-    const receipt = receipts.find((item) => item.id === Number(body.receiptId));
+    const config = await getConfig();
     const customer = config.partners.find((item) => item.id === Number(body.customerId));
-
-    if (!receipt) {
-      return sendJson(res, 404, { error: "Receptia nu a fost gasita." });
-    }
 
     if (!customer) {
       return sendJson(res, 400, { error: "Cumparatorul selectat nu exista." });
+    }
+
+    if (body.receiptId) {
+      const receipts = await listReceipts();
+      if (!receipts.find((item) => item.id === Number(body.receiptId))) {
+        return sendJson(res, 404, { error: "Receptia nu a fost gasita." });
+      }
     }
 
     const delivery = await createDelivery({

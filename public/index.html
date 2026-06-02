@@ -266,12 +266,12 @@
             </article>
 
             <!-- Row 3: Financial -->
-            <article class="dash-card">
+            <article class="dash-card" data-access="finance">
               <span class="dash-label">ÎNCASĂRI</span>
               <strong class="dash-value" id="dash-value-collections">0 MDL</strong>
               <div class="dash-meta"><span>tranzacții</span><b id="dash-meta-transactions">0</b></div>
             </article>
-            <article class="dash-card">
+            <article class="dash-card" data-access="finance">
               <span class="dash-label">PLĂȚI</span>
               <strong class="dash-value" id="dash-value-payments">0 MDL</strong>
               <div class="dash-meta"><span>furnizori</span><b>—</b></div>
@@ -631,21 +631,9 @@
         <section class="grid processing-grid" data-view="procesare">
           <form class="panel form-panel" id="processing-form" data-access="processing-write">
             <div class="panel-head">
-              <h2>Procesare lot</h2>
-              <p>Curățire, uscare, deșeu confirmat și net final. Selectează lotul de recepție și introdu cantitatea procesată plus deșeul confirmat.</p>
+              <h2>Procesare pe produs</h2>
+              <p>Alege produsul, cilindrul sursă și (la uscare) cilindrul destinație. Cantitatea nu poate depăși stocul. La uscare se scade automat apa după umiditate.</p>
             </div>
-
-            <label>
-              Recepție (lotul pe care îl procesezi)
-              <select name="receiptId" id="processing-receipt-select" required></select>
-              <small class="field-hint">Dacă lista este goală — mai întâi creează o recepție din meniul „Recepții".</small>
-            </label>
-
-            <label>
-              Lot
-              <input name="lot" id="processing-lot-input" type="text" placeholder="Ex: SOIE 12.05.2026" />
-              <small class="field-hint">Se completează automat din produs + data primirii; îl poți modifica.</small>
-            </label>
 
             <div class="split">
               <label>
@@ -653,59 +641,75 @@
                 <select name="processingType" id="processing-type-select" required></select>
               </label>
               <label>
-                Operator
-                <select name="operator" id="processing-user-select"></select>
+                Produs
+                <select name="product" id="processing-product-select" required></select>
               </label>
             </div>
 
-            <label>
-              Status procesare
-              <select name="status">
-                <option value="Confirmat">Confirmat</option>
-                <option value="Inchis">Inchis</option>
-                <option value="Anulat">Anulat</option>
-                <option value="Redeschis">Redeschis</option>
-              </select>
-            </label>
+            <div class="split">
+              <label>
+                Din cilindru (sursă)
+                <select name="sourceLocation" id="processing-source-select" required></select>
+              </label>
+              <label>
+                În cilindru (destinație)
+                <select name="destLocation" id="processing-dest-select"></select>
+                <small class="field-hint">La uscare: cilindrul 1-4 unde ajunge produsul uscat.</small>
+              </label>
+            </div>
 
             <div class="split">
               <label>
-                Cantitate procesata
+                Cantitate procesată
                 <input name="processedQuantity" id="processed-quantity-input" type="number" min="0" step="0.01" required />
               </label>
               <label>
-                Deseu confirmat
+                Deșeu confirmat
                 <input name="confirmedWaste" id="confirmed-waste-input" type="number" min="0" step="0.01" value="0" />
               </label>
             </div>
 
             <div class="split">
               <label>
-                Umiditate finala
-                <input name="finalHumidity" type="number" min="0" step="0.01" />
+                Umiditate inițială %
+                <input name="initialHumidity" id="processing-initial-humidity" type="number" min="0" step="0.01" />
               </label>
               <label>
-                Observatii
+                Umiditate finală %
+                <input name="finalHumidity" id="processing-final-humidity" type="number" min="0" step="0.01" />
+              </label>
+            </div>
+
+            <div class="split">
+              <label>
+                Operator
+                <select name="operator" id="processing-user-select"></select>
+              </label>
+              <label>
+                Observații
                 <input name="note" placeholder="Comentariu procesare" />
               </label>
             </div>
 
             <section class="estimate-panel">
               <div class="estimate-card">
-                <span>Sursa</span>
-                <strong id="processing-source">-</strong>
+                <span>Disponibil în sursă</span>
+                <strong id="processing-available">0</strong>
               </div>
               <div class="estimate-card">
-                <span>Net provizoriu receptie</span>
-                <strong id="processing-provisional-net">0</strong>
+                <span>Apă eliminată (uscare)</span>
+                <strong id="processing-water">0</strong>
               </div>
               <div class="estimate-card estimate-card-accent">
-                <span>Net final estimat</span>
+                <span>Net final (în destinație)</span>
                 <strong id="processing-final-net">0</strong>
               </div>
             </section>
 
-            <button type="submit">Salveaza procesarea</button>
+            <div class="form-actions">
+              <button type="submit">Salveaza procesarea</button>
+              <button type="button" id="processing-inlucru-btn" class="cell-btn">Salveaza «în lucru»</button>
+            </div>
             <p class="form-message" id="processing-message"></p>
           </form>
 
@@ -721,11 +725,11 @@
                     <th>ID</th>
                     <th>Data</th>
                     <th>Produs</th>
-                    <th>Lot</th>
-                    <th>Receptie</th>
+                    <th>Sursă</th>
+                    <th>Destinație</th>
                     <th>Tip</th>
                     <th>Procesat</th>
-                    <th>Deseu</th>
+                    <th>Deșeu</th>
                     <th>Net final</th>
                   </tr>
                 </thead>
@@ -833,6 +837,7 @@
           <div class="inline-date-filter">
             <label>De la<input type="date" id="stock-period-from" /></label>
             <label>Pana la<input type="date" id="stock-period-to" /></label>
+            <label>Produs<select id="stock-period-product"><option value="">Toate produsele</option></select></label>
           </div>
           <div class="table-wrap">
             <table>
@@ -841,6 +846,7 @@
                   <th>Produs</th>
                   <th>Stoc inițial (t)</th>
                   <th>Recepții (t)</th>
+                  <th>Pierderi proc. (t)</th>
                   <th>Livrări (t)</th>
                   <th>Stoc final (t)</th>
                 </tr>
@@ -961,51 +967,57 @@
               </div>
             <input type="hidden" name="status" value="Confirmat" />
 
-            <label>
-              Receptie sursa
-              <select name="receiptId" id="delivery-receipt-select" required></select>
-            </label>
+            <div class="split">
+              <label>
+                Produs
+                <select name="product" id="delivery-product-select" required></select>
+              </label>
+              <label>
+                Din cilindru / locatie
+                <select name="sourceLocation" id="delivery-source-select" required></select>
+              </label>
+            </div>
 
             <label>
               Cumparator
               <select name="customerId" id="delivery-customer-select" required></select>
             </label>
 
+            <label>
+              Mașină (nr.)
+              <input name="vehicle" id="delivery-vehicle-input" list="vehicles-datalist" placeholder="Ex: AG-102" />
+              <datalist id="vehicles-datalist"></datalist>
+              <small class="field-hint">Numărul mașinii care a încărcat.</small>
+            </label>
+
             <div class="split">
               <label>
-                Cantitate livrată (kg)
-                <input name="deliveredQuantity" id="delivery-quantity-input" type="number" min="0" step="1" required placeholder="ex: 40000" />
+                Masă brută (kg)
+                <input name="grossWeight" id="delivery-gross-input" type="number" min="0" step="1" placeholder="camion + marfă" />
               </label>
-              <div></div>
+              <label>
+                Masă camion / tară (kg)
+                <input name="tareWeight" id="delivery-tare-input" type="number" min="0" step="1" placeholder="camion gol" />
+              </label>
             </div>
 
-            <details class="optional-fields">
-              <summary>Detalii livrare (mașină, observații)</summary>
-              <div class="split">
-                <label>
-                  Mașină (nr.)
-                  <input name="vehicle" list="vehicles-datalist" placeholder="Ex: AG-102" />
-                  <datalist id="vehicles-datalist"></datalist>
-                </label>
-                <label>
-                  Observații
-                  <input name="note" placeholder="Comentariu livrare" />
-                </label>
-              </div>
-              <p class="field-hint" data-access="finance">Datele pentru factură (vânzător, preț, valută, curs) se completează din butonul „Date factură" din lista de livrări recente.</p>
-            </details>
+            <label>
+              Observații
+              <input name="note" placeholder="Comentariu livrare" />
+            </label>
+            <p class="field-hint" data-access="finance">Datele pentru factură (vânzător, preț, valută, curs) se completează din butonul „Date factură" din lista de livrări recente.</p>
 
             <section class="estimate-panel">
               <div class="estimate-card">
-                <span>Locatie</span>
-                <strong id="delivery-location">-</strong>
-              </div>
-              <div class="estimate-card">
-                <span>Disponibil</span>
+                <span>Disponibil în sursă</span>
                 <strong id="delivery-available">0</strong>
               </div>
               <div class="estimate-card estimate-card-accent">
-                <span>Status livrare</span>
+                <span>Masă netă (livrată)</span>
+                <strong id="delivery-net">0</strong>
+              </div>
+              <div class="estimate-card">
+                <span>Status</span>
                 <strong id="delivery-status">Nelivrat</strong>
               </div>
             </section>
@@ -1034,14 +1046,14 @@
                   <tr>
                     <th>ID</th>
                     <th>Data</th>
-                    <th>Receptie</th>
+                    <th>Sursă</th>
                     <th>Cumparator</th>
                     <th class="col-fin">Vanzator</th>
                     <th>Produs</th>
                     <th>Cantitate</th>
-                    <th class="col-fin">Masina</th>
+                    <th>Masina</th>
                     <th class="col-fin">Pret</th>
-                    <th>Invoice</th>
+                    <th>Status</th>
                   </tr>
                 </thead>
                 <tbody id="deliveries-body"></tbody>

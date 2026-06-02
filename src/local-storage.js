@@ -583,13 +583,17 @@ function createReceiptSummary(receipts) {
 }
 
 function createProcessingSummary(processings) {
+  // Numaram doar procesarile care afecteaza stocul (nu Anulat, nu In lucru).
+  const active = (processings || []).filter(
+    (item) => item.status !== "Anulat" && item.status !== "In lucru"
+  );
   return {
-    totalProcessings: processings.length,
-    totalProcessedQuantity: processings.reduce(
+    totalProcessings: active.length,
+    totalProcessedQuantity: active.reduce(
       (sum, item) => sum + Number(item.processedQuantity || 0),
       0
     ),
-    totalConfirmedWaste: processings.reduce(
+    totalConfirmedWaste: active.reduce(
       (sum, item) => sum + Number(item.confirmedWaste || 0),
       0
     )
@@ -692,19 +696,9 @@ function listOpeningDebtItemsFromDocuments(openingDocuments = []) {
   return normalizeOpeningDocuments(openingDocuments).flatMap((item) => item.debtItems || []);
 }
 
-function createStockSummary(receipts, deliveries = [], openingDocuments = [], transfers = []) {
+function createStockSummary(receipts, deliveries = [], openingDocuments = [], transfers = [], processings = []) {
   const stockByLocation = new Map();
-  const deliveredByLocation = new Map();
   const openingStockItems = openingDocuments.flatMap((item) => item.stockItems || []);
-
-  for (const item of deliveries) {
-    const location = item.location || "Fara locatie";
-    const key = `${location}::${item.product}`;
-    deliveredByLocation.set(
-      key,
-      (deliveredByLocation.get(key) || 0) + Number(item.deliveredQuantity || 0)
-    );
-  }
 
   for (const item of openingStockItems) {
     const location = item.location || "Fara locatie";
@@ -773,22 +767,93 @@ function createStockSummary(receipts, deliveries = [], openingDocuments = [], tr
     stockByLocation.set(toKey, toExisting);
   }
 
-  const byLocation = Array.from(stockByLocation.values())
-    .map((item) => {
-      const key = `${item.location}::${item.product}`;
-      const deliveredQuantity = Number(deliveredByLocation.get(key) || 0);
-      return {
-        ...item,
-        deliveredQuantity,
-        quantity: Math.max(Number(item.quantity || 0) - deliveredQuantity, 0)
+  // Procesari pe produs (model "miscare"): scad cantitatea de intrare din locatia
+  // sursa si adaug cantitatea de iesire in destinatie. Diferenta (deseu + apa la uscare)
+  // dispare din stoc. Doar procesarile noi (movement===true); cele vechi sunt deja
+  // reflectate prin finalNetQuantity-ul receptiei, deci nu le numaram din nou.
+  for (const item of processings) {
+    if (!item || item.movement !== true) continue;
+    if (item.status === "Anulat" || item.status === "In lucru") continue;
+    const product = item.product;
+    if (!product) continue;
+    const input = Number(item.processedQuantity || 0);
+    const output = Number(
+      item.outputQuantity ??
+        Math.max(input - Number(item.confirmedWaste || 0) - Number(item.waterRemoved || 0), 0)
+    );
+    const src = item.sourceLocation || "Fara locatie";
+    const dest = item.destLocation || src;
+
+    if (input > 0) {
+      const fromKey = `${src}::${product}`;
+      const fromExisting = stockByLocation.get(fromKey) || {
+        location: src,
+        product,
+        quantity: 0,
+        unit: "tone",
+        costCategory: null
       };
-    })
-    .sort((a, b) => {
+      fromExisting.quantity -= input;
+      stockByLocation.set(fromKey, fromExisting);
+    }
+
+    if (output > 0) {
+      const toKey = `${dest}::${product}`;
+      const toExisting = stockByLocation.get(toKey) || {
+        location: dest,
+        product,
+        quantity: 0,
+        unit: "tone",
+        costCategory: null
+      };
+      toExisting.quantity += output;
+      stockByLocation.set(toKey, toExisting);
+    }
+  }
+
+  const byLocation = Array.from(stockByLocation.values()).map((item) => ({
+    ...item,
+    quantity: Number(item.quantity || 0),
+    deliveredQuantity: 0
+  }));
+
+  // Scadem fiecare livrare livrata: intai din locatia aleasa la livrare, apoi din
+  // celelalte locatii ale produsului (cele mai pline intai) daca acolo nu ajunge —
+  // astfel poarta (pe locatie) si scaderea coincid, dar ramane robust daca produsul
+  // a fost mutat intre timp prin procesare/transfer.
+  for (const d of deliveries) {
+    let remaining = Number(d.deliveredQuantity || 0);
+    if (remaining <= 0) continue;
+    const product = d.product;
+    const primary = byLocation.find((i) => i.location === d.location && i.product === product);
+    if (primary && primary.quantity > 0) {
+      const take = Math.min(primary.quantity, remaining);
+      primary.quantity -= take;
+      primary.deliveredQuantity += take;
+      remaining -= take;
+    }
+    if (remaining > 0) {
+      const others = byLocation
+        .filter((i) => i.product === product && i !== primary && i.quantity > 0)
+        .sort((a, b) => b.quantity - a.quantity);
+      for (const loc of others) {
+        if (remaining <= 0) break;
+        const take = Math.min(loc.quantity, remaining);
+        loc.quantity -= take;
+        loc.deliveredQuantity += take;
+        remaining -= take;
+      }
+    }
+  }
+
+  byLocation
+    .forEach((item) => { item.quantity = Math.max(Number(item.quantity || 0), 0); });
+  byLocation.sort((a, b) => {
     if (a.location === b.location) {
       return a.product.localeCompare(b.product, "ro");
     }
     return a.location.localeCompare(b.location, "ro");
-    });
+  });
 
   const totals = {
     totalQuantity: byLocation.reduce((sum, item) => sum + Number(item.quantity || 0), 0),
@@ -972,7 +1037,9 @@ function filterByDate(items, dateValue) {
 
 function createDailyReport(dateValue, receipts, processings, transactions, stockSummary) {
   const dailyReceipts = filterByDate(receipts, dateValue);
-  const dailyProcessings = filterByDate(processings, dateValue);
+  const dailyProcessings = filterByDate(processings, dateValue).filter(
+    (item) => item.status !== "Anulat" && item.status !== "In lucru"
+  );
   const dailyTransactions = filterByDate(transactions, dateValue);
 
   return {
@@ -1453,49 +1520,100 @@ async function getSupplierStatement(partnerId, fromDate, toDate) {
   };
 }
 
+// Procesare pe PRODUS (model "miscare"): operatorul alege produs + cilindru sursa
+// (+ cilindru destinatie la uscare) si cantitatea. Stocul se actualizeaza prin
+// miscarea din createStockSummary (movement===true), nu prin editarea receptiei.
 async function createProcessing(payload) {
-  const state = readReceiptsState();
-  const processing = {
-    id: nextId(state.processings),
-    receiptId: Number(payload.receiptId),
-    product: payload.product,
-    lot: payload.lot || "",
-    sourceLocation: payload.sourceLocation || "",
-    processingType: payload.processingType,
-    processedQuantity: sanitizeNumber(payload.processedQuantity),
-    confirmedWaste: sanitizeNumber(payload.confirmedWaste),
-    finalHumidity: sanitizeNumber(payload.finalHumidity),
-    finalNetQuantity: sanitizeNumber(payload.finalNetQuantity),
-    operator: payload.operator || "",
-    status: payload.status || "Confirmat",
-    note: payload.note || "",
-    createdAt: new Date().toISOString()
-  };
+  const config = readConfigState();
 
+  const productName =
+    payload.product ||
+    (config.products.find((p) => Number(p.id) === Number(payload.productId)) || {}).name ||
+    "";
+  if (!productName) {
+    throw new Error("Selecteaza produsul de procesat.");
+  }
+
+  const sourceLocation =
+    payload.sourceLocation ||
+    (config.storageLocations.find((l) => Number(l.id) === Number(payload.sourceLocationId)) || {}).name ||
+    "";
+  if (!sourceLocation) {
+    throw new Error("Selecteaza locatia (cilindrul) sursa.");
+  }
+
+  const destLocation =
+    payload.destLocation ||
+    (config.storageLocations.find((l) => Number(l.id) === Number(payload.destLocationId)) || {}).name ||
+    "";
+
+  const processedQuantity = sanitizeNumber(payload.processedQuantity);
+  if (processedQuantity <= 0) {
+    throw new Error("Cantitatea procesata trebuie sa fie mai mare ca zero.");
+  }
+
+  const confirmedWaste = sanitizeNumber(payload.confirmedWaste);
+  const initialHumidity = sanitizeNumber(payload.initialHumidity);
+  const finalHumidity = sanitizeNumber(payload.finalHumidity);
+
+  // #10 uscare: apa eliminata = cantitate \u00d7 (umiditate initiala \u2212 finala) %.
+  const humidityDrop = Math.max(initialHumidity - finalHumidity, 0);
+  const waterRemoved =
+    initialHumidity > 0 && finalHumidity > 0
+      ? Number(((processedQuantity * humidityDrop) / 100).toFixed(3))
+      : 0;
+
+  const outputQuantity = Math.max(processedQuantity - confirmedWaste - waterRemoved, 0);
+
+  // #8: nu se poate procesa mai mult decat exista in stoc (produs + locatie sursa).
+  const summary = await getStockSummary();
+  const available = Number(
+    (summary.byLocation.find(
+      (i) => i.location === sourceLocation && i.product === productName
+    ) || {}).quantity || 0
+  );
+  if (processedQuantity > available) {
+    throw new Error(
+      `Stoc insuficient pentru ${productName} in ${sourceLocation}: disponibil ${available} t, cerut ${processedQuantity} t.`
+    );
+  }
+
+  const status = payload.status === "In lucru" ? "In lucru" : payload.status || "Confirmat";
+
+  const state = readReceiptsState();
   if (!Array.isArray(state.processings)) {
     state.processings = [];
   }
 
-  state.processings.push(processing);
+  const processing = {
+    id: nextId(state.processings),
+    movement: true,
+    receiptId: payload.receiptId ? Number(payload.receiptId) : null,
+    product: productName,
+    lot: payload.lot || "",
+    sourceLocation,
+    destLocation: destLocation || sourceLocation,
+    processingType: payload.processingType || "",
+    processedQuantity,
+    confirmedWaste,
+    initialHumidity,
+    finalHumidity,
+    waterRemoved,
+    outputQuantity,
+    finalNetQuantity: outputQuantity,
+    operator: payload.operator || "",
+    status,
+    note: payload.note || "",
+    createdAt: new Date().toISOString()
+  };
 
-  const receipt = state.receipts.find((item) => item.id === processing.receiptId);
-  if (receipt) {
-    if (receipt.status === "Inchis") {
-      throw new Error("Receptia este inchisa. Redeschide recep\u021bia pentru a procesa.");
-    }
-    receipt.status = "Procesata";
-    receipt.confirmedWaste = processing.confirmedWaste;
-    receipt.finalHumidity = processing.finalHumidity;
-    receipt.finalNetQuantity = processing.finalNetQuantity;
-    receipt.updatedAt = new Date().toISOString();
-    recalcReceiptDeliveryState(state, receipt.id);
-  }
+  state.processings.push(processing);
 
   createAuditEntry(state, {
     entityType: "processing",
     entityId: processing.id,
     action: "create",
-    reason: "Creare procesare",
+    reason: "Creare procesare pe produs",
     user: payload.createdBy || "dashboard",
     newValue: { ...processing }
   });
@@ -1777,7 +1895,25 @@ async function updateProcessing(id, payload = {}) {
   };
 
   if (payload.status !== undefined) {
-    processing.status = requiredText(payload.status, "Status procesare");
+    const newStatus = requiredText(payload.status, "Status procesare");
+    const oldStatus = processing.status;
+    const wasInactive = oldStatus === "In lucru" || oldStatus === "Anulat";
+    const willAffectStock = newStatus !== "In lucru" && newStatus !== "Anulat";
+    // #8 re-verificat: la activarea unei procesari (model miscare) trebuie sa existe stoc.
+    if (processing.movement === true && wasInactive && willAffectStock) {
+      const summary = await getStockSummary();
+      const available = Number(
+        (summary.byLocation.find(
+          (i) => i.location === processing.sourceLocation && i.product === processing.product
+        ) || {}).quantity || 0
+      );
+      if (Number(processing.processedQuantity || 0) > available) {
+        throw new Error(
+          `Stoc insuficient pentru ${processing.product} in ${processing.sourceLocation}: disponibil ${available} t, necesar ${processing.processedQuantity} t.`
+        );
+      }
+    }
+    processing.status = newStatus;
   }
 
   if (payload.note !== undefined) {
@@ -1852,34 +1988,89 @@ async function updateTransaction(id, payload = {}) {
 
 async function createDelivery(payload) {
   const state = readReceiptsState();
-  const receipt = state.receipts.find((item) => item.id === Number(payload.receiptId));
 
-  if (!receipt) {
+  // Doua moduri: pe receptie (vechi) sau pe PRODUS + cilindru sursa (nou, #14).
+  const receipt = payload.receiptId
+    ? state.receipts.find((item) => item.id === Number(payload.receiptId))
+    : null;
+  if (payload.receiptId && !receipt) {
     throw new Error("Receptia selectata nu exista.");
   }
-
-  if (receipt.status === "Inchis") {
+  if (receipt && receipt.status === "Inchis") {
     throw new Error("Receptia este inchisa. Nu se poate crea livrare.");
   }
 
-  const availableQuantity = getReceiptAvailableQuantity(state, payload.receiptId);
-  const plannedQuantity = sanitizeNumber(payload.plannedQuantity ?? payload.deliveredQuantity);
+  const config = readConfigState();
+  const productName = receipt
+    ? receipt.product
+    : payload.product ||
+      (config.products.find((p) => Number(p.id) === Number(payload.productId)) || {}).name ||
+      "";
+  const sourceLocation = receipt
+    ? receipt.location || ""
+    : payload.sourceLocation ||
+      (config.storageLocations.find((l) => Number(l.id) === Number(payload.sourceLocationId)) || {}).name ||
+      "";
 
-  if (plannedQuantity <= 0) {
-    throw new Error("Cantitatea planificata trebuie sa fie mai mare ca zero.");
+  if (!productName) {
+    throw new Error("Selecteaza produsul de livrat.");
+  }
+  if (!sourceLocation) {
+    throw new Error("Selecteaza cilindrul / locatia sursa.");
   }
 
-  if (plannedQuantity > availableQuantity) {
-    throw new Error("Cantitatea planificata depaseste stocul disponibil pentru receptie.");
+  // Masa: brut − tara = net (daca sunt introduse), altfel cantitatea directa.
+  const grossWeight = sanitizeNumber(payload.grossWeight);
+  const tareWeight = sanitizeNumber(payload.tareWeight);
+  const netFromMass = grossWeight > 0 ? Math.max(grossWeight - tareWeight, 0) : 0;
+  const plannedQuantity = sanitizeNumber(
+    payload.plannedQuantity ?? (netFromMass > 0 ? netFromMass : payload.deliveredQuantity)
+  );
+
+  if (plannedQuantity <= 0) {
+    throw new Error("Cantitatea de livrare trebuie sa fie mai mare ca zero.");
+  }
+
+  if (receipt) {
+    const availableQuantity = getReceiptAvailableQuantity(state, payload.receiptId);
+    if (plannedQuantity > availableQuantity) {
+      throw new Error("Cantitatea planificata depaseste stocul disponibil pentru receptie.");
+    }
+  } else {
+    // #14: plafon pe stocul produsului in locatia sursa.
+    const summary = await getStockSummary();
+    const inStock = Number(
+      (summary.byLocation.find(
+        (i) => i.location === sourceLocation && i.product === productName
+      ) || {}).quantity || 0
+    );
+    // Rezervare: livrarile pe produs inca nelivrate (deliveredQuantity 0) nu au scazut
+    // inca stocul, dar sunt deja promise — le scadem ca sa nu promitem mai mult decat exista.
+    const reservedPending = (state.deliveries || [])
+      .filter(
+        (d) =>
+          !d.receiptId &&
+          d.product === productName &&
+          d.location === sourceLocation &&
+          Number(d.deliveredQuantity || 0) === 0 &&
+          ["Proiect", "Confirmat", "Redeschis"].includes(d.status)
+      )
+      .reduce((sum, d) => sum + Number(d.plannedQuantity || 0), 0);
+    const available = inStock - reservedPending;
+    if (plannedQuantity > available) {
+      throw new Error(
+        `Stoc insuficient pentru ${productName} in ${sourceLocation}: disponibil ${available} t (din ${inStock} t, rezervat ${reservedPending} t), cerut ${plannedQuantity} t.`
+      );
+    }
   }
 
   const delivery = {
     id: nextId(state.deliveries),
-    receiptId: Number(payload.receiptId),
+    receiptId: receipt ? Number(payload.receiptId) : null,
     customerId: payload.customerId ? Number(payload.customerId) : null,
     customer: payload.customer || "",
-    product: receipt.product,
-    location: receipt.location || "",
+    product: productName,
+    location: sourceLocation,
     vehicle: payload.vehicle || "",
     contractNumber: payload.contractNumber || "",
     contractDate: payload.contractDate || "",
@@ -1895,9 +2086,9 @@ async function createDelivery(payload) {
     invoiceDate: payload.invoiceDate || "",
     plannedQuantity,
     deliveredQuantity: 0,
-    grossWeight: 0,
-    tareWeight: 0,
-    netWeight: 0,
+    grossWeight,
+    tareWeight,
+    netWeight: netFromMass,
     quantityAtDelivery: 0,
     // Marcaj: livrarea a fost introdusa in kg. Vechile livrari nu au acest camp -> afisate in tone.
     enteredUnit: payload.enteredUnit === "kg" ? "kg" : "tone",
@@ -1918,7 +2109,7 @@ async function createDelivery(payload) {
   }
 
   state.deliveries.push(delivery);
-  recalcReceiptDeliveryState(state, receipt.id);
+  if (receipt) recalcReceiptDeliveryState(state, receipt.id);
 
   createAuditEntry(state, {
     entityType: "delivery",
@@ -2423,6 +2614,7 @@ async function createQuickSupplier(name, changedBy) {
     role: "furnizor",
     fiscalProfile: "Persoana fizica",
     status: "temporar",
+    allowDuplicateName: true,
     changeReason: "Furnizor temporar adaugat de operator la receptie",
     changedBy: changedBy || "operator"
   });
@@ -2552,8 +2744,12 @@ async function getStats() {
   const complaints = await listComplaints();
   const auditLogs = await listAuditLogs();
   const partnerAdvances = await listPartnerAdvances();
+  const transfers = await listTransfers();
+  // Stoc curent (la momentul de fata), nu suma istorica a receptiilor.
+  const stockSummary = createStockSummary(receipts, deliveries, openingDocuments, transfers, processings);
   return {
     ...createReceiptSummary(receipts),
+    stockTotal: stockSummary.totals.totalQuantity,
     opening: createOpeningSummary(openingDocuments),
     processing: createProcessingSummary(processings),
     finance: createTransactionSummary(transactions),
@@ -2569,7 +2765,8 @@ async function getStockSummary() {
   const receipts = await listReceipts();
   const deliveries = await listDeliveries();
   const transfers = await listTransfers();
-  return createStockSummary(receipts, deliveries, openingDocuments, transfers);
+  const processings = await listProcessings();
+  return createStockSummary(receipts, deliveries, openingDocuments, transfers, processings);
 }
 
 async function listTransfers() {
@@ -2617,6 +2814,32 @@ async function createTransfer(payload) {
   if (quantity > available) {
     throw new Error(
       `Stoc insuficient in ${fromLocation.name}: disponibil ${available} ${product.unit || "tone"}.`
+    );
+  }
+
+  // #12: continutul curent al cilindrului destinatie (doar produse cu stoc real).
+  const destItems = summary.byLocation.filter(
+    (item) => item.location === toLocation.name && Number(item.quantity || 0) > 0
+  );
+
+  // #12: intr-un cilindru poate fi un singur produs. Daca destinatia are deja alt
+  // produs, operatiunea este gresita si nu se permite salvarea.
+  if (String(toLocation.type || "").toLowerCase() === "cilindru") {
+    const otherProduct = destItems.find((item) => item.product !== product.name);
+    if (otherProduct) {
+      throw new Error(
+        `Operatiune gresita: in ${toLocation.name} se afla deja ${otherProduct.product}. Intr-un cilindru poate fi un singur produs.`
+      );
+    }
+  }
+
+  // #12: capacitatea maxima a locatiei destinatie (ex: cilindru = 2000 t = 2.000.000 kg).
+  const destCurrent = destItems.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+  const capacity = Number(toLocation.capacity || 0);
+  if (capacity > 0 && destCurrent + quantity > capacity) {
+    const liber = Math.max(capacity - destCurrent, 0);
+    throw new Error(
+      `Capacitate depasita in ${toLocation.name}: maxim ${capacity} t, ocupat ${destCurrent} t, mai incap ${liber} t (transfer cerut ${quantity} t).`
     );
   }
 
@@ -2741,7 +2964,9 @@ async function createConfigEntry(entity, payload) {
 
   // Nu permitem doi furnizori/parteneri cu acelasi nume.
   // IDNO-ul diferentiaza persoane reale cu acelasi nume.
-  if (entity === "partners") {
+  // Exceptie: operatorul poate adauga rapid o persoana fizica temporara la receptie
+  // chiar daca exista deja un nume identic (contabilul diferentiaza/uneste mai tarziu).
+  if (entity === "partners" && !payload.allowDuplicateName) {
     const sameName = state.partners.filter(
       (item) =>
         String(item.name || "").trim().toLowerCase() ===
