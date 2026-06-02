@@ -954,62 +954,20 @@
               <div></div>
             </div>
 
-            <details class="optional-fields" data-access="finance">
-              <summary>Date pentru factură (contabil)</summary>
+            <details class="optional-fields">
+              <summary>Detalii livrare (mașină, observații)</summary>
               <div class="split">
-                <label>
-                  Vânzător
-                  <input name="seller" placeholder="Denumire vânzător" />
-                </label>
-                <label>
-                  Invoice / factură
-                  <input name="invoiceNumber" placeholder="Nr. invoice / factură" />
-                </label>
-              </div>
-
-              <div class="split">
-                <label>
-                  Nr. contract
-                  <input name="contractNumber" placeholder="Contract" />
-                </label>
-                <label>
-                  Data contract
-                  <input name="contractDate" type="date" />
-                </label>
-              </div>
-
-              <div class="split">
-                <label>
-                  Preț (lei)
-                  <input name="priceLei" type="number" min="0" step="0.01" placeholder="MDL / unitate" />
-                </label>
-                <label>
-                  Preț valută
-                  <input name="priceForeign" type="number" min="0" step="0.01" placeholder="EUR / USD" />
-                </label>
-              </div>
-
-              <div class="split">
-                <label>
-                  Valuta
-                  <select name="currency">
-                    <option value="MDL">MDL</option>
-                    <option value="EUR">EUR</option>
-                    <option value="USD">USD</option>
-                    <option value="RON">RON</option>
-                  </select>
-                </label>
                 <label>
                   Mașină (nr.)
                   <input name="vehicle" list="vehicles-datalist" placeholder="Ex: AG-102" />
                   <datalist id="vehicles-datalist"></datalist>
                 </label>
+                <label>
+                  Observații
+                  <input name="note" placeholder="Comentariu livrare" />
+                </label>
               </div>
-
-              <label>
-                Observații
-                <input name="note" placeholder="Comentariu livrare" />
-              </label>
+              <p class="field-hint" data-access="finance">Datele pentru factură (vânzător, preț, valută, curs) se completează din butonul „Date factură" din lista de livrări recente.</p>
             </details>
 
             <section class="estimate-panel">
@@ -1139,6 +1097,15 @@
 
             <div class="split">
               <label>
+                Suma de diminuat (lei)
+                <input name="deductedAmount" type="number" min="0" step="0.01" placeholder="Suma care NU se va încasa" />
+                <span class="field-hint">Se scade din suma de încasat. Nu modifică stocul.</span>
+              </label>
+              <div></div>
+            </div>
+
+            <div class="split">
+              <label>
                 Status
                 <select name="status">
                   <option value="Deschisa">Deschisa</option>
@@ -1181,7 +1148,10 @@
                     <th>Livrare</th>
                     <th>Client</th>
                     <th>Tip</th>
-                    <th>Cantitate</th>
+                    <th>Sumă livrare</th>
+                    <th>Cant. inițială</th>
+                    <th>Cant. reclamată</th>
+                    <th>Sumă diminuată</th>
                     <th>Status</th>
                   </tr>
                 </thead>

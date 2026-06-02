@@ -2040,12 +2040,20 @@ async function createComplaint(payload) {
     throw new Error("Livrarea selectata nu exista.");
   }
 
+  // Suma totală a livrării (informativ) + cantitatea inițială
+  const deliveryQty = Number(delivery.netWeight > 0 ? delivery.netWeight : delivery.deliveredQuantity || delivery.plannedQuantity || 0);
+  const deliveryTotal = deliveryQty * Number(delivery.priceLei || 0);
+
   const complaint = {
     id: nextId(state.complaints),
     deliveryId: Number(payload.deliveryId),
     customer: delivery.customer,
     product: delivery.product,
     contestedQuantity: sanitizeNumber(payload.contestedQuantity),
+    // Modul D: reclamația NU modifică stocul — doar suma de încasat
+    deductedAmount: sanitizeNumber(payload.deductedAmount),
+    deliveryQuantity: deliveryQty,
+    deliveryTotal,
     complaintType: requiredText(payload.complaintType, "Tipul reclamatiei"),
     status: payload.status || "Deschisa",
     resolutionType: payload.resolutionType || "",

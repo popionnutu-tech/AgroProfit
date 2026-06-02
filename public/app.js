@@ -1434,13 +1434,24 @@ function renderComplaints(complaints) {
   const canEditStatuses = canAccess("complaint-write");
   complaintsBodyEl.innerHTML = complaints
     .map(
-      (item) => `
-        <tr>
+      (item) => {
+        const deducted = Number(item.deductedAmount || 0);
+        const deliveryTotal = Number(item.deliveryTotal || 0);
+        const initialQty = Number(item.deliveryQuantity || 0);
+        // Reclamația diminuează suma de încasat → afișăm cu minus, roșu
+        const deductedCell = deducted > 0
+          ? `<span class="complaint-minus">−${currency.format(deducted)}</span>`
+          : "-";
+        return `
+        <tr class="${deducted > 0 ? "complaint-row-minus" : ""}">
           <td>#${item.id}</td>
           <td>#${item.deliveryId}</td>
           <td>${item.customer}</td>
           <td>${item.complaintType}</td>
+          <td>${deliveryTotal > 0 ? currency.format(deliveryTotal) : "-"}</td>
+          <td>${initialQty > 0 ? formatNumber(initialQty) + " t" : "-"}</td>
           <td>${formatNumber(item.contestedQuantity)}</td>
+          <td>${deductedCell}</td>
           <td>
             <select class="complaint-status" data-id="${item.id}" ${canEditStatuses ? "" : "disabled"}>
               ${["Deschisa", "Acceptata", "Respinsa", "Inchisa", "Redeschisa"].map((status) => {
@@ -1450,7 +1461,8 @@ function renderComplaints(complaints) {
             </select>
           </td>
         </tr>
-      `
+      `;
+      }
     )
     .join("");
 }
@@ -4520,7 +4532,14 @@ function updateBillingPriceLei() {
   const cur = document.getElementById("billing-currency-select")?.value || "MDL";
   const lei = cur === "MDL" ? pf : pf * rate;
   const el = document.getElementById("billing-price-lei");
-  if (el) el.textContent = currency.format(lei || 0);
+  if (el) {
+    // Warn if foreign currency but no exchange rate (preț lei would be 0)
+    if (cur !== "MDL" && pf > 0 && rate <= 0) {
+      el.innerHTML = `<span style="color:var(--danger);">Introdu cursul valutar pentru ${cur}!</span>`;
+    } else {
+      el.textContent = currency.format(lei || 0);
+    }
+  }
 }
 
 complaintsBodyEl.addEventListener("change", async (event) => {

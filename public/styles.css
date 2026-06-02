@@ -1471,6 +1471,19 @@ dialog.billing-dialog .form-actions { display: flex; gap: 12px; margin-top: 16px
   display: none;
 }
 
+/* Reclamație cu sumă diminuată (Modul D) */
+.complaint-minus {
+  color: var(--danger);
+  font-weight: 800;
+  font-family: var(--font-mono);
+}
+.table-wrap tbody tr.complaint-row-minus td {
+  color: var(--danger);
+}
+.table-wrap tbody tr.complaint-row-minus td:first-child {
+  border-left: 3px solid var(--danger);
+}
+
 /* Billing modal computed price (Modul B) */
 .billing-computed {
   background: rgba(27, 94, 63, 0.06);
