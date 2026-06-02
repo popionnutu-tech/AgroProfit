@@ -331,6 +331,16 @@
               </select>
             </label>
             <label>
+              Stare plată
+              <select id="receipt-payment-filter">
+                <option value="">Toate</option>
+                <option value="restanta">Cu restanță (datorăm)</option>
+                <option value="Neachitat">Neachitat</option>
+                <option value="Partial">Parțial</option>
+                <option value="Achitat">Achitat</option>
+              </select>
+            </label>
+            <label>
               Perioada de la
               <input type="date" id="receipt-date-from" />
             </label>
@@ -593,14 +603,17 @@
                   <tr>
                     <th>ID</th>
                     <th>Data</th>
-                    <th>Produs</th>
                     <th>Furnizor</th>
-                    <th>Brut / net</th>
+                    <th>Produs</th>
+                    <th>Cantitate</th>
                     <th>Locatie</th>
-                    <th class="col-fin">Plata prelim.</th>
-                    <th class="col-fin">Data plata</th>
+                    <th class="col-fin">Valoare</th>
+                    <th class="col-fin">Achitat</th>
+                    <th class="col-fin">Rest</th>
+                    <th class="col-fin">Data plată</th>
+                    <th class="col-fin">Stare</th>
                     <th>Status</th>
-                    <th>Sursa</th>
+                    <th class="col-fin">Acțiuni</th>
                   </tr>
                 </thead>
                 <tbody id="receipts-body"></tbody>

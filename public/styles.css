@@ -1471,6 +1471,23 @@ dialog.billing-dialog .form-actions { display: flex; gap: 12px; margin-top: 16px
   display: none;
 }
 
+/* Payment status badges (Modul Achitări) */
+.pay-badge {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.pay-neachitat { background: rgba(181, 62, 34, 0.14); color: var(--danger); }
+.pay-partial { background: rgba(176, 136, 40, 0.18); color: var(--accent-2); }
+.pay-achitat { background: rgba(45, 143, 96, 0.18); color: var(--accent); }
+.pay-anulat { background: rgba(17, 33, 26, 0.06); color: var(--muted); }
+
 /* Document print buttons in livrari (Etapa 6) */
 .doc-print-row {
   display: flex;

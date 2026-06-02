@@ -92,6 +92,7 @@ const stockSummaryEl = document.getElementById("stock-summary");
 const silosGridEl = document.getElementById("silos-grid");
 const receiptStatusFilterEl = document.getElementById("receipt-status-filter");
 const receiptProductFilterEl = document.getElementById("receipt-product-filter");
+const receiptPaymentFilterEl = document.getElementById("receipt-payment-filter");
 const receiptDateFromEl = document.getElementById("receipt-date-from");
 const receiptDateToEl = document.getElementById("receipt-date-to");
 const receiptsFootEl = document.getElementById("receipts-foot");
@@ -956,34 +957,51 @@ function renderReceipts(receipts) {
   if (receiptsTable) {
     receiptsTable.classList.toggle("hide-fin", !canAccess("finance"));
   }
+  const payFilter = receiptPaymentFilterEl ? receiptPaymentFilterEl.value : "";
   const filteredReceipts = receipts.filter((item) => {
     const statusMatch = !receiptStatusFilterEl.value || item.status === receiptStatusFilterEl.value;
     const productMatch = !receiptProductFilterEl.value || item.product === receiptProductFilterEl.value;
     const dateMatch = withinDateRange(item, ["createdAt", "receivedAt"], receiptDateFromEl, receiptDateToEl);
-    return statusMatch && productMatch && dateMatch;
+    let payMatch = true;
+    if (payFilter === "restanta") payMatch = item.paymentStatus !== "Achitat";
+    else if (payFilter) payMatch = item.paymentStatus === payFilter;
+    // Anulat receipts don't owe money — hide them from payment filters
+    if (payFilter && item.status === "Anulat") payMatch = false;
+    return statusMatch && productMatch && dateMatch && payMatch;
   });
 
   bodyEl.innerHTML = filteredReceipts
     .map((item) => {
+      const valoare = Number(item.amountToPay ?? item.preliminaryPayableAmount ?? 0);
+      const achitat = Number(item.paidAmount || 0);
+      const rest = Number(item.soldRestant ?? Math.max(valoare - achitat, 0));
+      const isCanceled = item.status === "Anulat";
+      const payBadge = isCanceled
+        ? '<span class="pay-badge pay-anulat">—</span>'
+        : paymentBadge(item.paymentStatus);
+      const canPay = canAccess("finance") && !isCanceled && rest > 0;
       return `
         <tr>
           <td>#${item.id}</td>
           <td>${formatDateShort(item.createdAt || item.receivedAt)}</td>
-          <td>${item.product}</td>
           <td class="supplier-cell" data-id="${item.id}">
             <span class="supplier-name">${item.supplier}</span>
             ${canChangeSupplier ? `<button type="button" class="cell-btn change-supplier-btn" data-action="change-supplier" data-id="${item.id}" title="Schimbă furnizorul">✎</button>` : ""}
           </td>
-          <td>${formatQtyByEntry(item.grossQuantity || item.quantity, item)} / ${formatQtyByEntry(item.provisionalNetQuantity || item.quantity, item)}</td>
+          <td>${item.product}</td>
+          <td>${formatQtyByEntry(item.provisionalNetQuantity || item.quantity, item)}</td>
           <td>${item.location || "-"}</td>
-          <td class="col-fin">${currency.format(Number(item.preliminaryPayableAmount || 0))}</td>
-          <td class="col-fin">${formatDateShort(item.paymentDate || item.paidAt)}</td>
+          <td class="col-fin">${currency.format(valoare)}</td>
+          <td class="col-fin">${achitat > 0 ? currency.format(achitat) : "-"}</td>
+          <td class="col-fin"><b>${rest > 0 ? currency.format(rest) : "0"}</b></td>
+          <td class="col-fin">${formatDateShort(item.lastPaymentDate)}</td>
+          <td class="col-fin">${payBadge}</td>
           <td>
             <select class="status" data-id="${item.id}" ${canEditStatuses ? "" : "disabled"}>
               ${statusOptions(item.status).join("")}
             </select>
           </td>
-          <td>${item.source}</td>
+          <td class="col-fin">${canPay ? `<button type="button" class="cell-btn cell-btn-primary achita-btn" data-achita="${item.id}">Achită</button>` : "-"}</td>
         </tr>
       `;
     })
@@ -995,31 +1013,75 @@ function renderReceipts(receipts) {
   }
 }
 
+function paymentBadge(status) {
+  const map = {
+    Neachitat: { cls: "pay-neachitat", label: "Neachitat" },
+    Partial: { cls: "pay-partial", label: "Parțial" },
+    Achitat: { cls: "pay-achitat", label: "Achitat" }
+  };
+  const s = map[status] || map.Neachitat;
+  return `<span class="pay-badge ${s.cls}">${s.label}</span>`;
+}
+
+// "Achită" button: jump to Financiar with the payment pre-filled (Modul Achitări)
+function prefillReceiptPayment(receiptId) {
+  const receipt = (receiptsCache || []).find((r) => String(r.id) === String(receiptId));
+  if (!receipt) return;
+  setView("financiar");
+  const navBtn = document.querySelector('.view-tab[data-view="financiar"]');
+  if (navBtn) navBtn.classList.add("is-active");
+  // Set reference to this receipt
+  if (transactionReferenceTypeSelect) {
+    transactionReferenceTypeSelect.value = "receipt";
+  }
+  renderTransactionReferenceOptions();
+  setSelectValue(transactionReferenceSelect, [String(receiptId)]);
+  if (typeof syncTransactionDirection === "function") syncTransactionDirection();
+  // Pre-fill amount = sold restant
+  const rest = Number(receipt.soldRestant ?? Math.max(Number(receipt.amountToPay || receipt.preliminaryPayableAmount || 0) - Number(receipt.paidAmount || 0), 0));
+  if (transactionFormEl && transactionFormEl.elements.amount) {
+    transactionFormEl.elements.amount.value = rest > 0 ? rest.toFixed(2) : "";
+    transactionFormEl.elements.amount.focus();
+  }
+  transactionFormEl?.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
 function renderReceiptTotals(rows) {
   if (!rows.length) {
     receiptsFootEl.innerHTML = "";
     return;
   }
+  // Totals per product: cantitate / sumă către plată / sumă achitată
   const byProduct = {};
   let totalNet = 0;
   let totalPay = 0;
+  let totalPaid = 0;
   rows.forEach((item) => {
+    if (item.status === "Anulat") return;
     const net = Number(item.provisionalNetQuantity || item.quantity || 0);
-    const pay = Number(item.preliminaryPayableAmount || 0);
+    const pay = Number(item.amountToPay ?? item.preliminaryPayableAmount ?? 0);
+    const paid = Number(item.paidAmount || 0);
     totalNet += net;
     totalPay += pay;
+    totalPaid += paid;
     const key = item.product || "—";
-    byProduct[key] = (byProduct[key] || 0) + net;
+    if (!byProduct[key]) byProduct[key] = { net: 0, pay: 0, paid: 0 };
+    byProduct[key].net += net;
+    byProduct[key].pay += pay;
+    byProduct[key].paid += paid;
   });
+  const fin = canAccess("finance");
   const perProduct = Object.entries(byProduct)
-    .map(([prod, qty]) => `${prod}: ${formatNumber(qty)} t`)
-    .join(" · ");
-  const payPart = canAccess("finance")
-    ? `&nbsp;·&nbsp; Plată prelim: <b>${currency.format(totalPay)}</b> `
+    .map(([prod, v]) => fin
+      ? `${prod}: ${formatNumber(v.net)} t / plată ${currency.format(v.pay)} / achitat ${currency.format(v.paid)}`
+      : `${prod}: ${formatNumber(v.net)} t`)
+    .join("  ·  ");
+  const finPart = fin
+    ? `&nbsp;·&nbsp; Plată: <b>${currency.format(totalPay)}</b> · Achitat: <b>${currency.format(totalPaid)}</b> · Rest: <b>${currency.format(Math.max(totalPay - totalPaid, 0))}</b>`
     : "";
   receiptsFootEl.innerHTML = `
     <tr class="totals-row">
-      <td colspan="10">TOTAL (${rows.length} recepții) &nbsp;·&nbsp; Net: <b>${formatNumber(totalNet)} t</b> ${payPart}&nbsp;·&nbsp; ${perProduct}</td>
+      <td colspan="13">TOTAL (${rows.length} recepții) &nbsp;·&nbsp; Net: <b>${formatNumber(totalNet)} t</b>${finPart}<br>${perProduct}</td>
     </tr>
   `;
 }
@@ -3879,8 +3941,16 @@ formEl.elements.quantity.addEventListener("input", renderReceiptEstimate);
 formEl.elements.price.addEventListener("input", renderReceiptEstimate);
 receiptStatusFilterEl.addEventListener("change", () => renderReceipts(receiptsCache));
 receiptProductFilterEl.addEventListener("change", () => renderReceipts(receiptsCache));
+receiptPaymentFilterEl?.addEventListener("change", () => renderReceipts(receiptsCache));
 receiptDateFromEl?.addEventListener("change", () => renderReceipts(receiptsCache));
 receiptDateToEl?.addEventListener("change", () => renderReceipts(receiptsCache));
+
+// "Achită" buttons in receipts table (Modul Achitări)
+bodyEl?.addEventListener("click", (event) => {
+  const btn = event.target.closest(".achita-btn");
+  if (!btn) return;
+  prefillReceiptPayment(btn.dataset.achita);
+});
 processingTypeFilterEl.addEventListener("change", () => renderProcessings(processingsCache));
 processingReceiptFilterEl.addEventListener("change", () => renderProcessings(processingsCache));
 processingDateFromEl?.addEventListener("change", () => renderProcessings(processingsCache));

@@ -1138,7 +1138,35 @@ function assertEntity(entity) {
 
 async function listReceipts() {
   const state = readReceiptsState();
-  return state.receipts.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  // Recompute payment state from transactions on the fly so cifrele coincid mereu
+  const paidByReceipt = new Map();
+  const lastPaymentByReceipt = new Map();
+  for (const t of state.transactions || []) {
+    if (t.referenceType !== "receipt" || t.direction !== "payment") continue;
+    if (t.stornata === true) continue; // storned payments don't count
+    const rid = Number(t.receiptId);
+    if (!rid) continue;
+    const applied = Number(t.appliedAmount ?? t.amount ?? 0);
+    paidByReceipt.set(rid, (paidByReceipt.get(rid) || 0) + applied);
+    const when = t.createdAt || t.transactedAt || "";
+    const prev = lastPaymentByReceipt.get(rid);
+    if (!prev || String(when) > String(prev)) lastPaymentByReceipt.set(rid, when);
+  }
+  const enriched = state.receipts.map((r) => {
+    const target = Number(r.preliminaryPayableAmount || 0);
+    const paid = Number(paidByReceipt.get(Number(r.id)) || 0);
+    const soldRestant = Math.max(target - paid, 0);
+    const paymentStatus = paid <= 0 ? "Neachitat" : paid < target ? "Partial" : "Achitat";
+    return {
+      ...r,
+      amountToPay: target,
+      paidAmount: paid,
+      soldRestant,
+      paymentStatus,
+      lastPaymentDate: lastPaymentByReceipt.get(Number(r.id)) || ""
+    };
+  });
+  return enriched.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 }
 
 async function listOpeningDocuments() {
