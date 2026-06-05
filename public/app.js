@@ -704,6 +704,17 @@ function renderSilosGrid(summary) {
     .filter((loc) => loc.active !== false && String(loc.type || "").toLowerCase() === "cilindru")
     .sort((a, b) => Number(a.id) - Number(b.id));
 
+  // Header dinamic (reflectă numărul real de cilindri + capacitatea totală)
+  const titleEl = document.getElementById("silos-title");
+  const subEl = document.getElementById("silos-sub");
+  if (titleEl && subEl) {
+    const n = cylinders.length;
+    const totalCap = cylinders.reduce((s, c) => s + Number(c.capacity || 0), 0);
+    const totalSun = cylinders.reduce((s, c) => s + Number(c.capacitySunflower || c.capacity || 0), 0);
+    titleEl.textContent = `${n} ${n === 1 ? "cilindru" : "cilindri"} · ${formatNumber(totalCap)} t`;
+    subEl.textContent = `Capacitate totală ${formatNumber(totalCap)} t pentru grâu/porumb · ${formatNumber(totalSun)} t pentru floarea soarelui`;
+  }
+
   if (!cylinders.length) {
     silosGridEl.innerHTML = '<p class="hero-copy" style="grid-column:1/-1;color:var(--muted);">Niciun cilindru configurat. Configurează în Setari → Locatii.</p>';
     return;

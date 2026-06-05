@@ -1988,7 +1988,7 @@ dialog.billing-dialog .form-actions { display: flex; gap: 12px; margin-top: 16px
 
 .silos-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   gap: 18px;
   position: relative;
   z-index: 1;
