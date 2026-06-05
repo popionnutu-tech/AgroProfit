@@ -1565,6 +1565,14 @@ async function createProcessing(payload) {
 
   const outputQuantity = Math.max(processedQuantity - confirmedWaste - waterRemoved, 0);
 
+  // Protecție: deșeul + apa nu pot fi mai mari decât cantitatea procesată (altfel
+  // cilindrul destinație ar rămâne pe 0 din greșeală de unitate).
+  if (confirmedWaste + waterRemoved >= processedQuantity) {
+    throw new Error(
+      `Deșeu (${(confirmedWaste * 1000).toFixed(0)} kg) + apă (${(waterRemoved * 1000).toFixed(0)} kg) depășesc cantitatea procesată (${(processedQuantity * 1000).toFixed(0)} kg). Verifică valorile.`
+    );
+  }
+
   // #8: nu se poate procesa mai mult decat exista in stoc (produs + locatie sursa).
   const summary = await getStockSummary();
   const available = Number(
@@ -2085,18 +2093,21 @@ async function createDelivery(payload) {
     priceLei: sanitizeNumber(payload.priceForeign) * (sanitizeNumber(payload.exchangeRate) || (String(payload.currency || "MDL").toUpperCase() === "MDL" ? 1 : 0)) || sanitizeNumber(payload.priceLei),
     invoiceDate: payload.invoiceDate || "",
     plannedQuantity,
-    deliveredQuantity: 0,
+    // Livrare imediată: scade stocul pe loc (operatorul se așteaptă ca livrarea =
+    // ieșire reală din stoc, nu doar rezervare). Astfel dashboard-ul se actualizează
+    // și nu se acumulează rezervări fantomă.
+    deliveredQuantity: plannedQuantity,
     grossWeight,
     tareWeight,
-    netWeight: netFromMass,
-    quantityAtDelivery: 0,
+    netWeight: netFromMass > 0 ? netFromMass : plannedQuantity,
+    quantityAtDelivery: plannedQuantity,
     // Marcaj: livrarea a fost introdusa in kg. Vechile livrari nu au acest camp -> afisate in tone.
     enteredUnit: payload.enteredUnit === "kg" ? "kg" : "tone",
     invoiceNumber: payload.invoiceNumber || "",
     note: payload.note || "",
-    status: "Proiect",
-    confirmedAt: null,
-    deliveredAt: null,
+    status: "Livrat",
+    confirmedAt: new Date().toISOString(),
+    deliveredAt: new Date().toISOString(),
     closedAt: null,
     canceledAt: null,
     changedBy: payload.createdBy || "dashboard",

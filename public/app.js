@@ -3390,23 +3390,29 @@ function getProcessingAvailable() {
 }
 
 function renderProcessingEstimate() {
-  const available = getProcessingAvailable();
-  const processedQuantity = Number(processedQuantityInput.value || 0);
-  const confirmedWaste = Number(confirmedWasteInput.value || 0);
+  // Inputurile sunt in KG (ca la recepții și livrări); stocul intern e in tone.
+  const availableT = getProcessingAvailable();
+  const availableKg = availableT * 1000;
+  const processedKg = Number(processedQuantityInput.value || 0);
+  const wasteKg = Number(confirmedWasteInput.value || 0);
   const initialHum = Number(processingInitialHumidityInput?.value || 0);
   const finalHum = Number(processingFinalHumidityInput?.value || 0);
-  const water =
+  const waterKg =
     initialHum > 0 && finalHum > 0
-      ? Math.max((processedQuantity * (initialHum - finalHum)) / 100, 0)
+      ? Math.max((processedKg * (initialHum - finalHum)) / 100, 0)
       : 0;
-  const finalNet = Math.max(processedQuantity - confirmedWaste - water, 0);
+  const finalNetKg = Math.max(processedKg - wasteKg - waterKg, 0);
 
   if (processingAvailableEl) {
-    processingAvailableEl.textContent = formatNumber(available);
-    processingAvailableEl.style.color = processedQuantity > available ? "#b3261e" : "";
+    processingAvailableEl.textContent = `${formatNumber(availableKg)} kg (${formatNumber(availableT)} t)`;
+    processingAvailableEl.style.color = processedKg > availableKg ? "#b3261e" : "";
   }
-  if (processingWaterEl) processingWaterEl.textContent = formatNumber(Number(water.toFixed(3)));
-  if (processingFinalNetEl) processingFinalNetEl.textContent = formatNumber(Number(finalNet.toFixed(3)));
+  if (processingWaterEl) processingWaterEl.textContent = `${formatNumber(Number(waterKg.toFixed(1)))} kg`;
+  if (processingFinalNetEl) {
+    processingFinalNetEl.textContent = `${formatNumber(Number(finalNetKg.toFixed(1)))} kg`;
+    // Avertizare vizuală dacă net rămas ar fi 0 (deșeu/apă mai mari decât cantitatea)
+    processingFinalNetEl.style.color = processedKg > 0 && finalNetKg <= 0 ? "#b3261e" : "";
+  }
 }
 
 // Prefill umiditate initiala din ultima receptie a produsului in locatia sursa.
@@ -3428,15 +3434,19 @@ async function createProcessing(formData, status) {
     (item) => String(item.id) === String(formData.get("operator"))
   );
 
+  // Inputurile sunt in KG; stocul intern e in tone → împărțim la 1000.
+  const processedKg = Number(formData.get("processedQuantity") || 0);
+  const wasteKg = Number(formData.get("confirmedWaste") || 0);
   const payload = {
     product: formData.get("product"),
     sourceLocation: formData.get("sourceLocation"),
     destLocation: formData.get("destLocation") || "",
     processingType: formData.get("processingType"),
-    processedQuantity: formData.get("processedQuantity"),
-    confirmedWaste: formData.get("confirmedWaste"),
+    processedQuantity: String(processedKg / 1000),
+    confirmedWaste: String(wasteKg / 1000),
     initialHumidity: formData.get("initialHumidity"),
     finalHumidity: formData.get("finalHumidity"),
+    enteredUnit: "kg",
     operator: operator?.name || "",
     note: formData.get("note"),
     status: status === "In lucru" ? "In lucru" : "Confirmat"
