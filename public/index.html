@@ -623,9 +623,12 @@
           </section>
         </section>
 
-        <section class="eod-banner" id="eod-processing-banner" data-view="procesare" hidden>
-          <span id="eod-processing-text">Azi au fost recepții, dar nicio procesare. Introdu o procesare sau confirmă că nu s-a procesat nimic.</span>
-          <button type="button" id="eod-confirm-btn">Confirmă: nu s-a procesat nimic azi</button>
+        <section class="eod-banner" id="eod-processing-banner" hidden>
+          <span id="eod-processing-text">Azi au fost recepții, dar încă nu s-a procesat nimic. Introdu o procesare sau confirmă că nu s-a procesat nimic.</span>
+          <div class="eod-banner-actions">
+            <button type="button" id="eod-confirm-btn">Confirmă: nu s-a procesat nimic azi</button>
+            <button type="button" id="eod-close-btn" class="eod-close" aria-label="Închide" title="Închide până data viitoare">✕</button>
+          </div>
         </section>
 
         <section class="grid processing-grid" data-view="procesare">
@@ -1039,6 +1042,19 @@
             <div class="inline-date-filter">
               <label>De la<input type="date" id="delivery-date-from" /></label>
               <label>Pana la<input type="date" id="delivery-date-to" /></label>
+              <label>Cumpărător
+                <select id="delivery-customer-filter"><option value="">Toți</option></select>
+              </label>
+              <label>Produs
+                <select id="delivery-product-filter"><option value="">Toate</option></select>
+              </label>
+              <label class="col-fin">Achitare
+                <select id="delivery-paid-filter">
+                  <option value="">Toate</option>
+                  <option value="paid">Achitate</option>
+                  <option value="unpaid">Neachitate</option>
+                </select>
+              </label>
             </div>
             <div class="table-wrap">
               <table id="deliveries-table">
@@ -1053,6 +1069,8 @@
                     <th>Cantitate</th>
                     <th>Masina</th>
                     <th class="col-fin">Pret</th>
+                    <th class="col-fin">Sumă factură</th>
+                    <th class="col-fin">Achitată</th>
                     <th>Status</th>
                   </tr>
                 </thead>
@@ -1092,6 +1110,22 @@
               Preț în lei (calculat): <strong id="billing-price-lei">0,00 MDL</strong> / tonă
             </div>
             <div class="split">
+              <label>Cotă TVA
+                <select name="vatRate" id="billing-vat-select">
+                  <option value="-">– (fără TVA)</option>
+                  <option value="0">0%</option>
+                  <option value="8">8%</option>
+                  <option value="20">20%</option>
+                </select>
+              </label>
+              <div></div>
+            </div>
+            <div class="billing-totals" id="billing-totals">
+              <div>Valoare totală fără TVA: <strong id="billing-base">0,00</strong> lei</div>
+              <div>Suma totală TVA: <strong id="billing-vat">0,00</strong> lei</div>
+              <div class="billing-grand">Total factură: <strong id="billing-total">0,00</strong> lei</div>
+            </div>
+            <div class="split">
               <label>Nr. contract<input name="contractNumber" placeholder="Contract" /></label>
               <label>Data contract<input name="contractDate" type="date" /></label>
             </div>
@@ -1113,9 +1147,20 @@
             </div>
 
             <label>
-              Livrare
-              <select name="deliveryId" id="complaint-delivery-select" required></select>
+              Cumpărător (firmă)
+              <select name="customerId" id="complaint-customer-select" required></select>
             </label>
+
+            <div class="split">
+              <label>
+                Produs reclamat
+                <select name="product" id="complaint-product-select" required></select>
+              </label>
+              <label>
+                Livrare (opțional)
+                <select name="deliveryId" id="complaint-delivery-select"></select>
+              </label>
+            </div>
 
             <div class="split">
               <label>
@@ -1127,8 +1172,8 @@
                 </select>
               </label>
               <label>
-                Cantitate contestata
-                <input name="contestedQuantity" type="number" min="0" step="0.01" required />
+                Cantitate contestată
+                <input name="contestedQuantity" class="complaint-qty-input" type="number" min="0" step="0.01" required />
               </label>
             </div>
 
@@ -1177,13 +1222,18 @@
               <h2>Reclamatii recente</h2>
               <p>Controlul lipsurilor si neajunsurilor la livrare</p>
             </div>
+            <div class="inline-date-filter">
+              <label>Filtru produs
+                <select id="complaint-product-filter"><option value="">Toate produsele</option></select>
+              </label>
+            </div>
             <div class="table-wrap">
               <table>
                 <thead>
                   <tr>
                     <th>ID</th>
-                    <th>Livrare</th>
                     <th>Client</th>
+                    <th>Produs</th>
                     <th>Tip</th>
                     <th>Sumă livrare</th>
                     <th>Cant. inițială</th>
@@ -1193,6 +1243,7 @@
                   </tr>
                 </thead>
                 <tbody id="complaints-body"></tbody>
+                <tfoot id="complaints-foot"></tfoot>
               </table>
             </div>
           </section>

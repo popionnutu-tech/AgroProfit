@@ -1380,6 +1380,11 @@ thead th {
   margin-bottom: 16px;
   font-weight: 600;
 }
+.eod-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .eod-banner button {
   background: #92400e;
   color: #fff;
@@ -1389,6 +1394,17 @@ thead th {
   cursor: pointer;
   font-weight: 600;
   white-space: nowrap;
+}
+.eod-banner button.eod-close {
+  background: transparent;
+  color: #92400e;
+  border: 1px solid #f59e0b;
+  padding: 6px 10px;
+  font-size: 0.9rem;
+  line-height: 1;
+}
+.eod-banner button.eod-close:hover {
+  background: rgba(146, 64, 14, 0.1);
 }
 
 dialog.billing-dialog {
@@ -1508,6 +1524,15 @@ dialog.billing-dialog .form-actions { display: flex; gap: 12px; margin-top: 16px
   padding: 7px 9px;
 }
 
+/* Input cantitate reclamație mai mare (REC) */
+.complaint-qty-input {
+  padding: 12px 14px;
+  font-size: 1.05rem;
+  font-weight: 600;
+  width: 100%;
+  min-height: 46px;
+}
+
 /* Reclamație cu sumă diminuată (Modul D) */
 .complaint-minus {
   color: var(--danger);
@@ -1519,6 +1544,36 @@ dialog.billing-dialog .form-actions { display: flex; gap: 12px; margin-top: 16px
 }
 .table-wrap tbody tr.complaint-row-minus td:first-child {
   border-left: 3px solid var(--danger);
+}
+
+/* Billing TVA totals (FACT) */
+.billing-totals {
+  background: rgba(27, 94, 63, 0.05);
+  border: 1px solid rgba(27, 94, 63, 0.14);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin: 4px 0;
+  font-size: 0.86rem;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.billing-totals strong { color: var(--accent-deep); }
+.billing-totals .billing-grand {
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px dashed rgba(27, 94, 63, 0.2);
+  font-size: 0.95rem;
+}
+.billing-totals .billing-grand strong { font-size: 1.05rem; }
+
+/* Status achitare factură per livrare (FACT) */
+.pay-cell.is-paid select { color: var(--accent); font-weight: 700; }
+.pay-cell.is-unpaid select { color: var(--danger); font-weight: 700; }
+.delivery-paid-select {
+  padding: 4px 8px;
+  border-radius: 8px;
+  font-size: 0.78rem;
 }
 
 /* Billing modal computed price (Modul B) */

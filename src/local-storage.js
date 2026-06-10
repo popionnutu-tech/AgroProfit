@@ -2236,21 +2236,35 @@ async function transitionDelivery(id, newStatus, payload = {}) {
 
 async function createComplaint(payload) {
   const state = readReceiptsState();
-  const delivery = (state.deliveries || []).find((item) => item.id === Number(payload.deliveryId));
+  // Livrarea e OPȚIONALĂ acum: reclamația se leagă de firmă + produs (REC).
+  const delivery = payload.deliveryId
+    ? (state.deliveries || []).find((item) => item.id === Number(payload.deliveryId))
+    : null;
 
-  if (!delivery) {
-    throw new Error("Livrarea selectata nu exista.");
+  // Determinăm firma (cumpărător) și produsul: din livrare dacă există, altfel din payload.
+  let customer = delivery ? delivery.customer : (payload.customer || "");
+  const product = delivery ? delivery.product : requiredText(payload.product, "Produsul reclamat");
+  if (!customer && payload.customerId) {
+    const config = readConfigState();
+    const partner = (config.partners || []).find((p) => Number(p.id) === Number(payload.customerId));
+    customer = partner ? partner.name : "";
+  }
+  if (!customer) {
+    throw new Error("Selectează firma (cumpărătorul).");
   }
 
-  // Suma totală a livrării (informativ) + cantitatea inițială
-  const deliveryQty = Number(delivery.netWeight > 0 ? delivery.netWeight : delivery.deliveredQuantity || delivery.plannedQuantity || 0);
-  const deliveryTotal = deliveryQty * Number(delivery.priceLei || 0);
+  // Suma totală a livrării (informativ) + cantitatea inițială (doar dacă există livrare)
+  const deliveryQty = delivery
+    ? Number(delivery.netWeight > 0 ? delivery.netWeight : delivery.deliveredQuantity || delivery.plannedQuantity || 0)
+    : 0;
+  const deliveryTotal = delivery ? deliveryQty * Number(delivery.priceLei || 0) : 0;
 
   const complaint = {
     id: nextId(state.complaints),
-    deliveryId: Number(payload.deliveryId),
-    customer: delivery.customer,
-    product: delivery.product,
+    deliveryId: delivery ? Number(payload.deliveryId) : null,
+    customerId: payload.customerId ? Number(payload.customerId) : (delivery ? delivery.customerId : null),
+    customer,
+    product,
     contestedQuantity: sanitizeNumber(payload.contestedQuantity),
     // Modul D: reclamația NU modifică stocul — doar suma de încasat
     deductedAmount: sanitizeNumber(payload.deductedAmount),
@@ -2275,10 +2289,11 @@ async function createComplaint(payload) {
   }
 
   state.complaints.push(complaint);
-  delivery.complaintStatus = complaint.status;
-  delivery.updatedAt = new Date().toISOString();
-
-  recalcReceiptComplaintFlag(state, delivery.receiptId);
+  if (delivery) {
+    delivery.complaintStatus = complaint.status;
+    delivery.updatedAt = new Date().toISOString();
+    recalcReceiptComplaintFlag(state, delivery.receiptId);
+  }
 
   createAuditEntry(state, {
     entityType: "complaint",
@@ -2338,6 +2353,14 @@ async function updateDelivery(id, payload = {}) {
   }
   if (payload.sellerId !== undefined) {
     delivery.sellerId = payload.sellerId ? Number(payload.sellerId) : null;
+  }
+  // Cotă TVA: "-" (fără TVA) sau număr (0/8/20)
+  if (payload.vatRate !== undefined) {
+    delivery.vatRate = payload.vatRate === "-" || payload.vatRate === null || payload.vatRate === "" ? "-" : Number(payload.vatRate);
+  }
+  // Status achitare factură de către cumpărător (FACT)
+  if (payload.invoicePaid !== undefined) {
+    delivery.invoicePaid = payload.invoicePaid === true || payload.invoicePaid === "true" || payload.invoicePaid === "Achitată";
   }
   if (payload.invoiceDate !== undefined) {
     delivery.invoiceDate = String(payload.invoiceDate || "").trim();

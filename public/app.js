@@ -110,6 +110,9 @@ const processingDateToEl = document.getElementById("processing-date-to");
 const processingsFootEl = document.getElementById("processings-foot");
 const deliveryDateFromEl = document.getElementById("delivery-date-from");
 const deliveryDateToEl = document.getElementById("delivery-date-to");
+const deliveryCustomerFilterEl = document.getElementById("delivery-customer-filter");
+const deliveryProductFilterEl2 = document.getElementById("delivery-product-filter");
+const deliveryPaidFilterEl = document.getElementById("delivery-paid-filter");
 const deliveriesFootEl = document.getElementById("deliveries-foot");
 const transactionDateFromEl = document.getElementById("transaction-date-from");
 const transactionDateToEl = document.getElementById("transaction-date-to");
@@ -140,6 +143,10 @@ const deliveriesBodyEl = document.getElementById("deliveries-body");
 const deliveryBillingDialog = document.getElementById("delivery-billing-dialog");
 const deliveryBillingForm = document.getElementById("delivery-billing-form");
 const complaintFormEl = document.getElementById("complaint-form");
+const complaintCustomerSelect = document.getElementById("complaint-customer-select");
+const complaintProductSelect = document.getElementById("complaint-product-select");
+const complaintProductFilterEl = document.getElementById("complaint-product-filter");
+const complaintsFootEl = document.getElementById("complaints-foot");
 const complaintMessageEl = document.getElementById("complaint-message");
 const complaintDeliverySelect = document.getElementById("complaint-delivery-select");
 const complaintsBodyEl = document.getElementById("complaints-body");
@@ -462,12 +469,20 @@ function setView(view) {
     syncSidebarGroups(view);
   }
 
+  // Memorăm view-ul curent pentru alerta de procesare (OP-1)
+  currentActiveView = view;
+  if (typeof checkEndOfDayProcessing === "function") {
+    checkEndOfDayProcessing();
+  }
+
   try {
     window.localStorage.setItem("active-view", view);
   } catch (_err) {
     // localStorage blocked — ignore
   }
 }
+
+let currentActiveView = "acasa";
 
 // Helper to safely set text on a dashboard cell (no-op if element missing)
 function setDashText(id, value) {
@@ -1260,15 +1275,25 @@ function renderReceiptTotals(rows) {
   `;
 }
 
-// La finele zilei: daca au fost receptii azi dar nicio procesare, atentioneaza operatorul.
+// Alertă operator: au fost recepții azi dar nicio procesare. (OP-1)
+// Rămâne pe ecran (Recepție/Procesare) până când operatorul confirmă SAU închide manual.
+// NU dispare automat la reîncărcarea datelor.
 function checkEndOfDayProcessing() {
   if (!eodBanner) return;
+  // Se afișează doar pe ecranele Recepție și Procesare
+  const onRelevantView = currentActiveView === "receptii" || currentActiveView === "procesare";
+  if (!onRelevantView) {
+    eodBanner.hidden = true;
+    return;
+  }
   const today = new Date().toISOString().slice(0, 10);
-  let confirmed = false;
+  let dismissed = false;
   try {
-    confirmed = window.localStorage.getItem(`eod-no-processing-${today}`) === "1";
+    // Confirmat pentru toată ziua, sau închis manual în sesiunea curentă
+    dismissed = window.localStorage.getItem(`eod-no-processing-${today}`) === "1"
+      || window.sessionStorage.getItem(`eod-closed-${today}`) === "1";
   } catch (_e) {
-    confirmed = false;
+    dismissed = false;
   }
   const todaysReceipts = receiptsCache.filter(
     (r) => String(r.createdAt || r.receivedAt || "").slice(0, 10) === today && r.status !== "Anulat"
@@ -1276,7 +1301,7 @@ function checkEndOfDayProcessing() {
   const todaysProcessings = processingsCache.filter(
     (p) => String(p.createdAt || p.processedAt || "").slice(0, 10) === today
   );
-  eodBanner.hidden = !(todaysReceipts.length > 0 && todaysProcessings.length === 0 && !confirmed);
+  eodBanner.hidden = !(todaysReceipts.length > 0 && todaysProcessings.length === 0 && !dismissed);
 }
 
 // Stoc neprocesat pe produs: receptii care inca nu au fost procesate.
@@ -1522,9 +1547,31 @@ function renderDeliveries(deliveries) {
   if (deliveriesTable) {
     deliveriesTable.classList.toggle("hide-fin", !canAccess("finance"));
   }
-  const filtered = deliveries.filter((item) =>
-    withinDateRange(item, ["createdAt", "deliveredAt"], deliveryDateFromEl, deliveryDateToEl)
-  );
+  // Populează filtrele cumpărător/produs (o singură dată per valoare)
+  if (deliveryCustomerFilterEl) {
+    const custs = Array.from(new Set(deliveries.map((d) => d.customer).filter(Boolean))).sort((a, b) => String(a).localeCompare(String(b), "ro"));
+    const prev = deliveryCustomerFilterEl.value;
+    deliveryCustomerFilterEl.innerHTML = '<option value="">Toți</option>' + custs.map((c) => `<option value="${c}">${c}</option>`).join("");
+    if (prev) deliveryCustomerFilterEl.value = prev;
+  }
+  if (deliveryProductFilterEl2) {
+    const prods = Array.from(new Set(deliveries.map((d) => d.product).filter(Boolean))).sort((a, b) => String(a).localeCompare(String(b), "ro"));
+    const prev = deliveryProductFilterEl2.value;
+    deliveryProductFilterEl2.innerHTML = '<option value="">Toate</option>' + prods.map((p) => `<option value="${p}">${p}</option>`).join("");
+    if (prev) deliveryProductFilterEl2.value = prev;
+  }
+  const custFilter = deliveryCustomerFilterEl ? deliveryCustomerFilterEl.value : "";
+  const prodFilter = deliveryProductFilterEl2 ? deliveryProductFilterEl2.value : "";
+  const paidFilter = deliveryPaidFilterEl ? deliveryPaidFilterEl.value : "";
+
+  const filtered = deliveries.filter((item) => {
+    if (!withinDateRange(item, ["createdAt", "deliveredAt"], deliveryDateFromEl, deliveryDateToEl)) return false;
+    if (custFilter && item.customer !== custFilter) return false;
+    if (prodFilter && item.product !== prodFilter) return false;
+    if (paidFilter === "paid" && !item.invoicePaid) return false;
+    if (paidFilter === "unpaid" && item.invoicePaid) return false;
+    return true;
+  });
   deliveriesBodyEl.innerHTML = filtered
     .map((item) => {
       const status = item.status || "Proiect";
@@ -1540,6 +1587,14 @@ function renderDeliveries(deliveries) {
       const priceLabel = item.priceForeign && item.currency && item.currency !== "MDL"
         ? `${formatNumber(item.priceForeign)} ${item.currency}`
         : (item.priceLei ? `${formatNumber(item.priceLei)} MDL` : "-");
+      const totalFactura = qty * Number(item.priceLei || 0);
+      const canBill = canAccess("finance");
+      const paidSelect = canBill
+        ? `<select class="delivery-paid-select" data-id="${item.id}">
+             <option value="false" ${!item.invoicePaid ? "selected" : ""}>Neachitată</option>
+             <option value="true" ${item.invoicePaid ? "selected" : ""}>Achitată</option>
+           </select>`
+        : (item.invoicePaid ? "Achitată" : "Neachitată");
       return `
         <tr>
           <td>#${item.id}</td>
@@ -1551,6 +1606,8 @@ function renderDeliveries(deliveries) {
           <td>${formatQtyByEntry(qty, item)}</td>
           <td>${item.vehicle || "-"}</td>
           <td class="col-fin">${priceLabel}</td>
+          <td class="col-fin">${totalFactura > 0 ? currency.format(totalFactura) : "-"}</td>
+          <td class="col-fin pay-cell ${item.invoicePaid ? "is-paid" : "is-unpaid"}">${paidSelect}</td>
           <td>
             <div class="col-fin">${item.invoiceNumber || "-"}</div>
             ${item.note ? `<div class="row-note">${item.note}</div>` : ""}
@@ -1621,28 +1678,41 @@ function renderDeliveryTotals(rows) {
     : "";
   deliveriesFootEl.innerHTML = `
     <tr class="totals-row">
-      <td colspan="10">TOTAL (${rows.length} livrări) &nbsp;·&nbsp; Cantitate: <b>${formatNumber(totalQty)} t</b>${finPart}<br>${perProduct}</td>
+      <td colspan="12">TOTAL (${rows.length} livrări) &nbsp;·&nbsp; Cantitate: <b>${formatNumber(totalQty)} t</b>${finPart}<br>${perProduct}</td>
     </tr>
   `;
 }
 
 function renderComplaints(complaints) {
   const canEditStatuses = canAccess("complaint-write");
-  complaintsBodyEl.innerHTML = complaints
+
+  // Populează filtrul de produs (o singură dată per produs)
+  if (complaintProductFilterEl) {
+    const prods = Array.from(new Set(complaints.map((c) => c.product).filter(Boolean)))
+      .sort((a, b) => String(a).localeCompare(String(b), "ro"));
+    const prev = complaintProductFilterEl.value;
+    complaintProductFilterEl.innerHTML = '<option value="">Toate produsele</option>' +
+      prods.map((p) => `<option value="${p}">${p}</option>`).join("");
+    if (prev) complaintProductFilterEl.value = prev;
+  }
+
+  const productFilter = complaintProductFilterEl ? complaintProductFilterEl.value : "";
+  const filtered = complaints.filter((c) => !productFilter || c.product === productFilter);
+
+  complaintsBodyEl.innerHTML = filtered
     .map(
       (item) => {
         const deducted = Number(item.deductedAmount || 0);
         const deliveryTotal = Number(item.deliveryTotal || 0);
         const initialQty = Number(item.deliveryQuantity || 0);
-        // Reclamația diminuează suma de încasat → afișăm cu minus, roșu
         const deductedCell = deducted > 0
           ? `<span class="complaint-minus">−${currency.format(deducted)}</span>`
           : "-";
         return `
         <tr class="${deducted > 0 ? "complaint-row-minus" : ""}">
           <td>#${item.id}</td>
-          <td>#${item.deliveryId}</td>
           <td>${item.customer}</td>
+          <td>${item.product || "-"}</td>
           <td>${item.complaintType}</td>
           <td>${deliveryTotal > 0 ? currency.format(deliveryTotal) : "-"}</td>
           <td>${initialQty > 0 ? formatNumber(initialQty) + " t" : "-"}</td>
@@ -1661,6 +1731,29 @@ function renderComplaints(complaints) {
       }
     )
     .join("");
+
+  // Footer: total cantitate reclamată (+ pe produs) și total sumă diminuată
+  if (complaintsFootEl) {
+    if (!filtered.length) {
+      complaintsFootEl.innerHTML = "";
+    } else {
+      const byProduct = {};
+      let totalQty = 0;
+      let totalDeducted = 0;
+      filtered.forEach((c) => {
+        const q = Number(c.contestedQuantity || 0);
+        totalQty += q;
+        totalDeducted += Number(c.deductedAmount || 0);
+        const key = c.product || "—";
+        byProduct[key] = (byProduct[key] || 0) + q;
+      });
+      const perProduct = Object.entries(byProduct).map(([p, q]) => `${p}: ${formatNumber(q)}`).join(" · ");
+      complaintsFootEl.innerHTML = `
+        <tr class="totals-row">
+          <td colspan="9">TOTAL reclamat: <b>${formatNumber(totalQty)}</b> &nbsp;·&nbsp; Sumă diminuată: <b>${currency.format(totalDeducted)}</b> &nbsp;·&nbsp; ${perProduct}</td>
+        </tr>`;
+    }
+  }
 }
 
 function renderOpenJournal() {
@@ -2034,11 +2127,21 @@ function renderReceiptSelectors(config) {
     (item) => item.name,
     "Selecteaza cumparator"
   );
+  // Reclamații: cumpărători UNICI (firma o singură dată) + produs separat
+  if (complaintCustomerSelect) {
+    const uniqueCustomers = (config.partners || []).filter(
+      (p) => p.role === "cumparator" || p.role === "ambele"
+    );
+    renderSelectOptions(complaintCustomerSelect, uniqueCustomers, (item) => item.name, "Selectează firma", (item) => item.id);
+  }
+  if (complaintProductSelect) {
+    renderSelectOptions(complaintProductSelect, config.products, (item) => item.name, "Selectează produsul", (item) => item.name);
+  }
   renderSelectOptions(
     complaintDeliverySelect,
     deliveriesCache,
     (item) => `#${item.id} - ${item.customer} - ${item.product}`,
-    "Selecteaza livrarea"
+    "— fără livrare anume —"
   );
 
   const activePaymentType = config.paymentTypes.find((item) => item.active);
@@ -3986,8 +4089,28 @@ function buildInvoicePrintHtml(delivery) {
       <tbody><tr><td>${code ? code + " - " : ""}${delivery.product}</td><td>${formatNumber(qty)}</td><td>${moneyRo(unitPrice)}</td><td>${moneyRo(total)}</td></tr></tbody>
       <tfoot><tr><td colspan="3">TOTAL pe invoice</td><td>${moneyRo(total)} ${cur}</td></tr></tfoot>
     </table>
-    ${isForeign ? `<div style="font-size:12px;text-align:right;">Echivalent în lei (curs ${moneyRo(delivery.exchangeRate || 0)}): <b>${moneyRo(totalLei)} MDL</b></div>` : ""}
+    ${buildInvoiceVatBlock(delivery, totalLei)}
+    ${isForeign ? `<div style="font-size:12px;text-align:right;">Echivalent în lei (curs ${moneyRo(delivery.exchangeRate || 0)})</div>` : ""}
     <div class="doc-sign"><div>Vânzător</div><div>Cumpărător</div></div>`;
+}
+
+// Bloc TVA pe factură (FACT): valoare fără TVA / sumă TVA / total, în lei.
+function buildInvoiceVatBlock(delivery, totalLei) {
+  const vatRaw = delivery.vatRate;
+  if (vatRaw === undefined || vatRaw === null || vatRaw === "-") {
+    return `<div style="font-size:13px;text-align:right;margin-top:8px;">Total factură: <b>${moneyRo(totalLei)} lei</b> (fără TVA)</div>`;
+  }
+  const cota = Number(vatRaw);
+  if (cota === 0) {
+    return `<div style="font-size:13px;text-align:right;margin-top:8px;">Valoare fără TVA: <b>${moneyRo(totalLei)} lei</b> · TVA 0%: 0,00 lei · Total: <b>${moneyRo(totalLei)} lei</b></div>`;
+  }
+  const baza = totalLei / (1 + cota / 100);
+  const tva = totalLei - baza;
+  return `<div style="font-size:13px;text-align:right;margin-top:8px;line-height:1.6;">
+    Valoare totală fără TVA: <b>${moneyRo(baza)} lei</b><br>
+    Suma totală TVA (${cota}%): <b>${moneyRo(tva)} lei</b><br>
+    Total factură: <b>${moneyRo(totalLei)} lei</b>
+  </div>`;
 }
 
 function buildPurchaseActPrintHtml(delivery) {
@@ -4421,6 +4544,24 @@ processingDateFromEl?.addEventListener("change", () => renderProcessings(process
 processingDateToEl?.addEventListener("change", () => renderProcessings(processingsCache));
 deliveryDateFromEl?.addEventListener("change", () => renderDeliveries(deliveriesCache));
 deliveryDateToEl?.addEventListener("change", () => renderDeliveries(deliveriesCache));
+deliveryCustomerFilterEl?.addEventListener("change", () => renderDeliveries(deliveriesCache));
+deliveryProductFilterEl2?.addEventListener("change", () => renderDeliveries(deliveriesCache));
+deliveryPaidFilterEl?.addEventListener("change", () => renderDeliveries(deliveriesCache));
+
+// Status achitare factură per livrare (FACT) — contabilul bifează Achitată/Neachitată
+deliveriesBodyEl.addEventListener("change", async (event) => {
+  const sel = event.target.closest(".delivery-paid-select");
+  if (!sel) return;
+  const id = sel.dataset.id;
+  const invoicePaid = sel.value === "true";
+  try {
+    await updateDeliveryEntry(id, { invoicePaid, changeReason: "Marcare achitare factură" });
+    await loadDeliveries();
+  } catch (error) {
+    alert(error.message);
+  }
+});
+
 transactionDateFromEl?.addEventListener("change", () => renderTransactions(transactionsCache));
 transactionDateToEl?.addEventListener("change", () => renderTransactions(transactionsCache));
 processingProductSelect.addEventListener("change", () => {
@@ -4656,12 +4797,26 @@ if (processingInlucruBtn) {
   });
 }
 
-// Confirmarea de la finele zilei ca nu s-a procesat nimic
+// Confirmarea de la finele zilei ca nu s-a procesat nimic (rămâne confirmat toată ziua)
 if (eodConfirmBtn) {
   eodConfirmBtn.addEventListener("click", () => {
     const today = new Date().toISOString().slice(0, 10);
     try {
       window.localStorage.setItem(`eod-no-processing-${today}`, "1");
+    } catch (_e) {
+      /* ignore */
+    }
+    if (eodBanner) eodBanner.hidden = true;
+  });
+}
+
+// Închidere manuală (×): ascunde alerta doar pentru sesiunea curentă, reapare la reîncărcare
+const eodCloseBtn = document.getElementById("eod-close-btn");
+if (eodCloseBtn) {
+  eodCloseBtn.addEventListener("click", () => {
+    const today = new Date().toISOString().slice(0, 10);
+    try {
+      window.sessionStorage.setItem(`eod-closed-${today}`, "1");
     } catch (_e) {
       /* ignore */
     }
@@ -4783,12 +4938,41 @@ deliverySaveNewButton.addEventListener("click", () => {
   deliveryFormEl.requestSubmit();
 });
 
+// Enter NU mai salvează reclamația din greșeală — trece la următorul câmp (REC)
+complaintFormEl.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && event.target.tagName !== "TEXTAREA" && event.target.tagName !== "BUTTON") {
+    event.preventDefault();
+    // Mută focusul pe următorul câmp completabil
+    const fields = Array.from(complaintFormEl.querySelectorAll("input, select, textarea"))
+      .filter((el) => !el.disabled && el.type !== "hidden");
+    const idx = fields.indexOf(event.target);
+    if (idx >= 0 && idx < fields.length - 1) fields[idx + 1].focus();
+  }
+});
+
+// Filtru produs pe reclamații recente
+complaintProductFilterEl?.addEventListener("change", () => renderComplaints(complaintsCache));
+
+function validateComplaintForm(formData) {
+  if (!formData.get("customerId")) return "Selectează firma (cumpărătorul).";
+  if (!formData.get("product")) return "Selectează produsul reclamat.";
+  if (!String(formData.get("complaintType") || "").trim()) return "Selectează tipul reclamației.";
+  if (Number(formData.get("contestedQuantity") || 0) <= 0) return "Cantitatea contestată trebuie să fie mai mare ca zero.";
+  return null;
+}
+
 complaintFormEl.addEventListener("submit", async (event) => {
   event.preventDefault();
+  // Reclamația se salvează DOAR pe butonul Salvează, după validarea câmpurilor obligatorii (REC)
+  const formData = new FormData(complaintFormEl);
+  const validationError = validateComplaintForm(formData);
+  if (validationError) {
+    complaintMessageEl.textContent = validationError;
+    return;
+  }
   complaintMessageEl.textContent = "Se salveaza...";
-
   try {
-    await createComplaint(new FormData(complaintFormEl));
+    await createComplaint(formData);
     complaintFormEl.reset();
     complaintMessageEl.textContent = "Reclamatia a fost salvata.";
     await Promise.all([loadReceipts(), loadDeliveries(), loadComplaints(), loadDailyReport(), loadConfig(), loadAuditLogs()]);
@@ -4891,6 +5075,8 @@ if (deliveryBillingDialog && deliveryBillingForm) {
     f.elements.currency.value = delivery.currency || "MDL";
     f.elements.vehicle.value = delivery.vehicle || "";
     f.elements.note.value = delivery.note || "";
+    if (f.elements.vatRate) f.elements.vatRate.value = delivery.vatRate !== undefined && delivery.vatRate !== null ? String(delivery.vatRate) : "-";
+    billingDelivery = delivery; // memorăm livrarea pentru calculul TVA (cantitate)
     updateBillingPriceLei();
     const idLabel = document.getElementById("billing-delivery-id");
     if (idLabel) idLabel.textContent = `#${delivery.id}`;
@@ -4899,13 +5085,15 @@ if (deliveryBillingDialog && deliveryBillingForm) {
     deliveryBillingDialog.showModal();
   });
 
-  // Live calculation: preț lei = preț valută × curs
+  // Live calculation: preț lei = preț valută × curs + totaluri TVA
   const billingPriceForeign = document.getElementById("billing-price-foreign");
   const billingExchangeRate = document.getElementById("billing-exchange-rate");
   const billingCurrencySelect = document.getElementById("billing-currency-select");
+  const billingVatSelect = document.getElementById("billing-vat-select");
   billingPriceForeign?.addEventListener("input", updateBillingPriceLei);
   billingExchangeRate?.addEventListener("input", updateBillingPriceLei);
   billingCurrencySelect?.addEventListener("change", updateBillingPriceLei);
+  billingVatSelect?.addEventListener("change", updateBillingPriceLei);
 
   const billingCancelBtn = document.getElementById("billing-cancel-btn");
   if (billingCancelBtn) {
@@ -4931,6 +5119,7 @@ if (deliveryBillingDialog && deliveryBillingForm) {
       priceForeign: f.elements.priceForeign.value,
       exchangeRate: f.elements.exchangeRate.value,
       currency: f.elements.currency.value,
+      vatRate: f.elements.vatRate ? f.elements.vatRate.value : "-",
       vehicle: f.elements.vehicle.value,
       note: f.elements.note.value,
       changeReason: "Completare date factura",
@@ -4942,24 +5131,53 @@ if (deliveryBillingDialog && deliveryBillingForm) {
       await updateDeliveryEntry(id, payload);
       deliveryBillingDialog.close();
       await Promise.all([loadDeliveries(), loadAuditLogs(), loadDailyReport()]);
+      // După salvare → generăm automat factura (FACT)
+      if (typeof printDeliveryDocument === "function") {
+        printDeliveryDocument(id, "invoice");
+      }
     } catch (error) {
       if (msg) msg.textContent = error.message;
     }
   });
 }
 
+let billingDelivery = null;
+
 function updateBillingPriceLei() {
   const pf = Number(document.getElementById("billing-price-foreign")?.value || 0);
   const rate = Number(document.getElementById("billing-exchange-rate")?.value || 0);
   const cur = document.getElementById("billing-currency-select")?.value || "MDL";
-  const lei = cur === "MDL" ? pf : pf * rate;
+  const leiPerTon = cur === "MDL" ? pf : pf * rate;
   const el = document.getElementById("billing-price-lei");
   if (el) {
-    // Warn if foreign currency but no exchange rate (preț lei would be 0)
     if (cur !== "MDL" && pf > 0 && rate <= 0) {
       el.innerHTML = `<span style="color:var(--danger);">Introdu cursul valutar pentru ${cur}!</span>`;
     } else {
-      el.textContent = currency.format(lei || 0);
+      el.textContent = currency.format(leiPerTon || 0);
+    }
+  }
+
+  // Totaluri factură cu TVA (FACT). Prețul (lei/tonă) este considerat CU TVA inclus,
+  // ca în exemplul din specificație: total = cantitate × preț; baza = total/(1+cotă).
+  const baseEl = document.getElementById("billing-base");
+  const vatEl = document.getElementById("billing-vat");
+  const totalEl = document.getElementById("billing-total");
+  if (baseEl && vatEl && totalEl) {
+    const qtyT = billingDelivery ? deliveryDisplayQuantity(billingDelivery) : 0;
+    const totalCuTva = qtyT * leiPerTon;
+    const vatRaw = document.getElementById("billing-vat-select")?.value ?? "-";
+    const cota = vatRaw === "-" ? null : Number(vatRaw);
+    if (cota === null || cota === 0) {
+      // Fără TVA (sau 0%): baza = totalul, TVA = 0
+      baseEl.textContent = formatNumber(Number(totalCuTva.toFixed(2)));
+      vatEl.textContent = "0,00";
+      totalEl.textContent = formatNumber(Number(totalCuTva.toFixed(2)));
+    } else {
+      const baza = totalCuTva / (1 + cota / 100);
+      const tva = totalCuTva - baza;
+      baseEl.textContent = formatNumber(Number(baza.toFixed(2)));
+      vatEl.textContent = formatNumber(Number(tva.toFixed(2)));
+      totalEl.textContent = formatNumber(Number(totalCuTva.toFixed(2)));
     }
   }
 }
