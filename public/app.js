@@ -1958,7 +1958,7 @@ function renderDailyReport(report) {
       (item) => `
         <tr>
           <td>#${item.id}</td>
-          <td>#${item.deliveryId}</td>
+          <td>${item.deliveryId ? "#" + item.deliveryId : (item.customer || "—")}</td>
           <td>${item.complaintType}</td>
           <td>${formatNumber(item.contestedQuantity)}</td>
           <td>${item.status}</td>
@@ -4548,16 +4548,26 @@ deliveryCustomerFilterEl?.addEventListener("change", () => renderDeliveries(deli
 deliveryProductFilterEl2?.addEventListener("change", () => renderDeliveries(deliveriesCache));
 deliveryPaidFilterEl?.addEventListener("change", () => renderDeliveries(deliveriesCache));
 
-// Status achitare factură per livrare (FACT) — contabilul bifează Achitată/Neachitată
+// Status achitare factură per livrare (FACT) — contabilul bifează Achitată/Neachitată.
+// UI optimist: actualizăm doar celula + cache, fără reîncărcarea întregii liste (perf).
 deliveriesBodyEl.addEventListener("change", async (event) => {
   const sel = event.target.closest(".delivery-paid-select");
   if (!sel) return;
   const id = sel.dataset.id;
   const invoicePaid = sel.value === "true";
+  const cell = sel.closest(".pay-cell");
+  const cached = (deliveriesCache || []).find((d) => String(d.id) === String(id));
+  const prev = cached ? cached.invoicePaid : undefined;
+  // Optimist
+  if (cached) cached.invoicePaid = invoicePaid;
+  if (cell) cell.classList.toggle("is-paid", invoicePaid), cell.classList.toggle("is-unpaid", !invoicePaid);
   try {
     await updateDeliveryEntry(id, { invoicePaid, changeReason: "Marcare achitare factură" });
-    await loadDeliveries();
   } catch (error) {
+    // Rollback la eroare
+    if (cached) cached.invoicePaid = prev;
+    sel.value = prev ? "true" : "false";
+    if (cell) cell.classList.toggle("is-paid", !!prev), cell.classList.toggle("is-unpaid", !prev);
     alert(error.message);
   }
 });
