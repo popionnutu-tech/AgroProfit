@@ -35,18 +35,30 @@ async function createComplaintHandler(req, res) {
   const body = getBody(req);
   const actor = getActorLabel(req);
 
-  if (!body.deliveryId || !body.complaintType || !body.contestedQuantity) {
+  // REC: livrarea e opțională; reclamația se poate face pe firmă + produs.
+  if (!body.complaintType || !body.contestedQuantity) {
     return sendJson(res, 400, {
-      error: "Campurile deliveryId, complaintType si contestedQuantity sunt obligatorii."
+      error: "Tipul reclamatiei si cantitatea contestata sunt obligatorii."
+    });
+  }
+  if (!body.deliveryId && !body.customerId && !body.customer) {
+    return sendJson(res, 400, {
+      error: "Selecteaza firma (cumparatorul) sau o livrare."
+    });
+  }
+  if (!body.deliveryId && !body.product) {
+    return sendJson(res, 400, {
+      error: "Selecteaza produsul reclamat."
     });
   }
 
   try {
-    const deliveries = await listDeliveries();
-    const delivery = deliveries.find((item) => item.id === Number(body.deliveryId));
-
-    if (!delivery) {
-      return sendJson(res, 404, { error: "Livrarea nu a fost gasita." });
+    if (body.deliveryId) {
+      const deliveries = await listDeliveries();
+      const delivery = deliveries.find((item) => item.id === Number(body.deliveryId));
+      if (!delivery) {
+        return sendJson(res, 404, { error: "Livrarea nu a fost gasita." });
+      }
     }
 
     const complaint = await createComplaint({
