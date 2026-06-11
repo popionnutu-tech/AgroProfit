@@ -21,7 +21,7 @@ const SYSTEM_ROLE_CAPABILITIES = {
     "complaint-write",
     "finance",
     "finance-write",
-    "opening",
+    "opening-read",
     "reports",
     "audit",
     "config-read"
@@ -36,7 +36,7 @@ const SYSTEM_ROLE_CAPABILITIES = {
     "complaint-invoice-adjust",
     "finance",
     "finance-write",
-    "opening",
+    "opening-read",
     "reports",
     "config-read",
     "nomenclator-read",
@@ -53,7 +53,7 @@ const SYSTEM_ROLE_CAPABILITIES = {
     "complaint-stock-correct",
     "finance",
     "finance-write",
-    "opening",
+    "opening-read",
     "reports",
     "audit",
     "config-read",
@@ -85,6 +85,7 @@ const SYSTEM_ROLE_CAPABILITIES = {
     "finance",
     "finance-write",
     "opening",
+    "opening-read",
     "reports",
     "audit",
     "security-admin",
@@ -99,7 +100,7 @@ const SYSTEM_ROLE_CAPABILITIES = {
 const SYSTEM_ROLES = [
   { id: 1, code: "operator", name: "Operator receptie", permissions: "receptie, procesare, livrari, stocuri", system: true },
   { id: 2, code: "manager", name: "Manager", permissions: "operations, finance, reports, audit", system: true },
-  { id: 3, code: "accountant", name: "Contabil", permissions: "finance, complaints, invoice adjust, opening, reports", system: true },
+  { id: 3, code: "accountant", name: "Contabil", permissions: "finance, complaints, invoice adjust, reports", system: true },
   { id: 4, code: "admin", name: "Administrator sistem", permissions: "setup, users, security, operations", system: true },
   { id: 5, code: "control", name: "Control / conducere", permissions: "reports, audit", system: true },
   { id: 6, code: "accountant-sef", name: "Contabil sef", permissions: "reclamatii, ajustari stoc, ajustari factura, audit", system: true }

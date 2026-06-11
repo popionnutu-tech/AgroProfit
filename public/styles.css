@@ -2372,3 +2372,60 @@ dialog.billing-dialog .form-actions { display: flex; gap: 12px; margin-top: 16px
     font-size: 1rem;
   }
 }
+
+/* === Task 2.1: Tipărire optimizată — listele (recepții etc.) încap compact pe A4,
+   până la ~50 rânduri / pagină. Documentele de tipar (bon, factură, CMR) se deschid
+   într-o fereastră separată, deci nu sunt afectate de regulile de mai jos. === */
+@media print {
+  @page { size: A4 portrait; margin: 8mm; }
+
+  /* Ascundem tot ce nu sunt datele tabelului */
+  .sidebar,
+  .sidebar-backdrop,
+  .eod-banner,
+  .filters-panel,
+  .panel-head p,
+  button { display: none !important; }
+
+  html, body { background: #fff !important; color: #000 !important; }
+  .main-area {
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+  .panel {
+    box-shadow: none !important;
+    border: none !important;
+    padding: 0 !important;
+    margin: 0 0 4mm !important;
+    background: #fff !important;
+  }
+  .panel-head h2 { font-size: 12px !important; margin: 0 0 2mm !important; }
+  .table-wrap { overflow: visible !important; }
+
+  /* Tabel compact: rânduri mici ca să încapă ~50 pe o pagină A4 */
+  table { width: 100% !important; border-collapse: collapse !important; font-size: 8px !important; }
+  thead { display: table-header-group; } /* antetul se repetă pe fiecare pagină */
+  tr { page-break-inside: avoid; }
+  th, td {
+    padding: 1px 3px !important;
+    border: 0.4px solid #999 !important;
+    line-height: 1.15 !important;
+    color: #000 !important;
+  }
+
+  /* Coloana de acțiuni (butoane) nu se tipărește */
+  #receipts-table th:last-child,
+  #receipts-table td:last-child { display: none !important; }
+
+  /* Selectul de status arată doar valoarea, fără chenar de control */
+  select.status {
+    -webkit-appearance: none;
+    appearance: none;
+    border: none !important;
+    background: transparent !important;
+    font-size: 8px !important;
+    padding: 0 !important;
+  }
+}

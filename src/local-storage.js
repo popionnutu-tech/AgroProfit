@@ -1035,6 +1035,20 @@ function filterByDate(items, dateValue) {
   return items.filter((item) => String(item.createdAt || "").slice(0, 10) === dateValue);
 }
 
+// Filtru pe interval [from, to] inclusiv (datele ISO YYYY-MM-DD se compara ca text).
+function filterByDateRange(items, from, to) {
+  const f = String(from || "").slice(0, 10);
+  const t = String(to || "").slice(0, 10);
+  if (!f && !t) return items;
+  return items.filter((item) => {
+    const d = String(item.createdAt || "").slice(0, 10);
+    if (!d) return false;
+    if (f && d < f) return false;
+    if (t && d > t) return false;
+    return true;
+  });
+}
+
 function createDailyReport(dateValue, receipts, processings, transactions, stockSummary) {
   const dailyReceipts = filterByDate(receipts, dateValue);
   const dailyProcessings = filterByDate(processings, dateValue).filter(
@@ -2257,7 +2271,8 @@ async function createComplaint(payload) {
   const deliveryQty = delivery
     ? Number(delivery.netWeight > 0 ? delivery.netWeight : delivery.deliveredQuantity || delivery.plannedQuantity || 0)
     : 0;
-  const deliveryTotal = delivery ? deliveryQty * Number(delivery.priceLei || 0) : 0;
+  // Suma = kg × preț/kg (cantitatea internă e în tone, deci × 1000).
+  const deliveryTotal = delivery ? deliveryQty * 1000 * Number(delivery.priceLei || 0) : 0;
 
   const complaint = {
     id: nextId(state.complaints),
@@ -2982,6 +2997,55 @@ async function getDailyReport(dateValue = new Date().toISOString().slice(0, 10))
   return report;
 }
 
+// Raport pe interval [from, to] — aceleasi 5 tabele ca raportul zilnic, dar pe perioada.
+async function getPeriodReport(from, to) {
+  const [receipts, processings, transactions, deliveries, complaints, stockSummary] = await Promise.all([
+    listReceipts(),
+    listProcessings(),
+    listTransactions(),
+    listDeliveries(),
+    listComplaints(),
+    getStockSummary()
+  ]);
+
+  const periodReceipts = filterByDateRange(receipts, from, to);
+  const periodProcessings = filterByDateRange(processings, from, to).filter(
+    (item) => item.status !== "Anulat" && item.status !== "In lucru"
+  );
+  const periodTransactions = filterByDateRange(transactions, from, to);
+  const periodDeliveries = filterByDateRange(deliveries, from, to);
+  const periodComplaints = filterByDateRange(complaints, from, to);
+
+  return {
+    from: String(from || "").slice(0, 10),
+    to: String(to || "").slice(0, 10),
+    summary: {
+      receiptsCount: periodReceipts.length,
+      grossQuantity: periodReceipts.reduce((sum, item) => sum + Number(item.grossQuantity || item.quantity || 0), 0),
+      provisionalNetQuantity: periodReceipts.reduce(
+        (sum, item) => sum + Number(item.provisionalNetQuantity || item.quantity || 0),
+        0
+      ),
+      processedQuantity: periodProcessings.reduce((sum, item) => sum + Number(item.processedQuantity || 0), 0),
+      confirmedWaste: periodProcessings.reduce((sum, item) => sum + Number(item.confirmedWaste || 0), 0),
+      paymentsTotal: periodTransactions
+        .filter((item) => item.direction === "payment")
+        .reduce((sum, item) => sum + Number(item.amount || 0), 0),
+      collectionsTotal: periodTransactions
+        .filter((item) => item.direction === "collection")
+        .reduce((sum, item) => sum + Number(item.amount || 0), 0),
+      deliveredQuantity: periodDeliveries.reduce((sum, item) => sum + Number(item.deliveredQuantity || 0), 0),
+      openComplaints: periodComplaints.filter((item) => item.status === "Deschisa").length,
+      stockTotal: stockSummary.totals.totalQuantity
+    },
+    receipts: periodReceipts,
+    processings: periodProcessings,
+    transactions: periodTransactions,
+    deliveries: periodDeliveries,
+    complaints: periodComplaints
+  };
+}
+
 async function createConfigEntry(entity, payload) {
   assertEntity(entity);
   if (entity === "roles") {
@@ -3459,6 +3523,7 @@ module.exports = {
   findUserByUsername,
   getConfig,
   getDailyReport,
+  getPeriodReport,
   getDashboardSnapshot,
   getDeliveryDefaults,
   getReceiptDefaults,

@@ -331,6 +331,12 @@
               </select>
             </label>
             <label>
+              Filtru dupa furnizor
+              <select id="receipt-supplier-filter">
+                <option value="">Toti furnizorii</option>
+              </select>
+            </label>
+            <label>
               Stare plată
               <select id="receipt-payment-filter">
                 <option value="">Toate</option>
@@ -1103,11 +1109,11 @@
               </label>
             </div>
             <div class="split">
-              <label>Preț valută<input name="priceForeign" id="billing-price-foreign" type="number" min="0" step="0.0001" placeholder="EUR / USD pe tonă" /></label>
+              <label>Preț pe kg<input name="priceForeign" id="billing-price-foreign" type="number" min="0" step="0.0001" placeholder="ex: 4,09 (lei sau valută / kg)" /></label>
               <label>Curs valutar<input name="exchangeRate" id="billing-exchange-rate" type="number" min="0" step="0.0001" placeholder="ex: 19.45" /></label>
             </div>
             <div class="billing-computed">
-              Preț în lei (calculat): <strong id="billing-price-lei">0,00 MDL</strong> / tonă
+              Preț în lei (calculat): <strong id="billing-price-lei">0,00 MDL</strong> / kg
             </div>
             <div class="split">
               <label>Cotă TVA
@@ -1381,8 +1387,12 @@
           <form class="mini-form report-filter-form" id="daily-report-form">
             <div class="split">
               <label>
-                Data raport
-                <input type="date" id="daily-report-date" name="date" required />
+                De la (start)
+                <input type="date" id="daily-report-from" name="from" required />
+              </label>
+              <label>
+                Pana la (final)
+                <input type="date" id="daily-report-to" name="to" required />
               </label>
               <div class="report-actions">
                 <button type="submit">Actualizeaza raportul</button>
@@ -1400,6 +1410,7 @@
                   <thead>
                     <tr>
                       <th>ID</th>
+                      <th>Data</th>
                       <th>Furnizor</th>
                       <th>Produs</th>
                       <th>Brut</th>
@@ -1418,6 +1429,7 @@
                   <thead>
                     <tr>
                       <th>ID</th>
+                      <th>Data</th>
                       <th>Receptie</th>
                       <th>Tip</th>
                       <th>Procesat</th>
@@ -1436,6 +1448,7 @@
                   <thead>
                     <tr>
                       <th>ID</th>
+                      <th>Data</th>
                       <th>Client</th>
                       <th>Produs</th>
                       <th>Cantitate</th>
@@ -1454,6 +1467,7 @@
                   <thead>
                     <tr>
                       <th>ID</th>
+                      <th>Data</th>
                       <th>Partener</th>
                       <th>Tip</th>
                       <th>Plata</th>
@@ -1472,6 +1486,7 @@
                   <thead>
                     <tr>
                       <th>ID</th>
+                      <th>Data</th>
                       <th>Livrare</th>
                       <th>Tip</th>
                       <th>Cantitate</th>

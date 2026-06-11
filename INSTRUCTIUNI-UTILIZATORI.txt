@@ -1,0 +1,435 @@
+================================================================
+   AgroProfit+ · GHID COMPLET PENTRU UTILIZATORI
+   Data: 21 mai 2026
+================================================================
+
+LINK-URI IMPORTANTE
+-------------------
+  Site web (complet, pentru calculator/laptop):
+      https://agroprofit-plus.vercel.app
+
+  Bot Telegram (recomandat pentru telefon):
+      https://t.me/agroprofitmdbot
+      (numele botului: @agroprofitmdbot)
+
+  Parola comuna pentru utilizatorii demo: Agro2026!Demo
+  (admin are parola separata: Agro2026Strong!)
+
+
+CUM SE INSTALEAZA MINI APP-UL TELEGRAM (o singura data)
+--------------------------------------------------------
+  1. Deschide Telegram pe telefon
+  2. Cauta: agroprofitmdbot
+  3. Apasa pe bot → apasa butonul "START" (jos)
+  4. Botul iti raspunde cu un mesaj si un buton albastru
+     "Deschide aplicatia" (sau "Open App")
+  5. Apesi butonul → se deschide aplicatia AgroProfit+
+
+  De la a doua deschidere, aplicatia te recunoaste automat
+  si nu mai cere parola.
+
+
+CUM SE CONECTEAZA PRIMA DATA
+----------------------------
+  Pe BOT (Telegram):
+    1. Apesi "Deschide aplicatia"
+    2. La ecranul de login completezi: Utilizator + Parola
+    3. Apesi "Intra"
+    4. Gata - aplicatia te tine logat, nu vei mai introduce
+       parola la urmatoarele intrari
+
+  Pe WEB (browser):
+    1. Mergi la https://agroprofit-plus.vercel.app
+    2. Completezi: Utilizator + Parola
+    3. Apesi "Autentificare"
+    4. Te recomandam sa schimbi parola initiala:
+       Schimba parola (jos in bara verde) → introduci
+       parola noua
+
+
+================================================================
+   UTILIZATOR 1: ADMINISTRATOR SISTEM
+================================================================
+
+  Utilizator: admin
+  Parola:     Agro2026Strong!
+  Numele afisat: Administrator
+
+CE POTI FACE
+  - VEZI tot in sistem
+  - ADAUGI / DEZACTIVEZI utilizatori
+  - CONFIGUREZI parteneri, produse, locatii de stoc, tarife
+  - DEBLOCHEZI utilizatori blocati
+  - RULEZI inchiderea de zi manuala
+  - VEZI auditul complet (toate modificarile facute)
+  - ACCES la setari sistem, securitate, automatizare Telegram
+
+CUM INTRI
+  - WEB:      https://agroprofit-plus.vercel.app
+  - TELEGRAM: https://t.me/agroprofitmdbot
+
+PRIMA ACTIUNE (obligatoriu)
+  1. Intra pe web cu admin / Agro2026Strong!
+  2. Apasa "Schimba parola" (jos in bara verde stanga)
+  3. Pune o parola noua, sigura, minim 10 caractere
+
+CE FACI IN MOD CURENT (rutina)
+  1. Adaugi parteneri noi (cumparatori / furnizori):
+     Nomenclator → Parteneri → completezi formularul de sus
+     → Adauga partener
+  2. Adaugi produse noi:
+     Nomenclator → Produse → completezi cod, denumire,
+     norma umiditate, norma impuritati → Adauga produs
+  3. Verifici reclamatiile deschise:
+     Reclamatii (in meniul din stanga)
+  4. Verifici auditul la sfarsit de zi:
+     Audit → vezi cine ce a modificat
+  5. Cand un angajat se blocheaza dupa 5 incercari gresite:
+     Nomenclator → Securitate acces → Deblocheaza
+
+CE NU TREBUIE SA FACI
+  - NU sterge utilizatori activi - mai bine dezactiveaza-i
+  - NU schimba norme la produse cand exista deja receptii
+    facute (afecteaza rapoartele istorice)
+  - NU folosesti acelasi cont pe mai multe persoane
+
+
+================================================================
+   UTILIZATOR 2: MANAGER
+================================================================
+
+  Utilizator: manager
+  Parola:     Agro2026!Demo
+  Numele afisat: Manager Demo
+  Rolul: vede totul dar nu poate modifica
+
+CE POTI FACE
+  - VEZI toate operatiunile (receptii, procesare, livrari)
+  - VEZI rapoarte financiare complete
+  - VEZI stocul curent pe locatii
+  - VEZI auditul cu toate modificarile
+  - NU adaugi / NU modifici - rolul este de supervizare
+
+CUM INTRI
+  - WEB (recomandat - rapoarte detaliate):
+      https://agroprofit-plus.vercel.app
+  - TELEGRAM (pentru verificari rapide pe teren):
+      https://t.me/agroprofitmdbot
+
+CE VEZI PE TELEGRAM (Mini App)
+  - Sus: SALUT Manager Demo + chip "MANAGER"
+  - Cilindri stoc (procent ocupat live)
+  - Actiuni rapide: doar "Rapoarte"
+  - KPI Astazi: receptii, livrari, incasari, reclamatii
+  - Ultima activitate: ce s-a intamplat in sistem
+  - Jos: Acasa, Receptii, Livrari, Bani, Cont
+
+RUTINA ZILNICA
+  1. Dimineata: deschizi Mini App, vezi cat e stocul,
+     cate operatiuni s-au facut ieri
+  2. La sfarsit de zi: vei primi automat raportul pe Telegram
+     (la ora setata de admin)
+  3. Saptamanal: deschizi versiunea web → Rapoarte →
+     vezi evolutia operatiunilor si finantelor
+
+CE NU POTI FACE
+  - Nu poti adauga / modifica receptii sau livrari
+  - Nu poti modifica nomenclatorul (parteneri, produse etc.)
+  - Daca trebuie ceva modificat - ceri operatorului sau
+    contabilului
+
+
+================================================================
+   UTILIZATOR 3: CONTABIL
+================================================================
+
+  Utilizator: contabil
+  Parola:     Agro2026!Demo
+  Numele afisat: Contabil Demo
+
+CE POTI FACE
+  - ADAUGI tranzactii financiare (incasari, plati)
+  - VEZI receptii si livrari (read-only)
+  - VEZI reclamatii (read-only)
+  - DESCHIZI ZIUA (introduci sold initial, debite, etc.)
+  - GENEREZI rapoarte financiare
+
+CUM INTRI
+  - WEB (recomandat - introducere tranzactii):
+      https://agroprofit-plus.vercel.app
+  - TELEGRAM (pentru consultare rapida):
+      https://t.me/agroprofitmdbot
+
+CE VEZI PE TELEGRAM (Mini App)
+  - Sus: SALUT Contabil Demo
+  - Cilindri stoc
+  - Actiuni rapide: "+ Tranzactie", "Rapoarte"
+  - KPI Astazi
+  - Jos: Acasa, Receptii, Livrari, Bani, Cont
+
+RUTINA ZILNICA
+  1. Dimineata: "Deschidere zi" - introduci sold de casa,
+     datorii deschise daca este cazul
+     (din meniu web: Deschidere)
+  2. Pe parcursul zilei: introduci tranzactii pe masura
+     ce primesti banii / faci plati:
+     - Web: Financiar → completezi formularul → Salveaza
+     - Telegram: butonul "+ Tranzactie" → te trimite la
+       formularul web (mai detaliat)
+  3. La sfarsit de zi: verifici lista tranzactiilor in
+     meniul "Bani" pe Mini App sau "Financiar" pe web
+
+UNDE GASESTI:
+  - Plati catre furnizori → Financiar → Tip "Plata furnizor"
+  - Incasari de la cumparatori → Financiar → Tip "Incasare"
+  - Cheltuieli generale → Financiar → Tip "Cheltuiala"
+  - Numerar / Transfer → setezi tipul de plata din lista
+
+CE NU POTI FACE
+  - Nu poti modifica receptii sau livrari deja inregistrate
+  - Nu poti deschide reclamatii pe facturi - asta face
+    contabilul sef
+  - Pentru ajustari de stoc / corectii - ceri contabilului
+    sef sau admin-ului
+
+
+================================================================
+   UTILIZATOR 4: CONTABIL SEF
+================================================================
+
+  Utilizator: contabilsef
+  Parola:     Agro2026!Demo
+  Numele afisat: Contabil Sef Demo
+
+CE POTI FACE (in plus fata de contabil normal)
+  - DESCHIZI RECLAMATII pe receptii / livrari
+  - AJUSTEZI FACTURA cand exista reclamatie
+  - AJUSTEZI STOCUL cand exista reclamatie (debifa/recountez)
+  - VEZI auditul
+
+CUM INTRI
+  - WEB (recomandat - lucrezi cu reclamatii detaliate):
+      https://agroprofit-plus.vercel.app
+  - TELEGRAM (consultare + reclamatii rapide):
+      https://t.me/agroprofitmdbot
+
+CE VEZI PE TELEGRAM (Mini App)
+  - Sus: SALUT Contabil Sef Demo
+  - Cilindri stoc
+  - Actiuni rapide: "+ Reclamatie", "Rapoarte"
+  - KPI Astazi + Reclamatii deschise
+
+CUM SE DESCHIDE O RECLAMATIE
+  1. Cumparatorul / soferul iti spune ca e o problema cu
+     cantitatea sau calitatea
+  2. Web → Reclamatii → "Adauga reclamatie"
+  3. Selectezi:
+     - Tipul (cantitate, calitate, lipsa, etc.)
+     - Receptia sau livrarea legata
+     - Cantitatea / suma in discutie
+     - Descriere ce s-a intamplat
+  4. Salveaza - admin si manager vor vedea reclamatia
+
+CUM SE INCHIDE O RECLAMATIE (cu corectii)
+  1. Daca trebuie ajustata FACTURA:
+     Reclamatii → deschizi reclamatia → "Ajusteaza factura"
+     → introduci suma noua → Salveaza
+  2. Daca trebuie ajustat STOCUL (lipsa la depozit):
+     Reclamatii → "Ajusteaza stoc" → introduci cantitatea
+     reala → Salveaza
+  3. Schimbi statutul reclamatiei in "Inchisa" cu motiv
+
+CE NU POTI FACE
+  - Nu poti modifica utilizatori sau roluri
+  - Nu poti schimba norme produse
+
+
+================================================================
+   UTILIZATOR 5: OPERATOR RECEPTIE
+================================================================
+
+  Utilizator: operator
+  Parola:     Agro2026!Demo
+  Numele afisat: Operator Receptie Demo
+
+CE POTI FACE
+  - ADAUGI receptii noi (cand intra un camion)
+  - INTRODUCI procesari (curatire, uscare, pastrare)
+  - ADAUGI livrari (cand iese marfa)
+  - VEZI stocul curent ca sa stii ce capacitate ai
+
+CUM INTRI
+  - TELEGRAM (RECOMANDAT - lucrezi pe teren, in cabina):
+      https://t.me/agroprofitmdbot
+  - WEB (cand esti la birou si introduci totul detaliat):
+      https://agroprofit-plus.vercel.app
+
+CE VEZI PE TELEGRAM (Mini App)
+  - Sus: SALUT Operator Receptie Demo
+  - Cilindri stoc cu procent ocupat
+  - Actiuni rapide MARI:
+        + Receptie    (verde, prima)
+        + Livrare     (gri)
+  - KPI Astazi: cate receptii ai facut, cate livrari
+  - Jos: Acasa, Receptii, Livrari, Bani (gri), Cont
+
+CUM INREGISTREZI O RECEPTIE NOUA
+  1. Intra in Mini App → apasa "+ Receptie"
+  2. (Pentru moment se deschide formularul web complet)
+  3. Completezi:
+     - Furnizor (din lista)
+     - Produs (Grau, Porumb, Floarea-soarelui)
+     - Cantitate bruta (kg sau tone)
+     - Locatia initiala (Cilindru 1/2/3/4 sau Tampon)
+     - Umiditate % (sau lasi gol - se ia norma)
+     - Impuritati % (sau lasi gol - se ia norma)
+     - Pret/unitate (optional)
+     - Observatii (optional)
+  4. Apasa "Salveaza" sau "Salveaza si nou" daca urmeaza
+     alt camion
+  5. Vezi jos rezumatul cu net provizoriu si plata
+     preliminara
+
+CUM INREGISTREZI O LIVRARE
+  1. Mini App → "+ Livrare"
+  2. Completezi:
+     - Receptia sursa (din ce stoc iese marfa)
+     - Cumparator
+     - Cantitate livrata
+  3. Salveaza
+
+CUM INREGISTREZI O PROCESARE (curatire / uscare)
+  1. Web → Procesare → "Adauga procesare"
+  2. Selectezi receptia, tipul procesarii
+  3. Introduci cantitatea de deseu confirmat
+  4. Salveaza
+
+CE NU POTI FACE
+  - Nu poti modifica receptii deja salvate (cere admin)
+  - Nu poti deschide reclamatii (asta face contabilul sef)
+  - Nu poti vedea bani / tranzactii financiare
+
+
+================================================================
+   UTILIZATOR 6: CONTROL / CONDUCERE
+================================================================
+
+  Utilizator: control
+  Parola:     Agro2026!Demo
+  Numele afisat: Control Conducere Demo
+
+CE POTI FACE (DOAR SUPRAVEGHERE - read-only)
+  - VEZI rapoarte operationale si financiare
+  - VEZI auditul complet (toate modificarile)
+  - VEZI stocul si toate receptiile / livrarile
+  - VEZI reclamatiile
+
+CUM INTRI
+  - WEB (recomandat - rapoarte detaliate):
+      https://agroprofit-plus.vercel.app
+  - TELEGRAM (monitorizare rapida):
+      https://t.me/agroprofitmdbot
+
+CE VEZI PE TELEGRAM (Mini App)
+  - Cilindri stoc
+  - Actiuni rapide: "Rapoarte"
+  - KPI Astazi
+  - Ultima activitate - toate modificarile
+  - Jos: Acasa, Receptii, Livrari, Bani, Cont
+
+RUTINA RECOMANDATA
+  1. Saptamanal: Web → Rapoarte → analizezi performanta
+     pe perioade
+  2. Zilnic: Mini App → vezi ultima activitate -
+     daca observi ceva neobisnuit (multe modificari
+     intr-o zi, stergeri, etc.) ridici intrebarea catre
+     admin sau manager
+  3. Lunar: Web → Audit → vezi cine ce a modificat in
+     luna care a trecut
+
+CE NU POTI FACE
+  - Nimic nu poti modifica - rolul este de supraveghere
+  - Daca observi probleme - le raportezi catre admin
+
+
+================================================================
+   PROBLEME FRECVENTE SI SOLUTII
+================================================================
+
+PROBLEMA: "Date de autentificare invalide"
+SOLUTIE:
+  - Verifica utilizatorul si parola (atentie la majuscule)
+  - Dupa 5 incercari gresite contul se blocheaza 15 min
+  - Daca s-a blocat: cere admin-ului sa-l deblocheze din
+    Nomenclator → Securitate acces
+
+PROBLEMA: Mini App-ul nu se deschide din bot
+SOLUTIE:
+  - Verifica ca ai Telegram actualizat (App Store / Play)
+  - Inchide complet aplicatia Telegram si redeschide-o
+  - Daca tot nu merge - foloseste versiunea web in browser
+
+PROBLEMA: Pe Mini App nu vad un meniu / actiune
+SOLUTIE:
+  - Rolul tau nu are acces la acea sectiune (vezi tabelul
+    de roluri de mai sus)
+  - Daca crezi ca ar trebui sa ai acces - cere admin-ului
+
+PROBLEMA: Am uitat parola
+SOLUTIE:
+  - Cere admin-ului sa te ajute. Admin va dezactiva contul
+    vechi si va crea unul nou cu parola initiala
+  - Dupa care iti schimbi parola din Cont → Schimba parola
+
+PROBLEMA: Aplicatia merge incet / nu se incarca
+SOLUTIE:
+  - Verifica conexiunea la internet
+  - Inchide si redeschide aplicatia
+  - Daca persista - anunta admin-ul
+
+PROBLEMA: Cilindrii arata 0% pe Mini App
+SOLUTIE:
+  - Normal daca nu sunt receptii introduse inca
+  - Verifica ca s-au facut receptii pe locatie de tip
+    "cilindru" (admin verifica din Nomenclator → Locatii
+    de stoc)
+
+
+================================================================
+   SECURITATE - REGULI OBLIGATORII PENTRU TOTI UTILIZATORII
+================================================================
+
+  1. SCHIMBA PAROLA INITIALA dupa prima conectare
+     (Cont → Schimba parola sau bara de jos pe web)
+
+  2. NU IMPARTI CONTUL cu colegii. Fiecare angajat are
+     propriul cont - asa stim cine ce a facut
+
+  3. NU SALVA PAROLA in browser-e publice (calculatoare
+     de la birou comune). Pe telefonul propriu - este OK
+
+  4. La final de tura: IESI DIN CONT daca lucrezi pe
+     calculator comun (jos in bara verde → "Iesire")
+
+  5. Daca crezi ca cineva a aflat parola ta - SCHIMB-O
+     IMEDIAT si anunta admin-ul
+
+  6. Toate actiunile sunt INREGISTRATE in audit. Daca
+     stergi sau modifici ceva din greseala - admin
+     poate vedea ce s-a intamplat si poate ajuta
+
+
+================================================================
+   SUPORT TEHNIC
+================================================================
+
+  Pentru orice intrebare sau problema, contacteaza admin-ul
+  sistemului.
+
+  Telegram Bot: @agroprofitmdbot
+  Site Web:     https://agroprofit-plus.vercel.app
+
+  ----------------------------------------------------------
+  Document generat: 21 mai 2026
+  AgroProfit+ MVP v1 · Sistem management elevator de cereale
+  ----------------------------------------------------------

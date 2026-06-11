@@ -119,15 +119,17 @@ app.post("/api/auth/change-password", requireAuth, changePasswordHandler);
 
 app.use("/api", requireAuth);
 
+// Citire solduri inițiale: rolurile cu finanțe le văd în Achitări/Încasări.
 app.get(
   "/api/opening-documents",
-  requireRoles(["manager", "accountant", "accountant-sef", "admin", "control"]),
+  requireRoles(["manager", "accountant", "accountant-sef", "admin"]),
   listOpeningDocumentsHandler
 );
 
+// Introducerea/ștergerea „Sold inițial" rămâne strict la admin (Task 5.1).
 app.post(
   "/api/opening-documents",
-  requireRoles(["manager", "accountant", "accountant-sef", "admin"]),
+  requireRoles(["admin"]),
   createOpeningDocumentHandler
 );
 

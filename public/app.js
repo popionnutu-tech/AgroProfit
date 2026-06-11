@@ -96,6 +96,7 @@ const stockSummaryEl = document.getElementById("stock-summary");
 const silosGridEl = document.getElementById("silos-grid");
 const receiptStatusFilterEl = document.getElementById("receipt-status-filter");
 const receiptProductFilterEl = document.getElementById("receipt-product-filter");
+const receiptSupplierFilterEl = document.getElementById("receipt-supplier-filter");
 const receiptPaymentFilterEl = document.getElementById("receipt-payment-filter");
 const receiptDateFromEl = document.getElementById("receipt-date-from");
 const receiptDateToEl = document.getElementById("receipt-date-to");
@@ -157,7 +158,8 @@ const openReceiptsBodyEl = document.getElementById("open-receipts-body");
 const openDeliveriesBodyEl = document.getElementById("open-deliveries-body");
 const auditBodyEl = document.getElementById("audit-body");
 const dailyReportFormEl = document.getElementById("daily-report-form");
-const dailyReportDateEl = document.getElementById("daily-report-date");
+const dailyReportFromEl = document.getElementById("daily-report-from");
+const dailyReportToEl = document.getElementById("daily-report-to");
 const dailyReportSummaryEl = document.getElementById("daily-report-summary");
 const dailyReportReceiptsEl = document.getElementById("daily-report-receipts");
 const dailyReportProcessingsEl = document.getElementById("daily-report-processings");
@@ -1146,17 +1148,30 @@ function renderReceipts(receipts) {
   if (receiptsTable) {
     receiptsTable.classList.toggle("hide-fin", !canAccess("finance"));
   }
+  // Populează filtrul de furnizori (fiecare o singură dată, fără duplicate)
+  if (receiptSupplierFilterEl) {
+    const sups = Array.from(new Set(receipts.map((r) => r.supplier).filter(Boolean))).sort((a, b) =>
+      String(a).localeCompare(String(b), "ro")
+    );
+    const prevSup = receiptSupplierFilterEl.value;
+    receiptSupplierFilterEl.innerHTML =
+      '<option value="">Toti furnizorii</option>' +
+      sups.map((s) => `<option value="${s}">${s}</option>`).join("");
+    if (prevSup) receiptSupplierFilterEl.value = prevSup;
+  }
   const payFilter = receiptPaymentFilterEl ? receiptPaymentFilterEl.value : "";
+  const supplierFilter = receiptSupplierFilterEl ? receiptSupplierFilterEl.value : "";
   const filteredReceipts = receipts.filter((item) => {
     const statusMatch = !receiptStatusFilterEl.value || item.status === receiptStatusFilterEl.value;
     const productMatch = !receiptProductFilterEl.value || item.product === receiptProductFilterEl.value;
+    const supplierMatch = !supplierFilter || item.supplier === supplierFilter;
     const dateMatch = withinDateRange(item, ["createdAt", "receivedAt"], receiptDateFromEl, receiptDateToEl);
     let payMatch = true;
     if (payFilter === "restanta") payMatch = item.paymentStatus !== "Achitat";
     else if (payFilter) payMatch = item.paymentStatus === payFilter;
     // Anulat receipts don't owe money — hide them from payment filters
     if (payFilter && item.status === "Anulat") payMatch = false;
-    return statusMatch && productMatch && dateMatch && payMatch;
+    return statusMatch && productMatch && supplierMatch && dateMatch && payMatch;
   });
 
   bodyEl.innerHTML = filteredReceipts
@@ -1540,6 +1555,12 @@ function deliveryDisplayQuantity(item) {
   return Number(item.plannedQuantity || 0);
 }
 
+// Sumele de factură se calculează în KILOGRAME × preț/kg (cum scrie contabilul pe factură:
+// 23950 kg × 4,09 lei = 97.955,50 lei). Cantitatea internă e în tone (pentru stoc), deci × 1000.
+function deliveryQtyKg(item) {
+  return deliveryDisplayQuantity(item) * 1000;
+}
+
 function renderDeliveries(deliveries) {
   const canEditStatuses = canAccess("delivery-write");
   // Financial columns (vanzator, masina, pret) hidden for operators (no finance access)
@@ -1587,7 +1608,7 @@ function renderDeliveries(deliveries) {
       const priceLabel = item.priceForeign && item.currency && item.currency !== "MDL"
         ? `${formatNumber(item.priceForeign)} ${item.currency}`
         : (item.priceLei ? `${formatNumber(item.priceLei)} MDL` : "-");
-      const totalFactura = qty * Number(item.priceLei || 0);
+      const totalFactura = deliveryQtyKg(item) * Number(item.priceLei || 0);
       const canBill = canAccess("finance");
       const paidSelect = canBill
         ? `<select class="delivery-paid-select" data-id="${item.id}">
@@ -1652,9 +1673,9 @@ function renderDeliveryTotals(rows) {
   rows.forEach((item) => {
     const qty = deliveryDisplayQuantity(item);
     totalQty += qty;
-    const lei = qty * Number(item.priceLei || 0);
+    const lei = deliveryQtyKg(item) * Number(item.priceLei || 0);
     const cur = item.currency || "MDL";
-    const foreign = qty * Number(item.priceForeign || 0);
+    const foreign = deliveryQtyKg(item) * Number(item.priceForeign || 0);
     totalLei += lei;
     if (cur !== "MDL") totalForeignByCur[cur] = (totalForeignByCur[cur] || 0) + foreign;
     const key = item.product || "—";
@@ -1902,6 +1923,7 @@ function renderDailyReport(report) {
       (item) => `
         <tr>
           <td>#${item.id}</td>
+          <td>${formatDateShort(item.createdAt)}</td>
           <td>${item.supplier}</td>
           <td>${item.product}</td>
           <td>${formatNumber(item.grossQuantity || item.quantity)}</td>
@@ -1916,6 +1938,7 @@ function renderDailyReport(report) {
       (item) => `
         <tr>
           <td>#${item.id}</td>
+          <td>${formatDateShort(item.createdAt)}</td>
           <td>#${item.receiptId}</td>
           <td>${item.processingType}</td>
           <td>${formatNumber(item.processedQuantity)}</td>
@@ -1930,6 +1953,7 @@ function renderDailyReport(report) {
       (item) => `
         <tr>
           <td>#${item.id}</td>
+          <td>${formatDateShort(item.createdAt)}</td>
           <td>${item.partner}</td>
           <td>${item.direction === "collection" ? "Incasare" : "Plata"}</td>
           <td>${item.paymentType || "-"}</td>
@@ -1944,6 +1968,7 @@ function renderDailyReport(report) {
       (item) => `
         <tr>
           <td>#${item.id}</td>
+          <td>${formatDateShort(item.createdAt)}</td>
           <td>${item.customer}</td>
           <td>${item.product}</td>
           <td>${formatNumber(item.deliveredQuantity)}</td>
@@ -1958,6 +1983,7 @@ function renderDailyReport(report) {
       (item) => `
         <tr>
           <td>#${item.id}</td>
+          <td>${formatDateShort(item.createdAt)}</td>
           <td>${item.deliveryId ? "#" + item.deliveryId : (item.customer || "—")}</td>
           <td>${item.complaintType}</td>
           <td>${formatNumber(item.contestedQuantity)}</td>
@@ -3131,7 +3157,9 @@ async function loadCriticalAlertsStatus() {
 }
 
 async function loadOpeningDocuments() {
-  if (!canAccess("opening")) {
+  // Citirea soldurilor inițiale e necesară în Achitări/Încasări (toți cei cu finanțe),
+  // dar introducerea ecranului „Sold inițial" rămâne doar la admin (capabilitatea "opening").
+  if (!canAccess("opening-read")) {
     openingDocumentsCache = [];
     renderOpenJournal();
     return;
@@ -3165,8 +3193,12 @@ async function loadDailyReport() {
     });
     return;
   }
-  const dateValue = dailyReportDateEl.value || new Date().toISOString().slice(0, 10);
-  const response = await fetch(`/api/reports/daily?date=${encodeURIComponent(dateValue)}`);
+  const today = new Date().toISOString().slice(0, 10);
+  const from = dailyReportFromEl?.value || today;
+  const to = dailyReportToEl?.value || from;
+  const response = await fetch(
+    `/api/reports/daily?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`
+  );
   const data = await response.json();
   renderDailyReport(data);
 }
@@ -3198,7 +3230,9 @@ async function loadConfig() {
 }
 
 async function loadDashboard() {
-  dailyReportDateEl.value = new Date().toISOString().slice(0, 10);
+  const reportToday = new Date().toISOString().slice(0, 10);
+  if (dailyReportFromEl) dailyReportFromEl.value = reportToday;
+  if (dailyReportToEl) dailyReportToEl.value = reportToday;
   openingDocumentDateEl.value = new Date().toISOString().slice(0, 10);
   // Config first — silos panel and many other widgets depend on storageLocations + products.
   await loadConfig();
@@ -4066,15 +4100,15 @@ function findPartnerByName(name) {
 function buildInvoicePrintHtml(delivery) {
   const seller = getSellerPartner(delivery);
   const buyer = getBuyerPartner(delivery);
-  const qty = deliveryQtyTonnes(delivery);
+  const qtyKg = deliveryQtyTonnes(delivery) * 1000;
   const cur = delivery.currency && delivery.currency !== "MDL" ? delivery.currency : "MDL";
   const unitPriceForeign = Number(delivery.priceForeign || 0);
   const unitPriceLei = Number(delivery.priceLei || 0);
-  // suma = tone × preț (în valuta facturii dacă există, altfel lei)
+  // suma = kg × preț/kg (în valuta facturii dacă există, altfel lei)
   const isForeign = cur !== "MDL" && unitPriceForeign > 0;
   const unitPrice = isForeign ? unitPriceForeign : unitPriceLei;
-  const total = qty * unitPrice;
-  const totalLei = qty * unitPriceLei;
+  const total = qtyKg * unitPrice;
+  const totalLei = qtyKg * unitPriceLei;
   const code = getProductCode(delivery.product);
   return `${docHeader()}
     <div class="doc-title">Invoice / Factură</div>
@@ -4085,8 +4119,8 @@ function buildInvoicePrintHtml(delivery) {
     </div>
     <div class="doc-grid"><div><b>AUTO (mașină):</b> ${delivery.vehicle || "-"}</div><div><b>Valuta:</b> ${cur}</div></div>
     <table class="doc-table">
-      <thead><tr><th>Denumirea mărfii</th><th>Greutate (t)</th><th>Preț în ${cur}</th><th>Sumă în ${cur}</th></tr></thead>
-      <tbody><tr><td>${code ? code + " - " : ""}${delivery.product}</td><td>${formatNumber(qty)}</td><td>${moneyRo(unitPrice)}</td><td>${moneyRo(total)}</td></tr></tbody>
+      <thead><tr><th>Denumirea mărfii</th><th>Greutate (kg)</th><th>Preț/kg în ${cur}</th><th>Sumă în ${cur}</th></tr></thead>
+      <tbody><tr><td>${code ? code + " - " : ""}${delivery.product}</td><td>${formatNumber(qtyKg)}</td><td>${moneyRo(unitPrice)}</td><td>${moneyRo(total)}</td></tr></tbody>
       <tfoot><tr><td colspan="3">TOTAL pe invoice</td><td>${moneyRo(total)} ${cur}</td></tr></tfoot>
     </table>
     ${buildInvoiceVatBlock(delivery, totalLei)}
@@ -4523,6 +4557,7 @@ formEl.elements.quantity.addEventListener("input", renderReceiptEstimate);
 formEl.elements.price.addEventListener("input", renderReceiptEstimate);
 receiptStatusFilterEl.addEventListener("change", () => renderReceipts(receiptsCache));
 receiptProductFilterEl.addEventListener("change", () => renderReceipts(receiptsCache));
+receiptSupplierFilterEl?.addEventListener("change", () => renderReceipts(receiptsCache));
 receiptPaymentFilterEl?.addEventListener("change", () => renderReceipts(receiptsCache));
 receiptDateFromEl?.addEventListener("change", () => renderReceipts(receiptsCache));
 receiptDateToEl?.addEventListener("change", () => renderReceipts(receiptsCache));
@@ -5157,24 +5192,24 @@ function updateBillingPriceLei() {
   const pf = Number(document.getElementById("billing-price-foreign")?.value || 0);
   const rate = Number(document.getElementById("billing-exchange-rate")?.value || 0);
   const cur = document.getElementById("billing-currency-select")?.value || "MDL";
-  const leiPerTon = cur === "MDL" ? pf : pf * rate;
+  const leiPerKg = cur === "MDL" ? pf : pf * rate;
   const el = document.getElementById("billing-price-lei");
   if (el) {
     if (cur !== "MDL" && pf > 0 && rate <= 0) {
       el.innerHTML = `<span style="color:var(--danger);">Introdu cursul valutar pentru ${cur}!</span>`;
     } else {
-      el.textContent = currency.format(leiPerTon || 0);
+      el.textContent = currency.format(leiPerKg || 0);
     }
   }
 
-  // Totaluri factură cu TVA (FACT). Prețul (lei/tonă) este considerat CU TVA inclus,
-  // ca în exemplul din specificație: total = cantitate × preț; baza = total/(1+cotă).
+  // Totaluri factură cu TVA (FACT). Prețul (lei/kg) este considerat CU TVA inclus,
+  // ca în exemplul din specificație: total = cantitate(kg) × preț/kg; baza = total/(1+cotă).
   const baseEl = document.getElementById("billing-base");
   const vatEl = document.getElementById("billing-vat");
   const totalEl = document.getElementById("billing-total");
   if (baseEl && vatEl && totalEl) {
-    const qtyT = billingDelivery ? deliveryDisplayQuantity(billingDelivery) : 0;
-    const totalCuTva = qtyT * leiPerTon;
+    const qtyKg = billingDelivery ? deliveryDisplayQuantity(billingDelivery) * 1000 : 0;
+    const totalCuTva = qtyKg * leiPerKg;
     const vatRaw = document.getElementById("billing-vat-select")?.value ?? "-";
     const cota = vatRaw === "-" ? null : Number(vatRaw);
     if (cota === null || cota === 0) {
