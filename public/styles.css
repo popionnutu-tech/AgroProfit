@@ -1569,6 +1569,19 @@ dialog.billing-dialog .form-actions { display: flex; gap: 12px; margin-top: 16px
 .hint-warn { color: #92400e; }
 .hint-info { color: #1d4ed8; }
 
+/* Câmpuri mari și comode în formularul de Plată / Încasare (Financiar) — ușor de introdus */
+#transaction-form input[type="number"],
+#transaction-form input[type="text"],
+#transaction-form select {
+  padding: 12px 14px;
+  font-size: 1.05rem;
+  min-height: 48px;
+}
+#transaction-amount {
+  font-weight: 600;
+  font-size: 1.15rem;
+}
+
 /* Reclamație cu sumă diminuată (Modul D) */
 .complaint-minus {
   color: var(--danger);
