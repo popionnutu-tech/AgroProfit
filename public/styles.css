@@ -554,6 +554,26 @@ h2 {
   font-size: 1.25rem;
 }
 
+/* Rapoarte: sumar compact pe orizontală (carduri mici ca la Stoc/Nomenclator), fără scroll vertical */
+.reports-panel #daily-report-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0 0 14px;
+}
+.reports-panel #daily-report-summary .stat {
+  flex: 1 1 0;
+  min-width: 130px;
+  padding: 10px 12px;
+}
+.reports-panel #daily-report-summary .stat-label {
+  margin-bottom: 4px;
+  font-size: 0.8rem;
+}
+.reports-panel #daily-report-summary .stat-value {
+  font-size: 1.25rem;
+}
+
 .grid {
   display: grid;
   grid-template-columns: 0.92fr 1.28fr;
@@ -1524,14 +1544,30 @@ dialog.billing-dialog .form-actions { display: flex; gap: 12px; margin-top: 16px
   padding: 7px 9px;
 }
 
-/* Input cantitate reclamație mai mare (REC) */
+/* Inputuri mari pentru reclamații — vizibile, late, ușor de editat (REC) */
 .complaint-qty-input {
-  padding: 12px 14px;
-  font-size: 1.05rem;
+  padding: 14px 16px;
+  font-size: 1.1rem;
   font-weight: 600;
   width: 100%;
-  min-height: 46px;
+  min-height: 52px;
 }
+
+/* Bifă „Plată parțială / Avans" pe orizontală + indicii colorate pentru rest/avans (Financiar) */
+.checkbox-inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  align-self: end;
+}
+.checkbox-inline input {
+  width: auto;
+  min-height: 0;
+}
+.hint-ok { color: #065f46; }
+.hint-warn { color: #92400e; }
+.hint-info { color: #1d4ed8; }
 
 /* Reclamație cu sumă diminuată (Modul D) */
 .complaint-minus {

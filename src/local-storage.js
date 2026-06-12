@@ -2271,8 +2271,13 @@ async function createComplaint(payload) {
   const deliveryQty = delivery
     ? Number(delivery.netWeight > 0 ? delivery.netWeight : delivery.deliveredQuantity || delivery.plannedQuantity || 0)
     : 0;
-  // Suma = kg × preț/kg (cantitatea internă e în tone, deci × 1000).
-  const deliveryTotal = delivery ? deliveryQty * 1000 * Number(delivery.priceLei || 0) : 0;
+  // Suma totală a livrării — aceeași convenție ca pe factură:
+  //  MDL → kg × lei/kg;  valută (EUR/USD/RON) → tone × preț/tonă × curs.
+  const deliveryTotal = delivery
+    ? (String(delivery.currency || "MDL") !== "MDL" && Number(delivery.priceForeign) > 0
+        ? deliveryQty * Number(delivery.priceForeign) * Number(delivery.exchangeRate || 0)
+        : deliveryQty * 1000 * Number(delivery.priceLei || 0))
+    : 0;
 
   const complaint = {
     id: nextId(state.complaints),

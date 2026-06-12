@@ -901,11 +901,15 @@
 
             <div class="split">
               <label>
-                Suma
-                <input name="amount" type="number" min="0" step="0.01" required />
+                Suma achitată
+                <input name="amount" id="transaction-amount" type="number" min="0" step="0.01" required />
               </label>
-              <div></div>
+              <label class="checkbox-inline">
+                <input type="checkbox" id="transaction-partial-check" />
+                <span>Plată parțială / Avans</span>
+              </label>
             </div>
+            <p class="field-hint" id="transaction-partial-hint"></p>
 
             <details class="optional-fields">
               <summary>Detalii optionale</summary>
@@ -927,6 +931,10 @@
               <div class="estimate-card estimate-card-accent">
                 <span>Stare</span>
                 <strong id="transaction-status">Neachitat</strong>
+              </div>
+              <div class="estimate-card">
+                <span>Rest de plată</span>
+                <strong id="transaction-remaining">0 MDL</strong>
               </div>
             </section>
 
@@ -958,7 +966,9 @@
                       <th>Partener</th>
                       <th>Tip</th>
                       <th>Plata</th>
-                    <th>Suma</th>
+                      <th>Suma achitată</th>
+                      <th>Rest de plată</th>
+                      <th>Status</th>
                   </tr>
                 </thead>
                 <tbody id="transactions-body"></tbody>
@@ -1109,11 +1119,11 @@
               </label>
             </div>
             <div class="split">
-              <label>Preț pe kg<input name="priceForeign" id="billing-price-foreign" type="number" min="0" step="0.0001" placeholder="ex: 4,09 (lei sau valută / kg)" /></label>
+              <label><span id="billing-price-field-label">Preț pe kg (lei)</span><input name="priceForeign" id="billing-price-foreign" type="number" min="0" step="0.0001" placeholder="ex: 4,09 lei/kg sau 175 valută/tonă" /></label>
               <label>Curs valutar<input name="exchangeRate" id="billing-exchange-rate" type="number" min="0" step="0.0001" placeholder="ex: 19.45" /></label>
             </div>
             <div class="billing-computed">
-              Preț în lei (calculat): <strong id="billing-price-lei">0,00 MDL</strong> / kg
+              Preț în lei (calculat): <strong id="billing-price-lei">0,00 MDL</strong><span id="billing-price-lei-unit"> / kg</span>
             </div>
             <div class="split">
               <label>Cotă TVA
@@ -1168,29 +1178,25 @@
               </label>
             </div>
 
-            <div class="split">
-              <label>
-                Tip reclamatie
-                <select name="complaintType">
-                  <option value="Lipsa cantitativa">Lipsa cantitativa</option>
-                  <option value="Problema calitate">Problema calitate</option>
-                  <option value="Alta retinere">Alta retinere</option>
-                </select>
-              </label>
-              <label>
-                Cantitate contestată
-                <input name="contestedQuantity" class="complaint-qty-input" type="number" min="0" step="0.01" required />
-              </label>
-            </div>
+            <label>
+              Tip reclamatie
+              <select name="complaintType">
+                <option value="Lipsa cantitativa">Lipsa cantitativa</option>
+                <option value="Problema calitate">Problema calitate</option>
+                <option value="Alta retinere">Alta retinere</option>
+              </select>
+            </label>
 
-            <div class="split">
-              <label>
-                Suma de diminuat (lei)
-                <input name="deductedAmount" type="number" min="0" step="0.01" placeholder="Suma care NU se va încasa" />
-                <span class="field-hint">Se scade din suma de încasat. Nu modifică stocul.</span>
-              </label>
-              <div></div>
-            </div>
+            <label>
+              Cantitate contestată (lipsă cantitativă)
+              <input name="contestedQuantity" class="complaint-qty-input" type="number" min="0" step="0.01" required placeholder="ex: 1500 (cantitatea lipsă)" />
+            </label>
+
+            <label>
+              Suma de diminuat (lei)
+              <input name="deductedAmount" class="complaint-qty-input" type="number" min="0" step="0.01" placeholder="Suma care NU se va încasa" />
+              <span class="field-hint">Se scade din suma de încasat. Nu modifică stocul.</span>
+            </label>
 
             <div class="split">
               <label>

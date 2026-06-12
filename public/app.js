@@ -1467,6 +1467,38 @@ function renderProcessingTotals(rows) {
   processingsFootEl.innerHTML = html;
 }
 
+// Standingul curent al referinței unei tranzacții — sursa de adevăr e recepția / livrarea / soldul inițial,
+// pe care backendul le actualizează cumulativ (paidAmount/collectedAmount/settledAmount + status).
+function buildTxStanding(target, paid, statusStr) {
+  const remaining = Math.max(Number(target || 0) - Number(paid || 0), 0);
+  const s = String(statusStr || "").toLowerCase();
+  let label = "Neachitat";
+  let css = "badge-alert";
+  if (s === "achitat" || s === "incasat") { label = "Achitat integral"; css = "badge-ok"; }
+  else if (s.includes("partial")) { label = "Achitat parțial"; css = "badge-warn"; }
+  else if (s === "neincasat") { label = "Neîncasat"; css = "badge-alert"; }
+  return { remaining, label, css };
+}
+
+function transactionReferenceStanding(item) {
+  if (item.referenceType === "receipt") {
+    const r = (receiptsCache || []).find((x) => Number(x.id) === Number(item.receiptId));
+    if (r) return buildTxStanding(r.amountToPay ?? r.preliminaryPayableAmount ?? 0, r.paidAmount || 0, r.paymentStatus);
+  } else if (item.referenceType === "delivery") {
+    const d = (deliveriesCache || []).find((x) => Number(x.id) === Number(item.deliveryId));
+    if (d) {
+      const qty = Number(d.deliveredQuantity || d.netWeight || 0);
+      return buildTxStanding(Number(d.contractPrice || 0) * qty, d.collectedAmount || 0, d.collectionStatus);
+    }
+  } else if (item.referenceType === "opening-debt") {
+    for (const doc of (openingDocumentsCache || [])) {
+      const di = (doc.debtItems || []).find((x) => String(x.openingDebtId) === String(item.openingDebtId));
+      if (di) return buildTxStanding(di.amount || 0, di.settledAmount || 0, di.status);
+    }
+  }
+  return null;
+}
+
 function renderTransactions(transactions) {
   const canEditStatuses = canAccess("finance-write");
   const filtered = transactions.filter((item) =>
@@ -1491,6 +1523,12 @@ function renderTransactions(transactions) {
             </select>
           </td>
           <td>${currency.format(Number(item.amount || 0))}</td>
+          ${(() => {
+            const st = transactionReferenceStanding(item);
+            const rest = st ? currency.format(st.remaining) : "-";
+            const badge = st ? `<span class="status-badge ${st.css}">${st.label}</span>` : "-";
+            return `<td>${rest}</td><td>${badge}</td>`;
+          })()}
         </tr>
       `
     )
@@ -1520,7 +1558,7 @@ function renderTransactionTotals(rows) {
   });
   transactionsFootEl.innerHTML = `
     <tr class="totals-row">
-      <td colspan="7">TOTAL (${rows.length}) &nbsp;·&nbsp; Numerar: <b>${currency.format(cashTotal)}</b> · Transfer: <b>${currency.format(transferTotal)}</b> &nbsp;·&nbsp; Încasări: <b>${currency.format(totalCollections)}</b> · Plăți: <b>${currency.format(totalPayments)}</b></td>
+      <td colspan="9">TOTAL (${rows.length}) &nbsp;·&nbsp; Numerar: <b>${currency.format(cashTotal)}</b> · Transfer: <b>${currency.format(transferTotal)}</b> &nbsp;·&nbsp; Încasări: <b>${currency.format(totalCollections)}</b> · Plăți: <b>${currency.format(totalPayments)}</b></td>
     </tr>
   `;
 }
@@ -1555,10 +1593,24 @@ function deliveryDisplayQuantity(item) {
   return Number(item.plannedQuantity || 0);
 }
 
-// Sumele de factură se calculează în KILOGRAME × preț/kg (cum scrie contabilul pe factură:
-// 23950 kg × 4,09 lei = 97.955,50 lei). Cantitatea internă e în tone (pentru stoc), deci × 1000.
-function deliveryQtyKg(item) {
-  return deliveryDisplayQuantity(item) * 1000;
+// Sumele de pe factură — convenție de business cu DOUĂ unități de preț, în funcție de valută:
+//  • Preț în MDL            = lei / KG    → total lei = kg × preț      (ex: 23.950 kg × 4,09 = 97.955,50 lei)
+//  • Preț în valută (EUR/USD/RON) = valută / TONĂ → total valută = tone × preț; total lei = total valută × curs
+//    (ex: 26,16 t × 175 EUR × 20,1152 = 92.087,39 lei)
+// Un SINGUR loc de adevăr pentru sume — folosit în tabel, totaluri, factura tipărită și formularul de facturare.
+function deliveryInvoiceTotals(item) {
+  const tonnes = deliveryDisplayQuantity(item);
+  const kg = tonnes * 1000;
+  const cur = item.currency || "MDL";
+  const isForeign = cur !== "MDL" && Number(item.priceForeign) > 0;
+  if (isForeign) {
+    const unitForeign = Number(item.priceForeign || 0); // valută / tonă
+    const rate = Number(item.exchangeRate || 0);
+    const totalForeign = tonnes * unitForeign;
+    return { cur, isForeign, tonnes, kg, unitForeign, unitLei: unitForeign * rate, totalForeign, totalLei: totalForeign * rate };
+  }
+  const unitLei = Number(item.priceLei || 0); // lei / kg
+  return { cur, isForeign, tonnes, kg, unitForeign: 0, unitLei, totalForeign: 0, totalLei: kg * unitLei };
 }
 
 function renderDeliveries(deliveries) {
@@ -1605,10 +1657,11 @@ function renderDeliveries(deliveries) {
             .join(" ")
         : "";
       const qty = deliveryDisplayQuantity(item);
-      const priceLabel = item.priceForeign && item.currency && item.currency !== "MDL"
-        ? `${formatNumber(item.priceForeign)} ${item.currency}`
-        : (item.priceLei ? `${formatNumber(item.priceLei)} MDL` : "-");
-      const totalFactura = deliveryQtyKg(item) * Number(item.priceLei || 0);
+      const money = deliveryInvoiceTotals(item);
+      const priceLabel = money.isForeign
+        ? `${formatNumber(money.unitForeign)} ${money.cur}/t`
+        : (money.unitLei ? `${formatNumber(money.unitLei)} MDL/kg` : "-");
+      const totalFactura = money.totalLei;
       const canBill = canAccess("finance");
       const paidSelect = canBill
         ? `<select class="delivery-paid-select" data-id="${item.id}">
@@ -1671,11 +1724,12 @@ function renderDeliveryTotals(rows) {
   let totalLei = 0;
   const totalForeignByCur = {};
   rows.forEach((item) => {
-    const qty = deliveryDisplayQuantity(item);
+    const money = deliveryInvoiceTotals(item);
+    const qty = money.tonnes;
     totalQty += qty;
-    const lei = deliveryQtyKg(item) * Number(item.priceLei || 0);
-    const cur = item.currency || "MDL";
-    const foreign = deliveryQtyKg(item) * Number(item.priceForeign || 0);
+    const lei = money.totalLei;
+    const cur = money.cur;
+    const foreign = money.totalForeign;
     totalLei += lei;
     if (cur !== "MDL") totalForeignByCur[cur] = (totalForeignByCur[cur] || 0) + foreign;
     const key = item.product || "—";
@@ -3725,6 +3779,34 @@ function getDeliveryAvailable() {
   return Number(row?.quantity || 0);
 }
 
+// Calculează în timp real „Rest de plată" = țintă − deja achitat − suma curentă; semnalează și avansul (surplus).
+function updateTransactionRemaining(target, alreadyPaid) {
+  const el = document.getElementById("transaction-remaining");
+  const hintEl = document.getElementById("transaction-partial-hint");
+  const amt = Number(document.getElementById("transaction-amount")?.value || 0);
+  const outstanding = Math.max(Number(target || 0) - Number(alreadyPaid || 0), 0);
+  const remaining = Math.max(outstanding - amt, 0);
+  const surplus = Math.max(amt - outstanding, 0);
+  if (el) el.textContent = currency.format(remaining);
+  if (!hintEl) return;
+  const checked = document.getElementById("transaction-partial-check")?.checked;
+  if (amt <= 0) {
+    hintEl.textContent = "";
+    hintEl.className = "field-hint";
+  } else if (surplus > 0) {
+    hintEl.textContent = `Avans (surplus): ${currency.format(surplus)} se înregistrează ca avans al partenerului.`;
+    hintEl.className = "field-hint hint-info";
+  } else if (remaining > 0) {
+    hintEl.textContent = checked
+      ? `Plată parțială — rest de achitat: ${currency.format(remaining)}.`
+      : `Mai rămâne ${currency.format(remaining)} neachitat. Bifează «Plată parțială / Avans» dacă e intenționat.`;
+    hintEl.className = checked ? "field-hint hint-info" : "field-hint hint-warn";
+  } else {
+    hintEl.textContent = "Se achită integral ✓";
+    hintEl.className = "field-hint hint-ok";
+  }
+}
+
 function renderTransactionPreview() {
   const referenceType = getTransactionReferenceType();
   const receipt = getSelectedReceiptForTransaction();
@@ -3735,6 +3817,7 @@ function renderTransactionPreview() {
     transactionPartnerEl.textContent = "-";
     transactionTargetEl.textContent = currency.format(0);
     transactionStatusEl.textContent = "Neachitat";
+    updateTransactionRemaining(0, 0);
     return;
   }
 
@@ -3746,6 +3829,7 @@ function renderTransactionPreview() {
     transactionTargetEl.textContent = currency.format(targetAmount);
     transactionStatusEl.textContent =
       direction === "collection" ? delivery.collectionStatus || "Neincasat" : "N/A";
+    updateTransactionRemaining(targetAmount, Number(delivery.collectedAmount || 0));
     return;
   }
 
@@ -3753,6 +3837,7 @@ function renderTransactionPreview() {
     transactionPartnerEl.textContent = openingDebt.partner || "-";
     transactionTargetEl.textContent = currency.format(Number(openingDebt.amount || 0));
     transactionStatusEl.textContent = openingDebt.status || "Neachitat";
+    updateTransactionRemaining(Number(openingDebt.amount || 0), Number(openingDebt.settledAmount || 0));
     return;
   }
 
@@ -3764,6 +3849,7 @@ function renderTransactionPreview() {
   transactionPartnerEl.textContent = receipt.supplier || "-";
   transactionTargetEl.textContent = currency.format(targetAmount);
   transactionStatusEl.textContent = receipt.paymentStatus || "Neachitat";
+  updateTransactionRemaining(targetAmount, Number(receipt.paidAmount || 0));
 }
 
 function renderDeliveryPreview() {
@@ -4100,15 +4186,15 @@ function findPartnerByName(name) {
 function buildInvoicePrintHtml(delivery) {
   const seller = getSellerPartner(delivery);
   const buyer = getBuyerPartner(delivery);
-  const qtyKg = deliveryQtyTonnes(delivery) * 1000;
-  const cur = delivery.currency && delivery.currency !== "MDL" ? delivery.currency : "MDL";
-  const unitPriceForeign = Number(delivery.priceForeign || 0);
-  const unitPriceLei = Number(delivery.priceLei || 0);
-  // suma = kg × preț/kg (în valuta facturii dacă există, altfel lei)
-  const isForeign = cur !== "MDL" && unitPriceForeign > 0;
-  const unitPrice = isForeign ? unitPriceForeign : unitPriceLei;
-  const total = qtyKg * unitPrice;
-  const totalLei = qtyKg * unitPriceLei;
+  const money = deliveryInvoiceTotals(delivery);
+  const cur = money.cur;
+  // Pe factură: MDL → kg × lei/kg;  valută → tone × preț/tonă (cum se scrie în contractul de export)
+  const qtyDisplay = money.isForeign ? money.tonnes : money.kg;
+  const qtyUnit = money.isForeign ? "tone" : "kg";
+  const priceUnit = money.isForeign ? "tonă" : "kg";
+  const unitPrice = money.isForeign ? money.unitForeign : money.unitLei;
+  const total = money.isForeign ? money.totalForeign : money.totalLei;
+  const totalLei = money.totalLei;
   const code = getProductCode(delivery.product);
   return `${docHeader()}
     <div class="doc-title">Invoice / Factură</div>
@@ -4119,12 +4205,12 @@ function buildInvoicePrintHtml(delivery) {
     </div>
     <div class="doc-grid"><div><b>AUTO (mașină):</b> ${delivery.vehicle || "-"}</div><div><b>Valuta:</b> ${cur}</div></div>
     <table class="doc-table">
-      <thead><tr><th>Denumirea mărfii</th><th>Greutate (kg)</th><th>Preț/kg în ${cur}</th><th>Sumă în ${cur}</th></tr></thead>
-      <tbody><tr><td>${code ? code + " - " : ""}${delivery.product}</td><td>${formatNumber(qtyKg)}</td><td>${moneyRo(unitPrice)}</td><td>${moneyRo(total)}</td></tr></tbody>
+      <thead><tr><th>Denumirea mărfii</th><th>Greutate (${qtyUnit})</th><th>Preț/${priceUnit} în ${cur}</th><th>Sumă în ${cur}</th></tr></thead>
+      <tbody><tr><td>${code ? code + " - " : ""}${delivery.product}</td><td>${formatNumber(qtyDisplay)}</td><td>${moneyRo(unitPrice)}</td><td>${moneyRo(total)}</td></tr></tbody>
       <tfoot><tr><td colspan="3">TOTAL pe invoice</td><td>${moneyRo(total)} ${cur}</td></tr></tfoot>
     </table>
     ${buildInvoiceVatBlock(delivery, totalLei)}
-    ${isForeign ? `<div style="font-size:12px;text-align:right;">Echivalent în lei (curs ${moneyRo(delivery.exchangeRate || 0)})</div>` : ""}
+    ${money.isForeign ? `<div style="font-size:12px;text-align:right;">Echivalent în lei (curs ${moneyRo(delivery.exchangeRate || 0)}): <b>${moneyRo(totalLei)} lei</b></div>` : ""}
     <div class="doc-sign"><div>Vânzător</div><div>Cumpărător</div></div>`;
 }
 
@@ -4631,6 +4717,9 @@ transactionReferenceSelect.addEventListener("change", () => {
   syncTransactionDirection();
   renderTransactionPreview();
 });
+// Recalcul „Rest de plată" live la schimbarea sumei sau a bifei plată parțială/avans
+document.getElementById("transaction-amount")?.addEventListener("input", renderTransactionPreview);
+document.getElementById("transaction-partial-check")?.addEventListener("change", renderTransactionPreview);
 openReceiptStatusFilterEl.addEventListener("change", renderOpenJournal);
 openDeliveryStatusFilterEl.addEventListener("change", renderOpenJournal);
 openPartnerFilterEl.addEventListener("input", renderOpenJournal);
@@ -5192,24 +5281,34 @@ function updateBillingPriceLei() {
   const pf = Number(document.getElementById("billing-price-foreign")?.value || 0);
   const rate = Number(document.getElementById("billing-exchange-rate")?.value || 0);
   const cur = document.getElementById("billing-currency-select")?.value || "MDL";
-  const leiPerKg = cur === "MDL" ? pf : pf * rate;
+  const isForeign = cur !== "MDL";
+  // Preț pe unitate în lei: MDL → lei/kg (= pf);  valută → lei/tonă (= pf × curs)
+  const leiPerUnit = isForeign ? pf * rate : pf;
+  const unitLabel = isForeign ? "tonă" : "kg";
+  // Etichete dinamice: câmpul de preț (kg pentru MDL, tonă pentru valută) și sufixul liniei calculate
+  const fieldLabel = document.getElementById("billing-price-field-label");
+  if (fieldLabel) fieldLabel.textContent = isForeign ? `Preț pe tonă (${cur})` : "Preț pe kg (lei)";
+  const unitSuffix = document.getElementById("billing-price-lei-unit");
+  if (unitSuffix) unitSuffix.textContent = " / " + unitLabel;
   const el = document.getElementById("billing-price-lei");
   if (el) {
-    if (cur !== "MDL" && pf > 0 && rate <= 0) {
+    if (isForeign && pf > 0 && rate <= 0) {
       el.innerHTML = `<span style="color:var(--danger);">Introdu cursul valutar pentru ${cur}!</span>`;
     } else {
-      el.textContent = currency.format(leiPerKg || 0);
+      el.textContent = currency.format(leiPerUnit || 0);
     }
   }
 
-  // Totaluri factură cu TVA (FACT). Prețul (lei/kg) este considerat CU TVA inclus,
-  // ca în exemplul din specificație: total = cantitate(kg) × preț/kg; baza = total/(1+cotă).
+  // Totaluri factură cu TVA (FACT). Prețul este considerat CU TVA inclus.
+  //  MDL: total = cantitate(kg) × preț/kg.  Valută: total lei = cantitate(tone) × preț/tonă × curs.
+  //  ATENȚIE: aceeași formulă ca în `deliveryInvoiceTotals` — aici se calculează din valorile LIVE
+  //  din formular (încă nesalvate pe livrare). Dacă schimbi formula, schimb-o în AMBELE locuri.
   const baseEl = document.getElementById("billing-base");
   const vatEl = document.getElementById("billing-vat");
   const totalEl = document.getElementById("billing-total");
   if (baseEl && vatEl && totalEl) {
-    const qtyKg = billingDelivery ? deliveryDisplayQuantity(billingDelivery) * 1000 : 0;
-    const totalCuTva = qtyKg * leiPerKg;
+    const tonnes = billingDelivery ? deliveryDisplayQuantity(billingDelivery) : 0;
+    const totalCuTva = isForeign ? tonnes * pf * rate : tonnes * 1000 * pf;
     const vatRaw = document.getElementById("billing-vat-select")?.value ?? "-";
     const cota = vatRaw === "-" ? null : Number(vatRaw);
     if (cota === null || cota === 0) {
