@@ -4,5 +4,8 @@ data/
 .runtime-data/
 .runtime-data-backups/
 .vercel
-.claude/
+.claude/*
+!.claude/agents/
+!.claude/settings.json
+!.claude/hooks/
 .env*.local

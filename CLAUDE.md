@@ -73,3 +73,14 @@ npm run dev          # aplicația WEB pe http://localhost:3000
 3. Verifică impactul pe **fluxul de business** (mai ales regulile de mai sus): o schimbare la o
    formulă atinge tabelul, factura, financiarul și reclamațiile deodată.
 4. Producția pornește în curând cu **date reale** — atenție la `STORAGE_DRIVER=supabase`.
+
+## 🛡️ Agenți de verificare (OBLIGATORIU, automat)
+După ORICE modificare de cod SAU propunere de modificare (funcție nouă, editare, refactor,
+dependență, migrație), rulează AUTOMAT — într-un singur mesaj, în paralel — 3 agenți:
+- **architecture-guardian** — arhitectură + flux de business
+- **performance-reviewer** — performanță + încărcare (Supabase/Vercel)
+- **security-reviewer** — securitate
+
+Nu cere voie — lansează-i. Raportează problemele grupate pe severitate (Critical/High/Medium/Low).
+Dacă apar **Critical/High**, NU spune «gata» până nu decide omul.
+(Agenții sunt în `.claude/agents/`; un hook din `.claude/settings.json` reamintește automat după fiecare modificare.)
