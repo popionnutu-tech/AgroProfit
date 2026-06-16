@@ -2708,6 +2708,199 @@ async function updateReceiptSupplier(id, partnerId, changedBy) {
   return receipt;
 }
 
+// --- Stergere partener cu reatribuire referinte (merge duplicat) ---
+function countPartnerReferences(partnerId) {
+  const pid = Number(partnerId);
+  const state = readReceiptsState();
+  const config = readConfigState();
+  const partner = (config.partners || []).find((item) => Number(item.id) === pid);
+  const name = partner ? String(partner.name || "").trim().toLowerCase() : "";
+
+  const receipts = (state.receipts || []).filter((r) => Number(r.supplierId) === pid).length;
+  const transactions = (state.transactions || []).filter((t) => Number(t.partnerId) === pid).length;
+  const deliveriesCustomer = (state.deliveries || []).filter((d) => Number(d.customerId) === pid).length;
+  const deliveriesSeller = (state.deliveries || []).filter((d) => Number(d.sellerId) === pid).length;
+  const complaints = (state.complaints || []).filter((c) => Number(c.customerId) === pid).length;
+  const advances = (state.partnerAdvances || []).filter((a) => Number(a.partnerId) === pid).length;
+  const openingDebts = (state.openingDocuments || []).reduce(
+    (sum, doc) => sum + (doc.debtItems || []).filter((it) => Number(it.partnerId) === pid).length,
+    0
+  );
+  const tariffsByName = name
+    ? (config.tariffs || []).filter((t) => String(t.partner || "").trim().toLowerCase() === name).length
+    : 0;
+
+  const hardTotal =
+    receipts + transactions + deliveriesCustomer + deliveriesSeller + complaints + advances + openingDebts;
+  return {
+    receipts,
+    transactions,
+    deliveriesCustomer,
+    deliveriesSeller,
+    complaints,
+    advances,
+    openingDebts,
+    tariffsByName,
+    hardTotal
+  };
+}
+
+function reassignPartnerReferences(oldId, newId, changedBy) {
+  const from = Number(oldId);
+  const to = Number(newId);
+  if (from === to) {
+    throw new Error("Partenerul de reatribuire trebuie sa fie diferit.");
+  }
+
+  const config = readConfigState();
+  const target = (config.partners || []).find((p) => Number(p.id) === to);
+  if (!target) {
+    throw new Error("Partenerul de reatribuire nu exista.");
+  }
+  const source = (config.partners || []).find((p) => Number(p.id) === from);
+  const oldName = source ? String(source.name || "") : "";
+  const newName = String(target.name || "");
+
+  const state = readReceiptsState();
+  const counts = {
+    receipts: 0,
+    transactions: 0,
+    deliveriesCustomer: 0,
+    deliveriesSeller: 0,
+    complaints: 0,
+    advances: 0,
+    openingDebts: 0
+  };
+
+  for (const r of state.receipts || []) {
+    if (Number(r.supplierId) === from) {
+      r.supplierId = to;
+      r.supplier = newName;
+      counts.receipts += 1;
+    }
+  }
+  for (const t of state.transactions || []) {
+    if (Number(t.partnerId) === from) {
+      t.partnerId = to;
+      t.partner = newName;
+      counts.transactions += 1;
+    }
+    // Defensiv: camp legacy folosit la potrivire in getSupplierStatement.
+    if (Number(t.supplierId) === from) {
+      t.supplierId = to;
+    }
+  }
+  for (const d of state.deliveries || []) {
+    if (Number(d.customerId) === from) {
+      d.customerId = to;
+      d.customer = newName;
+      counts.deliveriesCustomer += 1;
+    }
+    if (Number(d.sellerId) === from) {
+      d.sellerId = to;
+      d.seller = newName;
+      counts.deliveriesSeller += 1;
+    }
+  }
+  for (const c of state.complaints || []) {
+    if (Number(c.customerId) === from) {
+      c.customerId = to;
+      c.customer = newName;
+      counts.complaints += 1;
+    }
+  }
+  for (const a of state.partnerAdvances || []) {
+    if (Number(a.partnerId) === from) {
+      a.partnerId = to;
+      a.partner = newName;
+      counts.advances += 1;
+    }
+  }
+  for (const doc of state.openingDocuments || []) {
+    for (const it of doc.debtItems || []) {
+      if (Number(it.partnerId) === from) {
+        it.partnerId = to;
+        it.partner = newName;
+        counts.openingDebts += 1;
+      }
+    }
+  }
+
+  createAuditEntry(state, {
+    entityType: "partner",
+    entityId: from,
+    action: "partner-merge",
+    reason: `Reatribuire referinte partener #${from} -> #${to}`,
+    user: changedBy || "dashboard",
+    oldValue: { partnerId: from, name: oldName },
+    newValue: { partnerId: to, name: newName, counts }
+  });
+  writeReceiptsState(state);
+
+  if (oldName) {
+    const oldNameKey = oldName.trim().toLowerCase();
+    let touched = 0;
+    for (const tariff of config.tariffs || []) {
+      if (String(tariff.partner || "").trim().toLowerCase() === oldNameKey) {
+        tariff.partner = newName;
+        touched += 1;
+      }
+    }
+    if (touched) {
+      writeConfigState(config);
+    }
+  }
+  return counts;
+}
+
+async function deletePartner(id, payload = {}) {
+  const pid = Number(id);
+  const config = readConfigState();
+  const exists = (config.partners || []).some((p) => Number(p.id) === pid);
+  if (!exists) {
+    return { status: "not-found" };
+  }
+
+  const refs = countPartnerReferences(pid);
+  const reassignTo = payload.reassignTo ? Number(payload.reassignTo) : null;
+
+  if (refs.hardTotal > 0 && !reassignTo) {
+    return { status: "has-references", references: refs };
+  }
+  if (refs.hardTotal > 0 && reassignTo) {
+    if (reassignTo === pid) {
+      throw new Error("Nu poti reatribui partenerul catre el insusi.");
+    }
+    if (!(config.partners || []).some((p) => Number(p.id) === reassignTo)) {
+      throw new Error("Partenerul de reatribuire nu exista.");
+    }
+    reassignPartnerReferences(pid, reassignTo, payload.changedBy);
+  }
+
+  const fresh = readConfigState();
+  const removeIdx = (fresh.partners || []).findIndex((p) => Number(p.id) === pid);
+  if (removeIdx < 0) {
+    return { status: "not-found" };
+  }
+  const removed = fresh.partners[removeIdx];
+  fresh.partners.splice(removeIdx, 1);
+  writeConfigState(fresh);
+
+  const receiptsState = readReceiptsState();
+  createAuditEntry(receiptsState, {
+    entityType: "partners",
+    entityId: pid,
+    action: "config-delete",
+    reason: payload.changeReason || "Stergere partener",
+    user: payload.changedBy || "dashboard",
+    oldValue: { ...removed },
+    newValue: reassignTo ? { reassignedTo: reassignTo } : null
+  });
+  writeReceiptsState(receiptsState);
+
+  return { status: "deleted", removed, reassignedTo: reassignTo || null };
+}
+
 async function closeReceipt(id, payload = {}) {
   const state = readReceiptsState();
   const receipt = state.receipts.find((item) => item.id === Number(id));
@@ -3541,6 +3734,9 @@ module.exports = {
   listOpeningDebtItems,
   listOpeningDocuments,
   deleteOpeningDocument,
+  deletePartner,
+  countPartnerReferences,
+  reassignPartnerReferences,
   listPartnerAdvances,
   listProcessings,
   listReceipts,

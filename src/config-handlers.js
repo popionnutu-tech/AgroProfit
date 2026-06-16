@@ -1,5 +1,6 @@
 const {
   createConfigEntry,
+  deletePartner,
   getConfig,
   updateConfigEntry,
   updateSystemSettings
@@ -85,8 +86,35 @@ async function updateSystemSettingsHandler(req, res) {
   }
 }
 
+async function deletePartnerHandler(req, res) {
+  try {
+    const body = getBody(req);
+    const reassignTo = body.reassignTo || (req.query && req.query.reassignTo) || null;
+    const result = await deletePartner(req.params.id, {
+      reassignTo,
+      changedBy: getActorLabel(req),
+      changeReason: body.changeReason || "Stergere partener din nomenclator"
+    });
+
+    if (result.status === "not-found") {
+      return sendJson(res, 404, { error: "Partenerul nu a fost gasit." });
+    }
+    if (result.status === "has-references") {
+      return sendJson(res, 409, {
+        error: "Partenerul are referinte. Alege un partener pentru reatribuire.",
+        references: result.references
+      });
+    }
+    return sendJson(res, 200, { ok: true, reassignedTo: result.reassignedTo });
+  } catch (error) {
+    console.error("Failed to delete partner:", error.message);
+    return sendJson(res, 400, { error: error.message || "Nu am putut sterge partenerul." });
+  }
+}
+
 module.exports = {
   createConfigEntryHandler,
+  deletePartnerHandler,
   getConfigHandler,
   updateConfigEntryHandler,
   updateSystemSettingsHandler

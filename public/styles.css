@@ -1209,6 +1209,35 @@ thead th {
   border-color: var(--accent);
 }
 
+.cell-btn-danger {
+  background: rgba(193, 47, 47, 0.08);
+  color: #b3261e;
+  border-color: rgba(193, 47, 47, 0.22);
+}
+
+.cell-btn-danger:hover {
+  background: #c1352d;
+  color: #ffffff;
+  border-color: #c1352d;
+}
+
+.partner-merge-dialog {
+  border: none;
+  border-radius: 14px;
+  padding: 0;
+  max-width: 440px;
+  width: 92%;
+  box-shadow: var(--shadow);
+}
+
+.partner-merge-dialog::backdrop {
+  background: rgba(20, 14, 6, 0.45);
+}
+
+.partner-merge-dialog .mini-form {
+  padding: 20px;
+}
+
 /* Setari sistem: stack 3 sub-sections vertically (full width each) */
 .setup-grid article[data-view="nom-setari"] .setup-columns {
   display: flex;

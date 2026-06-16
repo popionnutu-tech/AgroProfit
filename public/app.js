@@ -2412,6 +2412,14 @@ function renderMiniList(entity, items) {
     return;
   }
 
+  // Parteneri: afisare alfabetica dupa nume (ro). Nu mutam sursa currentConfig.
+  const displayItems =
+    entity === "partners"
+      ? [...items].sort((a, b) =>
+          String(a.name || "").localeCompare(String(b.name || ""), "ro", { sensitivity: "base" })
+        )
+      : items;
+
   const cols = ENTITY_COLUMNS[entity];
   // Fallback to legacy card view if entity is unknown
   if (!cols) {
@@ -2448,13 +2456,13 @@ function renderMiniList(entity, items) {
     .map((col) => `<th>${col.label}</th>`)
     .join("");
   // Status + actions are always last
-  const hasStatus = items.some((it) => Object.prototype.hasOwnProperty.call(it, "active"));
+  const hasStatus = displayItems.some((it) => Object.prototype.hasOwnProperty.call(it, "active"));
   const statusHeader = hasStatus ? "<th>Status</th>" : "";
 
   // Admin poate modifica orice nomenclator; contabilul poate edita/valida partenerii.
   const canModify =
     canAccess("nomenclator-update") || (entity === "partners" && canAccess("nomenclator-create"));
-  const rows = items
+  const rows = displayItems
     .map((item) => {
       const cells = cols.map((col) => `<td>${getCellValue(item, col)}</td>`).join("");
       const canToggle = Object.prototype.hasOwnProperty.call(item, "active");
@@ -2469,8 +2477,12 @@ function renderMiniList(entity, items) {
       const toggleBtn = canModify && canToggle
         ? `<button class="cell-btn" type="button" data-action="toggle" data-entity="${entity}" data-id="${item.id}" title="${item.active ? "Dezactiveaza" : "Activeaza"}">${item.active ? "Off" : "On"}</button>`
         : "";
+      const canDelete = entity === "partners" && canAccess("nomenclator-update");
+      const deleteBtn = canDelete
+        ? `<button class="cell-btn cell-btn-danger" type="button" data-action="delete" data-entity="${entity}" data-id="${item.id}" title="Sterge partener">Șterge</button>`
+        : "";
       const actionsCell = canModify
-        ? `<td class="cell-actions">${editBtn}${toggleBtn}</td>`
+        ? `<td class="cell-actions">${editBtn}${toggleBtn}${deleteBtn}</td>`
         : `<td class="cell-actions"><span class="cell-locked" title="Doar admin poate modifica">—</span></td>`;
       return `
         <tr>
@@ -4055,6 +4067,105 @@ async function updateConfigEntry(entity, id, payload) {
   }
 }
 
+function formatPartnerRefs(r) {
+  const parts = [];
+  if (r.receipts) parts.push(`${r.receipts} recepții`);
+  if (r.transactions) parts.push(`${r.transactions} tranzacții`);
+  if (r.deliveriesCustomer) parts.push(`${r.deliveriesCustomer} livrări (cumpărător)`);
+  if (r.deliveriesSeller) parts.push(`${r.deliveriesSeller} livrări (vânzător)`);
+  if (r.complaints) parts.push(`${r.complaints} reclamații`);
+  if (r.advances) parts.push(`${r.advances} avansuri`);
+  if (r.openingDebts) parts.push(`${r.openingDebts} datorii sold inițial`);
+  if (r.tariffsByName) parts.push(`${r.tariffsByName} tarife (pe nume)`);
+  return parts.join(", ") || "referințe";
+}
+
+function askPartnerReassignTarget(item, references) {
+  return new Promise((resolve) => {
+    const others = (currentConfig.partners || [])
+      .filter((p) => Number(p.id) !== Number(item.id))
+      .sort((a, b) =>
+        String(a.name || "").localeCompare(String(b.name || ""), "ro", { sensitivity: "base" })
+      );
+
+    if (!others.length) {
+      window.alert("Nu exista alt partener catre care sa reatribui. Adauga intai un partener.");
+      resolve(null);
+      return;
+    }
+
+    const dialog = document.createElement("dialog");
+    dialog.className = "partner-merge-dialog";
+    const options = others
+      .map((p) => `<option value="${p.id}">${p.name}${p.idno ? ` (${p.idno})` : ""}</option>`)
+      .join("");
+    dialog.innerHTML = `
+      <form method="dialog" class="mini-form">
+        <h3>Reatribuie și șterge „${item.name}"</h3>
+        <p>Partenerul are ${formatPartnerRefs(references)}. Alege partenerul către care se mută aceste referințe, apoi se șterge:</p>
+        <label>Reatribuie către
+          <select id="partner-merge-target">${options}</select>
+        </label>
+        <div class="editor-actions">
+          <button type="submit" value="confirm" class="cell-btn cell-btn-danger">Reatribuie și șterge</button>
+          <button type="submit" value="cancel" class="ghost-button">Renunță</button>
+        </div>
+      </form>
+    `;
+    document.body.appendChild(dialog);
+    const select = dialog.querySelector("#partner-merge-target");
+    dialog.addEventListener("close", () => {
+      const value = dialog.returnValue === "confirm" && select ? Number(select.value) : null;
+      dialog.remove();
+      resolve(value);
+    });
+    dialog.showModal();
+  });
+}
+
+async function handlePartnerDelete(item) {
+  if (!window.confirm(`Stergi partenerul „${item.name}"?`)) {
+    return;
+  }
+  try {
+    let response = await fetch(`/api/config/partners/${item.id}`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({})
+    });
+
+    if (response.status === 409) {
+      const data = await response.json().catch(() => ({}));
+      const reassignTo = await askPartnerReassignTarget(item, data.references || {});
+      if (!reassignTo) {
+        return;
+      }
+      response = await fetch(`/api/config/partners/${item.id}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reassignTo })
+      });
+    }
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || "Nu am putut sterge partenerul.");
+    }
+
+    await Promise.all([
+      loadConfig(),
+      loadReceipts(),
+      loadTransactions(),
+      loadDeliveries(),
+      loadComplaints(),
+      loadOpeningDocuments(),
+      loadAuditLogs()
+    ]);
+  } catch (error) {
+    window.alert(error.message);
+  }
+}
+
 async function saveSystemSettings(payload) {
   const response = await fetch("/api/system-settings", {
     method: "PATCH",
@@ -5560,6 +5671,11 @@ document.querySelectorAll(".list-block").forEach((container) => {
           changeReason,
           changedBy: "dashboard"
         });
+      }
+
+      if (action === "delete" && entity === "partners") {
+        await handlePartnerDelete(item);
+        return;
       }
 
       await Promise.all([loadConfig(), loadAuditLogs()]);

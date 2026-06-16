@@ -21,6 +21,7 @@ const {
 } = require("./auth-handlers");
 const {
   createConfigEntryHandler,
+  deletePartnerHandler,
   getConfigHandler,
   updateConfigEntryHandler,
   updateSystemSettingsHandler
@@ -177,6 +178,14 @@ app.patch(
   async (req, res) => {
     return updateConfigEntryHandler(req, res, "partners", req.params.id);
   }
+);
+
+// Stergere partener cu reatribuire optionala a referintelor (merge duplicat) — doar admin.
+// Inregistrata INAINTE de rutele generice de config.
+app.delete(
+  "/api/config/partners/:id",
+  requireRoles(["admin"]),
+  deletePartnerHandler
 );
 
 // PATCH/UPDATE remains admin-only
