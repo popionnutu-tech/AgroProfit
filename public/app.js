@@ -1198,7 +1198,7 @@ function renderReceipts(receipts) {
       // cantitatea inca necunoscuta) — se finalizeaza din panoul „Recepții în descărcare".
       const isPendingWeighing = item.status === "In descarcare";
       const qtyCell = isPendingWeighing
-        ? `<span style="color:var(--muted,#6b7280)">brut ${formatNumber(Number(item.grossWeight || 0))} kg</span>`
+        ? "—"
         : formatQtyByEntry(item.provisionalNetQuantity || item.quantity, item);
       const statusCell = isPendingWeighing
         ? `<span class="status-badge badge-warn" title="Așteaptă a doua cântărire (tara)">În descărcare</span>`
@@ -1218,6 +1218,8 @@ function renderReceipts(receipts) {
           </td>
           <td>${item.product}</td>
           <td>${qtyCell}</td>
+          <td>${item.grossWeight > 0 ? formatNumber(Number(item.grossWeight)) + " kg" : "—"}</td>
+          <td>${item.tareWeight > 0 ? formatNumber(Number(item.tareWeight)) + " kg" : "—"}</td>
           <td>${item.location || "-"}</td>
           <td class="col-fin">${currency.format(valoare)}</td>
           <td class="col-fin">${achitat > 0 ? currency.format(achitat) : "-"}</td>
@@ -1454,7 +1456,7 @@ function renderReceiptTotals(rows) {
     : "";
   receiptsFootEl.innerHTML = `
     <tr class="totals-row">
-      <td colspan="13">TOTAL (${rows.length} recepții) &nbsp;·&nbsp; Net: <b>${formatNumber(totalNet)} t (${formatNumber(totalNet * 1000)} kg)</b>${finPart}<br>${perProduct}</td>
+      <td colspan="15">TOTAL (${rows.length} recepții) &nbsp;·&nbsp; Net: <b>${formatNumber(totalNet)} t (${formatNumber(totalNet * 1000)} kg)</b>${finPart}<br>${perProduct}</td>
     </tr>
   `;
 }
