@@ -1312,18 +1312,29 @@ if (pendingWeighingBody) {
 
 // #4 Inchiderea zilei: memento + warn-but-allow. Nu blocheaza, doar avertizeaza constient.
 function renderCloseDayStatus() {
+  const today = new Date().toISOString().slice(0, 10);
+  const isToday = (r) => String(r.createdAt || r.receivedAt || "").slice(0, 10) === today;
+
+  // „Azi primit" = net total primit azi (exclude anulate si cele inca in descarcare, fara masa neta).
+  const todayEl = document.getElementById("today-received");
+  if (todayEl) {
+    const todayDone = receiptsCache.filter(
+      (r) => isToday(r) && r.status !== "Anulat" && r.status !== "In descarcare"
+    );
+    const totalTons = todayDone.reduce(
+      (s, r) => s + Number(r.finalNetQuantity ?? r.provisionalNetQuantity ?? r.quantity ?? 0),
+      0
+    );
+    todayEl.textContent = `Azi primit: ${formatNumber(totalTons)} t · ${todayDone.length} recepții`;
+  }
+
   if (!closeDayStatus) {
     return;
   }
-  const today = new Date().toISOString().slice(0, 10);
-  const isToday = (r) => String(r.createdAt || r.receivedAt || "").slice(0, 10) === today;
+  // „Neterminat" = doar recepatiile „In descarcare" (cantarite brut, fara masa neta inca).
   const pending = receiptsCache.filter((r) => r.status === "In descarcare").length;
-  const drafts = receiptsCache.filter(
-    (r) => isToday(r) && (r.status === "Draft" || r.status === "Proiect")
-  ).length;
-  const unfinished = pending + drafts;
-  if (unfinished > 0) {
-    closeDayStatus.textContent = `⚠ ${unfinished} neterminate (${pending} în descărcare)`;
+  if (pending > 0) {
+    closeDayStatus.textContent = `⚠ ${pending} în descărcare (fără masă netă)`;
     closeDayStatus.className = "eod-status eod-warn";
     return;
   }
@@ -1339,32 +1350,20 @@ function renderCloseDayStatus() {
     const mm = String(d.getMinutes()).padStart(2, "0");
     closeDayStatus.textContent = `✅ Ziua închisă la ${hh}:${mm}`;
   } else {
-    closeDayStatus.textContent = "Toate recepțiile finalizate";
+    closeDayStatus.textContent = "Toate recepțiile au masă netă";
   }
   closeDayStatus.className = "eod-status eod-ok";
 }
 
 function handleCloseDay() {
-  const today = new Date().toISOString().slice(0, 10);
-  const isToday = (r) => String(r.createdAt || r.receivedAt || "").slice(0, 10) === today;
+  // „Neterminat" la inchiderea zilei = doar recepatiile „In descarcare" (fara masa neta).
   const pending = receiptsCache.filter((r) => r.status === "In descarcare");
-  const drafts = receiptsCache.filter(
-    (r) => isToday(r) && (r.status === "Draft" || r.status === "Proiect")
-  );
-  const unfinished = pending.length + drafts.length;
-  if (unfinished > 0) {
-    const lines = [];
-    if (pending.length) {
-      lines.push(`• ${pending.length} în descărcare (fără cantitate):`);
-      pending.slice(0, 8).forEach((r) => {
-        lines.push(`   #${r.id} ${r.vehicle || ""} ${r.supplier || ""}`.trimEnd());
-      });
-    }
-    if (drafts.length) {
-      lines.push(`• ${drafts.length} în lucru (Draft/Proiect) de azi`);
-    }
+  if (pending.length > 0) {
+    const lines = pending
+      .slice(0, 10)
+      .map((r) => `   #${r.id} ${r.vehicle || ""} ${r.supplier || ""}`.trimEnd());
     const ok = window.confirm(
-      `⚠ Mai ai ${unfinished} recepții neterminate:\n\n${lines.join("\n")}\n\nÎnchizi ziua oricum? Cele în descărcare rămân pentru mâine.`
+      `⚠ Ai ${pending.length} recepții în descărcare (fără masă netă):\n\n${lines.join("\n")}\n\nÎnchizi ziua oricum? Acestea rămân pentru mâine — le completezi tara când iese camionul.`
     );
     if (!ok) {
       return;
@@ -1377,9 +1376,9 @@ function handleCloseDay() {
   }
   renderCloseDayStatus();
   window.alert(
-    unfinished > 0
-      ? `Ziua a fost închisă cu ${unfinished} recepții neterminate. Le poți finaliza mâine din panoul „În descărcare".`
-      : "Ziua a fost închisă. Toate recepțiile sunt finalizate. ✅"
+    pending.length > 0
+      ? `Ziua a fost închisă cu ${pending.length} recepții în descărcare. Le completezi tara mâine din panoul „În descărcare".`
+      : "Ziua a fost închisă. Toate recepțiile au masă netă. ✅"
   );
 }
 

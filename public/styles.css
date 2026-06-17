@@ -1469,6 +1469,7 @@ thead th {
 .eod-status { font-size: 0.9rem; }
 .eod-status.eod-warn { color: #92400e; font-weight: 600; }
 .eod-status.eod-ok { color: var(--muted, #6b7280); }
+.eod-today { font-weight: 700; color: var(--accent, #1B5E3F); }
 
 .nom-filter { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
 .nom-filter input[type="search"] { flex: 1 1 200px; min-width: 160px; padding: 7px 10px; }
