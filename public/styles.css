@@ -1475,6 +1475,9 @@ thead th {
 .nom-filter select { padding: 7px 10px; }
 .nom-filter-count { font-size: 0.8rem; color: var(--muted, #6b7280); margin-left: auto; }
 
+/* Recepții „în descărcare" (cantar 2 pasi) in lista principala: rand evidentiat discret, read-only */
+.row-pending td { background: #fffbeb; }
+
 .row-note { font-size: 0.75rem; color: var(--muted, #6b7280); font-style: italic; }
 
 .eod-banner {

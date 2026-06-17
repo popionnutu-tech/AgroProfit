@@ -1172,8 +1172,6 @@ function renderReceipts(receipts) {
   const payFilter = receiptPaymentFilterEl ? receiptPaymentFilterEl.value : "";
   const supplierFilter = receiptSupplierFilterEl ? receiptSupplierFilterEl.value : "";
   const filteredReceipts = receipts.filter((item) => {
-    // Cantar in 2 pasi: recepțiile „In descarcare" traiesc doar in panoul dedicat, nu in tabelul principal.
-    if (item.status === "In descarcare") return false;
     const statusMatch = !receiptStatusFilterEl.value || item.status === receiptStatusFilterEl.value;
     const productMatch = !receiptProductFilterEl.value || item.product === receiptProductFilterEl.value;
     const supplierMatch = !supplierFilter || item.supplier === supplierFilter;
@@ -1196,8 +1194,22 @@ function renderReceipts(receipts) {
         ? '<span class="pay-badge pay-anulat">—</span>'
         : paymentBadge(item.paymentStatus);
       const canPay = canAccess("finance") && !isCanceled && rest > 0;
+      // Cantar in 2 pasi: recepțiile „In descarcare" apar in lista, dar READ-ONLY (badge in loc de select,
+      // cantitatea inca necunoscuta) — se finalizeaza din panoul „Recepții în descărcare".
+      const isPendingWeighing = item.status === "In descarcare";
+      const qtyCell = isPendingWeighing
+        ? `<span style="color:var(--muted,#6b7280)">brut ${formatNumber(Number(item.grossWeight || 0))} kg</span>`
+        : formatQtyByEntry(item.provisionalNetQuantity || item.quantity, item);
+      const statusCell = isPendingWeighing
+        ? `<span class="status-badge badge-warn" title="Așteaptă a doua cântărire (tara)">În descărcare</span>`
+        : `<select class="status" data-id="${item.id}" ${canEditStatuses ? "" : "disabled"}>${statusOptions(item.status).join("")}</select>`;
+      const actionCell = isPendingWeighing
+        ? "—"
+        : canPay
+          ? `<button type="button" class="cell-btn cell-btn-primary achita-btn" data-achita="${item.id}">Achită</button>`
+          : "-";
       return `
-        <tr>
+        <tr class="${isPendingWeighing ? "row-pending" : ""}">
           <td>#${item.id}</td>
           <td>${formatDateShort(item.createdAt || item.receivedAt)}</td>
           <td class="supplier-cell" data-id="${item.id}">
@@ -1205,19 +1217,15 @@ function renderReceipts(receipts) {
             ${canChangeSupplier ? `<button type="button" class="cell-btn change-supplier-btn" data-action="change-supplier" data-id="${item.id}" title="Schimbă furnizorul">✎</button>` : ""}
           </td>
           <td>${item.product}</td>
-          <td>${formatQtyByEntry(item.provisionalNetQuantity || item.quantity, item)}</td>
+          <td>${qtyCell}</td>
           <td>${item.location || "-"}</td>
           <td class="col-fin">${currency.format(valoare)}</td>
           <td class="col-fin">${achitat > 0 ? currency.format(achitat) : "-"}</td>
           <td class="col-fin"><b>${rest > 0 ? currency.format(rest) : "0"}</b></td>
           <td class="col-fin">${formatDateShort(item.lastPaymentDate)}</td>
           <td class="col-fin">${payBadge}</td>
-          <td>
-            <select class="status" data-id="${item.id}" ${canEditStatuses ? "" : "disabled"}>
-              ${statusOptions(item.status).join("")}
-            </select>
-          </td>
-          <td class="col-fin">${canPay ? `<button type="button" class="cell-btn cell-btn-primary achita-btn" data-achita="${item.id}">Achită</button>` : "-"}</td>
+          <td>${statusCell}</td>
+          <td class="col-fin">${actionCell}</td>
         </tr>
       `;
     })
