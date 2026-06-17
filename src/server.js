@@ -33,6 +33,7 @@ const {
 } = require("./user-handlers");
 const {
   closeReceiptHandler,
+  completeWeighingHandler,
   createReceiptHandler,
   healthHandler,
   listReceiptsHandler,
@@ -259,6 +260,15 @@ app.patch(
       console.error("Failed to change receipt supplier:", error.message);
       return res.status(400).json({ error: error.message || "Nu am putut schimba furnizorul." });
     }
+  }
+);
+
+// Cantar in 2 pasi: a doua cantarire (tara) finalizeaza receptia "In descarcare".
+app.patch(
+  "/api/receipts/:id/complete-weighing",
+  requireRoles(["operator", "manager", "admin"]),
+  async (req, res) => {
+    return completeWeighingHandler(req, res, req.params.id);
   }
 );
 

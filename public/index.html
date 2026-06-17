@@ -494,9 +494,16 @@
               <p>Operatorul introduce rapid doar datele primare, restul ramane optional.</p>
             </div>
 
-            <label>
-              Furnizor
-              <select name="supplierId" id="supplier-select" required></select>
+            <label class="combobox-label">
+              Furnizor <span class="field-hint">(tastează, alege din listă sau lasă gol)</span>
+              <div class="combobox" id="supplier-combobox">
+                <input type="text" id="supplier-search" autocomplete="off" autocapitalize="off"
+                  autocorrect="off" spellcheck="false" inputmode="search" role="combobox"
+                  aria-expanded="false" aria-controls="supplier-suggestions"
+                  placeholder="Caută furnizor sau lasă gol" />
+                <input type="hidden" name="supplierId" id="supplier-id" value="" />
+                <ul class="combobox-list" id="supplier-suggestions" role="listbox" hidden></ul>
+              </div>
             </label>
 
             <label id="new-supplier-wrap" hidden>
@@ -512,15 +519,16 @@
 
             <div class="split">
               <label>
-                Cantitate (kg)
-                <input name="quantity" id="quantity-input" type="number" min="0" step="1" required placeholder="ex: 50000" />
-                <span class="field-hint" id="quantity-tons-hint">&nbsp;</span>
+                Masă brută (kg) — camion plin
+                <input name="grossWeightKg" id="gross-weight-input" type="number" min="0" step="1" required placeholder="ex: 50000" />
               </label>
               <label>
-                Unitate stoc
-                <input name="unit" id="unit-input" readonly required />
+                Tara (kg) — camion gol
+                <input name="tareWeightKg" id="tare-weight-input" type="number" min="0" step="1" placeholder="gol → recepție «în descărcare»" />
+                <span class="field-hint" id="net-qty-hint">&nbsp;</span>
               </label>
             </div>
+            <input type="hidden" name="unit" id="unit-input" />
 
             <div class="split">
               <label>
@@ -597,6 +605,33 @@
             </div>
             <p class="form-message" id="form-message"></p>
           </form>
+
+          <section class="panel table-panel" id="pending-weighing-panel" hidden>
+            <div class="panel-head">
+              <h2>Recepții în descărcare <span id="pending-weighing-count" class="status-badge badge-warn"></span></h2>
+              <p>Mașini cântărite (brut) care așteaptă a doua cântărire (tara). Completează tara când mașina iese goală.</p>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Mașină</th>
+                    <th>Furnizor</th>
+                    <th>Produs</th>
+                    <th>Masă brută</th>
+                    <th>Acțiuni</th>
+                  </tr>
+                </thead>
+                <tbody id="pending-weighing-body"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <div class="eod-bar">
+            <button type="button" id="close-day-button" class="ghost-button">🌙 Închide ziua</button>
+            <span class="eod-status" id="close-day-status"></span>
+          </div>
 
           <section class="panel table-panel">
             <div class="panel-head">
@@ -1533,6 +1568,24 @@
               </div>
               <button type="submit">Adauga partener</button>
             </form>
+            <div class="nom-filter" data-filter="partners">
+              <input type="search" id="partner-filter-q" placeholder="Caută nume / IDNO / telefon" autocomplete="off" />
+              <select id="partner-filter-role">
+                <option value="">Toate rolurile</option>
+                <option value="furnizor">Furnizor</option>
+                <option value="cumparator">Cumparator</option>
+                <option value="ambele">Ambele</option>
+              </select>
+              <select id="partner-filter-fiscal">
+                <option value="">Toate statuturile fiscale</option>
+              </select>
+              <select id="partner-filter-status">
+                <option value="">Toate stările</option>
+                <option value="validat">Validați</option>
+                <option value="temporar">Temporari</option>
+              </select>
+              <span class="nom-filter-count" id="partner-filter-count"></span>
+            </div>
             <div class="list-block" id="partners-list"></div>
           </article>
 

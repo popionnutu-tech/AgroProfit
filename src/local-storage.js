@@ -161,7 +161,7 @@ const configEntities = [
 const defaultUserPassword = process.env.DEFAULT_USER_PASSWORD || "Agro2026!";
 
 const DELIVERY_STATUSES = ["Proiect", "Confirmat", "Livrat", "Inchis", "Anulat", "Redeschis"];
-const RECEIPT_STATUSES = ["Proiect", "Draft", "Procesata", "Confirmat", "Inchis", "Anulat", "Redeschis"];
+const RECEIPT_STATUSES = ["Proiect", "In descarcare", "Draft", "Procesata", "Confirmat", "Inchis", "Anulat", "Redeschis"];
 const COMPLAINT_STATUSES = ["Deschisa", "Acceptata", "Respinsa", "Inchisa"];
 
 const DELIVERY_TRANSITIONS = {
@@ -716,8 +716,8 @@ function createStockSummary(receipts, deliveries = [], openingDocuments = [], tr
   }
 
   for (const item of receipts) {
-    // Anulat (canceled) receipts must NOT count towards stock.
-    if (item.status === "Anulat") continue;
+    // Anulat (canceled) si "In descarcare" (asteapta a 2-a cantarire) NU intra in stoc.
+    if (item.status === "Anulat" || item.status === "In descarcare") continue;
     const location = item.location || "Fara locatie";
     const key = `${location}::${item.product}`;
     const fallbackQuantity = Number(item.quantity || 0);
@@ -1408,6 +1408,52 @@ async function createReceipt(payload) {
     reason: "Creare receptie",
     user: payload.createdBy || "dashboard",
     newValue: { ...receipt }
+  });
+  writeReceiptsState(state);
+  return receipt;
+}
+
+// Cantar in 2 pasi: finalizeaza o receptie "In descarcare" cu tara (a 2-a cantarire).
+// Estimate-ul (umiditate/impuritati/withholding) e calculat de handler pe cantitatea neta si trimis aici.
+async function completeReceiptWeighing(id, payload = {}) {
+  const state = readReceiptsState();
+  const receipt = state.receipts.find((item) => item.id === Number(id));
+  if (!receipt) {
+    throw new Error("Receptia nu a fost gasita.");
+  }
+  if (receipt.status !== "In descarcare") {
+    throw new Error("Receptia nu este in descarcare.");
+  }
+
+  const oldValue = { tareWeight: receipt.tareWeight, quantity: receipt.quantity, status: receipt.status };
+  const ESTIMATE_FIELDS = [
+    "grossQuantity", "humidity", "impurity", "humidityNorm", "impurityNorm",
+    "excessHumidity", "excessImpurity", "estimatedWaterLoss", "estimatedImpurityLoss",
+    "provisionalNetQuantity", "cleaningServiceTotal", "dryingServiceTotal",
+    "preliminaryServicesTotal", "preliminaryMerchandiseValue", "withholdingPercent",
+    "withholdingAmount", "preliminaryPayableAmount"
+  ];
+
+  receipt.tareWeight = sanitizeNumber(payload.tareWeight);
+  receipt.netWeight = sanitizeNumber(payload.netWeight);
+  receipt.quantity = sanitizeNumber(payload.quantity);
+  for (const field of ESTIMATE_FIELDS) {
+    if (payload[field] !== undefined) {
+      receipt[field] = sanitizeNumber(payload[field]);
+    }
+  }
+  receipt.status = "Draft";
+  receipt.availableQuantity = getReceiptBaseQuantity(receipt);
+  receipt.updatedAt = new Date().toISOString();
+
+  createAuditEntry(state, {
+    entityType: "receipt",
+    entityId: receipt.id,
+    action: "receipt-complete-weighing",
+    reason: "A doua cantarire (tara) - finalizare receptie",
+    user: payload.changedBy || "dashboard",
+    oldValue,
+    newValue: { tareWeight: receipt.tareWeight, quantity: receipt.quantity, status: "Draft" }
   });
   writeReceiptsState(state);
   return receipt;
@@ -2614,6 +2660,17 @@ async function updateComplaint(id, payload = {}) {
   return complaint;
 }
 
+// Cantar in 2 pasi: nu se intra manual in "In descarcare" si nu se iese din ea prin schimbarea
+// generica de status (finalizarea se face prin completeReceiptWeighing). Exceptie permisa: anulare.
+function assertReceiptStatusTransition(currentStatus, nextStatus) {
+  if (nextStatus === "In descarcare") {
+    throw new Error("Statusul \"In descarcare\" se seteaza doar la prima cantarire.");
+  }
+  if (currentStatus === "In descarcare" && nextStatus !== "Anulat") {
+    throw new Error("Receptia in descarcare se finalizeaza prin a doua cantarire (tara) sau se anuleaza.");
+  }
+}
+
 async function updateReceiptStatus(id, status) {
   const state = readReceiptsState();
   const receipt = state.receipts.find((item) => item.id === Number(id));
@@ -2622,6 +2679,7 @@ async function updateReceiptStatus(id, status) {
     return null;
   }
 
+  assertReceiptStatusTransition(receipt.status, status);
   receipt.status = status;
   receipt.updatedAt = new Date().toISOString();
   writeReceiptsState(state);
@@ -2639,6 +2697,7 @@ async function updateReceiptStatusWithAudit(id, status, payload = {}) {
   const reason = requiredChangeReason(payload.changeReason);
   const oldValue = { status: receipt.status };
 
+  assertReceiptStatusTransition(receipt.status, status);
   receipt.status = status;
   receipt.updatedAt = new Date().toISOString();
 
@@ -3752,6 +3811,7 @@ module.exports = {
   updateProcessing,
   updateReceiptStatus,
   updateReceiptStatusWithAudit,
+  completeReceiptWeighing,
   updateReceiptSupplier,
   updateSystemSettings,
   updateTransaction,

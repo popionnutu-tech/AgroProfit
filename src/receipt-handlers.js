@@ -1,5 +1,6 @@
 const {
   closeReceipt,
+  completeReceiptWeighing,
   createReceipt,
   getConfig,
   getStats,
@@ -104,16 +105,24 @@ async function createReceiptHandler(req, res) {
   const body = getBody(req);
   const actor = getActorLabel(req);
   const { quantity, price, humidity, impurity } = body;
+  // Cantar in 2 pasi: la intrare se salveaza doar masa bruta (status "In descarcare");
+  // cantitatea (net) ramane necunoscuta pana la a doua cantarire (tara).
+  const isPendingWeighing = body.status === "In descarcare";
 
-  if (!body.supplierId || !body.productId || quantity === undefined || quantity === "") {
+  if (!body.productId) {
+    return sendJson(res, 400, { error: "Campul productId este obligatoriu." });
+  }
+  if (!isPendingWeighing && (quantity === undefined || quantity === "")) {
     return sendJson(res, 400, {
-      error: "Campurile supplierId, productId si quantity sunt obligatorii."
+      error: "Campurile productId si quantity sunt obligatorii."
     });
   }
 
   try {
     const config = await getConfig();
-    const partner = config.partners.find((item) => item.id === Number(body.supplierId));
+    const partner = body.supplierId
+      ? config.partners.find((item) => item.id === Number(body.supplierId))
+      : null;
     const product = config.products.find((item) => item.id === Number(body.productId));
     const location = body.locationId
       ? config.storageLocations.find((item) => item.id === Number(body.locationId))
@@ -122,7 +131,7 @@ async function createReceiptHandler(req, res) {
       (item) => item.name === partner?.fiscalProfile
     );
 
-    if (!partner) {
+    if (body.supplierId && !partner) {
       return sendJson(res, 400, { error: "Furnizorul selectat nu exista." });
     }
 
@@ -134,7 +143,7 @@ async function createReceiptHandler(req, res) {
       return sendJson(res, 400, { error: "Locatia selectata nu exista." });
     }
 
-    const normalizedQuantity = Number(quantity);
+    const normalizedQuantity = isPendingWeighing ? 0 : Number(quantity);
     const normalizedPrice =
       price === undefined || price === null || price === "" ? 0 : Number(price);
     const normalizedHumidity =
@@ -146,7 +155,11 @@ async function createReceiptHandler(req, res) {
         ? Number(product.impurityNorm || 0)
         : Number(impurity);
 
-    if (!Number.isFinite(normalizedQuantity) || normalizedQuantity <= 0) {
+    if (isPendingWeighing) {
+      if (!(Number(body.grossWeight) > 0)) {
+        return sendJson(res, 400, { error: "Introdu masa bruta (camion plin)." });
+      }
+    } else if (!Number.isFinite(normalizedQuantity) || normalizedQuantity <= 0) {
       return sendJson(res, 400, { error: "Cantitatea trebuie sa fie mai mare ca zero." });
     }
 
@@ -176,7 +189,7 @@ async function createReceiptHandler(req, res) {
       ...body,
       quantity: normalizedQuantity,
       price: normalizedPrice,
-      supplier: partner.name,
+      supplier: partner ? partner.name : "",
       product: product.name,
       unit: product.unit,
       location: location?.name || "",
@@ -259,8 +272,59 @@ async function reopenReceiptHandler(req, res, id) {
   }
 }
 
+async function completeWeighingHandler(req, res, id) {
+  const body = getBody(req);
+  const tareWeight = Number(body.tareWeight);
+  try {
+    const receipts = await listReceipts();
+    const receipt = (receipts || []).find((item) => item.id === Number(id));
+    if (!receipt) {
+      return sendJson(res, 404, { error: "Receptia nu a fost gasita." });
+    }
+    if (receipt.status !== "In descarcare") {
+      return sendJson(res, 400, { error: "Receptia nu este in descarcare." });
+    }
+    const grossWeight = Number(receipt.grossWeight || 0);
+    if (!Number.isFinite(tareWeight) || tareWeight <= 0 || tareWeight >= grossWeight) {
+      return sendJson(res, 400, { error: "Tara trebuie sa fie mai mica decat masa bruta." });
+    }
+    const netWeightKg = Math.max(grossWeight - tareWeight, 0);
+    const quantityTons = netWeightKg / 1000;
+
+    const config = await getConfig();
+    const product = config.products.find(
+      (item) => item.id === Number(receipt.productId) || item.name === receipt.product
+    );
+    const partner = config.partners.find((item) => item.id === Number(receipt.supplierId));
+    const fiscalProfile = config.fiscalProfiles.find((item) => item.name === partner?.fiscalProfile);
+
+    const estimate = computeReceiptEstimate({
+      quantity: quantityTons,
+      price: Number(receipt.price || 0),
+      humidity: Number(receipt.humidity || 0),
+      impurity: Number(receipt.impurity || 0),
+      product: product || { humidityNorm: 0, impurityNorm: 0 },
+      tariffs: config.tariffs,
+      fiscalProfile
+    });
+
+    const updated = await completeReceiptWeighing(id, {
+      tareWeight,
+      netWeight: netWeightKg,
+      quantity: quantityTons,
+      ...estimate,
+      changedBy: getActorLabel(req)
+    });
+    return sendJson(res, 200, updated);
+  } catch (error) {
+    console.error("Failed to complete receipt weighing:", error.message);
+    return sendJson(res, 400, { error: error.message || "Nu am putut finaliza cantarirea." });
+  }
+}
+
 module.exports = {
   closeReceiptHandler,
+  completeWeighingHandler,
   createReceiptHandler,
   healthHandler,
   listReceiptsHandler,

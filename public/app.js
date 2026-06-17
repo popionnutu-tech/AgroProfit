@@ -12,6 +12,11 @@ const changePasswordMessageEl = document.getElementById("change-password-message
 const cancelPasswordButtonEl = document.getElementById("cancel-password-button");
 const statsEl = document.getElementById("stats");
 const bodyEl = document.getElementById("receipts-body");
+const pendingWeighingPanel = document.getElementById("pending-weighing-panel");
+const pendingWeighingBody = document.getElementById("pending-weighing-body");
+const pendingWeighingCount = document.getElementById("pending-weighing-count");
+const closeDayButton = document.getElementById("close-day-button");
+const closeDayStatus = document.getElementById("close-day-status");
 const openingDocumentFormEl = document.getElementById("opening-document-form");
 const openingDocumentDateEl = document.getElementById("opening-document-date");
 const openingDocumentMessageEl = document.getElementById("opening-document-message");
@@ -32,14 +37,18 @@ const processingFormEl = document.getElementById("processing-form");
 const messageEl = document.getElementById("form-message");
 const processingMessageEl = document.getElementById("processing-message");
 const configSummaryEl = document.getElementById("config-summary");
-const supplierSelect = document.getElementById("supplier-select");
+const supplierSearchInput = document.getElementById("supplier-search");
+const supplierIdInput = document.getElementById("supplier-id");
+const supplierSuggestionsEl = document.getElementById("supplier-suggestions");
 const newSupplierWrap = document.getElementById("new-supplier-wrap");
 const newSupplierNameInput = document.getElementById("new-supplier-name");
 const productSelect = document.getElementById("product-select");
 const locationSelect = document.getElementById("location-select");
 const userSelect = document.getElementById("user-select");
 const unitInput = document.getElementById("unit-input");
-const quantityTonsHintEl = document.getElementById("quantity-tons-hint");
+const grossWeightInput = document.getElementById("gross-weight-input");
+const tareWeightInput = document.getElementById("tare-weight-input");
+const netQtyHintEl = document.getElementById("net-qty-hint");
 const humidityInput = document.getElementById("humidity-input");
 const impurityInput = document.getElementById("impurity-input");
 const fiscalProfileOptions = document.getElementById("fiscal-profile-options");
@@ -185,6 +194,7 @@ const entityLabels = {
 };
 
 let currentConfig = null;
+let partnerFilters = { q: "", role: "", fiscal: "", status: "" };
 let currentEditor = null;
 let openingDocumentsCache = [];
 let openingStockDraft = [];
@@ -1162,6 +1172,8 @@ function renderReceipts(receipts) {
   const payFilter = receiptPaymentFilterEl ? receiptPaymentFilterEl.value : "";
   const supplierFilter = receiptSupplierFilterEl ? receiptSupplierFilterEl.value : "";
   const filteredReceipts = receipts.filter((item) => {
+    // Cantar in 2 pasi: recepțiile „In descarcare" traiesc doar in panoul dedicat, nu in tabelul principal.
+    if (item.status === "In descarcare") return false;
     const statusMatch = !receiptStatusFilterEl.value || item.status === receiptStatusFilterEl.value;
     const productMatch = !receiptProductFilterEl.value || item.product === receiptProductFilterEl.value;
     const supplierMatch = !supplierFilter || item.supplier === supplierFilter;
@@ -1215,6 +1227,156 @@ function renderReceipts(receipts) {
   if (receiptsFootEl) {
     renderReceiptTotals(filteredReceipts);
   }
+
+  renderPendingWeighing(receipts);
+  renderCloseDayStatus();
+}
+
+// Receptii in descarcare (cantar in 2 pasi): brut introdus, asteapta tara.
+function renderPendingWeighing(receipts) {
+  if (!pendingWeighingBody || !pendingWeighingPanel) {
+    return;
+  }
+  const pending = (receipts || []).filter((item) => item.status === "In descarcare");
+  if (pendingWeighingCount) {
+    pendingWeighingCount.textContent = pending.length ? String(pending.length) : "";
+  }
+  pendingWeighingPanel.hidden = pending.length === 0;
+  pendingWeighingBody.innerHTML = pending
+    .map(
+      (item) => `
+        <tr>
+          <td>#${item.id}</td>
+          <td>${item.vehicle ? escapeComboHtml(item.vehicle) : "—"}</td>
+          <td>${item.supplier ? escapeComboHtml(item.supplier) : "—"}</td>
+          <td>${escapeComboHtml(item.product || "")}</td>
+          <td>${formatNumber(Number(item.grossWeight || 0))} kg</td>
+          <td>
+            <button type="button" class="cell-btn cell-btn-primary" data-action="complete-weighing" data-id="${item.id}" data-gross="${Number(item.grossWeight || 0)}">Completează tara</button>
+          </td>
+        </tr>
+      `
+    )
+    .join("");
+}
+
+async function handleCompleteWeighing(id, grossWeight) {
+  const input = window.prompt(
+    `Tara (kg) — masa camionului gol.\nMasă brută = ${formatNumber(Number(grossWeight || 0))} kg.`
+  );
+  if (input === null) {
+    return;
+  }
+  const tareWeight = Number(String(input).replace(",", ".").trim());
+  if (!(tareWeight > 0)) {
+    window.alert("Tara trebuie să fie un număr mai mare ca zero.");
+    return;
+  }
+  if (tareWeight >= Number(grossWeight || 0)) {
+    window.alert("Tara trebuie să fie mai mică decât masa brută.");
+    return;
+  }
+  try {
+    const response = await fetch(`/api/receipts/${id}/complete-weighing`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tareWeight })
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || "Nu am putut finaliza cântărirea.");
+    }
+    await Promise.all([loadReceipts(), loadStocks(), loadDailyReport()]);
+  } catch (error) {
+    window.alert(error.message);
+  }
+}
+
+if (pendingWeighingBody) {
+  pendingWeighingBody.addEventListener("click", (event) => {
+    const btn = event.target.closest('[data-action="complete-weighing"]');
+    if (!btn) {
+      return;
+    }
+    handleCompleteWeighing(btn.dataset.id, Number(btn.dataset.gross || 0));
+  });
+}
+
+// #4 Inchiderea zilei: memento + warn-but-allow. Nu blocheaza, doar avertizeaza constient.
+function renderCloseDayStatus() {
+  if (!closeDayStatus) {
+    return;
+  }
+  const today = new Date().toISOString().slice(0, 10);
+  const isToday = (r) => String(r.createdAt || r.receivedAt || "").slice(0, 10) === today;
+  const pending = receiptsCache.filter((r) => r.status === "In descarcare").length;
+  const drafts = receiptsCache.filter(
+    (r) => isToday(r) && (r.status === "Draft" || r.status === "Proiect")
+  ).length;
+  const unfinished = pending + drafts;
+  if (unfinished > 0) {
+    closeDayStatus.textContent = `⚠ ${unfinished} neterminate (${pending} în descărcare)`;
+    closeDayStatus.className = "eod-status eod-warn";
+    return;
+  }
+  let stampIso = "";
+  try {
+    stampIso = window.localStorage.getItem("agro:dayClosedAt") || "";
+  } catch (e) {
+    stampIso = "";
+  }
+  if (stampIso.slice(0, 10) === today) {
+    const d = new Date(stampIso);
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mm = String(d.getMinutes()).padStart(2, "0");
+    closeDayStatus.textContent = `✅ Ziua închisă la ${hh}:${mm}`;
+  } else {
+    closeDayStatus.textContent = "Toate recepțiile finalizate";
+  }
+  closeDayStatus.className = "eod-status eod-ok";
+}
+
+function handleCloseDay() {
+  const today = new Date().toISOString().slice(0, 10);
+  const isToday = (r) => String(r.createdAt || r.receivedAt || "").slice(0, 10) === today;
+  const pending = receiptsCache.filter((r) => r.status === "In descarcare");
+  const drafts = receiptsCache.filter(
+    (r) => isToday(r) && (r.status === "Draft" || r.status === "Proiect")
+  );
+  const unfinished = pending.length + drafts.length;
+  if (unfinished > 0) {
+    const lines = [];
+    if (pending.length) {
+      lines.push(`• ${pending.length} în descărcare (fără cantitate):`);
+      pending.slice(0, 8).forEach((r) => {
+        lines.push(`   #${r.id} ${r.vehicle || ""} ${r.supplier || ""}`.trimEnd());
+      });
+    }
+    if (drafts.length) {
+      lines.push(`• ${drafts.length} în lucru (Draft/Proiect) de azi`);
+    }
+    const ok = window.confirm(
+      `⚠ Mai ai ${unfinished} recepții neterminate:\n\n${lines.join("\n")}\n\nÎnchizi ziua oricum? Cele în descărcare rămân pentru mâine.`
+    );
+    if (!ok) {
+      return;
+    }
+  }
+  try {
+    window.localStorage.setItem("agro:dayClosedAt", new Date().toISOString());
+  } catch (e) {
+    /* localStorage indisponibil — ignoram */
+  }
+  renderCloseDayStatus();
+  window.alert(
+    unfinished > 0
+      ? `Ziua a fost închisă cu ${unfinished} recepții neterminate. Le poți finaliza mâine din panoul „În descărcare".`
+      : "Ziua a fost închisă. Toate recepțiile sunt finalizate. ✅"
+  );
+}
+
+if (closeDayButton) {
+  closeDayButton.addEventListener("click", handleCloseDay);
 }
 
 function paymentBadge(status) {
@@ -2072,9 +2234,119 @@ function setSelectValue(select, preferredValues = []) {
   return select.value;
 }
 
+// --- Combobox furnizor (type-to-search, optimizat telefon): filtru "contine" + persoana fizica + lasa gol ---
+function normalizeComboText(value) {
+  return String(value ?? "")
+    .toLocaleLowerCase("ro")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .trim();
+}
+
+function escapeComboHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+let supplierComboItems = [];
+let supplierActiveIndex = -1;
+
+function setSupplierComboItems(suppliers) {
+  supplierComboItems = (suppliers || []).map((s) => ({ id: String(s.id), name: String(s.name) }));
+}
+
+function closeSupplierSuggestions() {
+  supplierSuggestionsEl.hidden = true;
+  supplierSuggestionsEl.innerHTML = "";
+  supplierSearchInput.setAttribute("aria-expanded", "false");
+  supplierActiveIndex = -1;
+}
+
+function renderSupplierSuggestions() {
+  const raw = supplierSearchInput.value;
+  const q = normalizeComboText(raw);
+  const matches = q
+    ? supplierComboItems.filter((s) => normalizeComboText(s.name).includes(q))
+    : supplierComboItems.slice(0, 50);
+  const exact = q && supplierComboItems.some((s) => normalizeComboText(s.name) === q);
+
+  const rows = [
+    '<li class="combobox-item combobox-empty" role="option" data-action="clear">Lasă gol (completează contabilul)</li>'
+  ];
+  matches.forEach((s) => {
+    rows.push(`<li class="combobox-item" role="option" data-id="${s.id}">${escapeComboHtml(s.name)}</li>`);
+  });
+  if (raw.trim() && !exact && canAccess("receipt-write")) {
+    const safe = escapeComboHtml(raw.trim());
+    rows.push(
+      `<li class="combobox-item combobox-new" role="option" data-action="new" data-name="${safe}">➕ Adaugă «${safe}» ca persoană fizică</li>`
+    );
+  }
+
+  supplierSuggestionsEl.innerHTML = rows.join("");
+  supplierSuggestionsEl.hidden = false;
+  supplierSearchInput.setAttribute("aria-expanded", "true");
+  supplierActiveIndex = -1;
+}
+
+function chooseSupplier({ id = "", name = "", isNew = false }) {
+  if (isNew) {
+    supplierIdInput.value = "__new__";
+    supplierSearchInput.value = name;
+    if (newSupplierNameInput) newSupplierNameInput.value = name;
+  } else if (id) {
+    supplierIdInput.value = id;
+    supplierSearchInput.value = name;
+    if (newSupplierNameInput) newSupplierNameInput.value = "";
+  } else {
+    supplierIdInput.value = "";
+    supplierSearchInput.value = "";
+    if (newSupplierNameInput) newSupplierNameInput.value = "";
+  }
+  closeSupplierSuggestions();
+  toggleNewSupplierInput();
+  renderReceiptEstimate();
+}
+
+function handleSuggestionPick(li) {
+  if (li.dataset.action === "clear") {
+    chooseSupplier({ id: "", name: "" });
+  } else if (li.dataset.action === "new") {
+    chooseSupplier({ isNew: true, name: li.dataset.name });
+  } else if (li.dataset.id) {
+    const found = supplierComboItems.find((s) => s.id === li.dataset.id);
+    chooseSupplier({ id: li.dataset.id, name: found ? found.name : "" });
+  }
+}
+
+function restoreSupplierSelection(preferredId) {
+  const match = supplierComboItems.find((s) => s.id === String(preferredId));
+  if (match) {
+    supplierIdInput.value = match.id;
+    supplierSearchInput.value = match.name;
+  } else {
+    supplierIdInput.value = "";
+    supplierSearchInput.value = "";
+  }
+  if (newSupplierNameInput) newSupplierNameInput.value = "";
+  toggleNewSupplierInput();
+}
+
+function updateActiveSuggestion() {
+  const items = Array.from(supplierSuggestionsEl.querySelectorAll(".combobox-item"));
+  items.forEach((el, i) => el.classList.toggle("is-active", i === supplierActiveIndex));
+  if (items[supplierActiveIndex]) {
+    items[supplierActiveIndex].scrollIntoView({ block: "nearest" });
+  }
+}
+
 function renderReceiptSelectors(config) {
   const currentSelections = {
-    supplierId: supplierSelect.value,
+    supplierId: supplierIdInput.value,
     productId: productSelect.value,
     locationId: locationSelect.value,
     receivedBy: userSelect.value,
@@ -2099,14 +2371,7 @@ function renderReceiptSelectors(config) {
     ["operator", "manager", "admin"].includes(item.roleCode)
   );
 
-  renderSelectOptions(supplierSelect, suppliers, (item) => item.name, "Selecteaza furnizor");
-  // Operatorul poate adauga pe loc un furnizor nou (persoana fizica) daca nu e in lista
-  if (canAccess("receipt-write")) {
-    supplierSelect.insertAdjacentHTML(
-      "beforeend",
-      '<option value="__new__">➕ Furnizor nou (persoană fizică)</option>'
-    );
-  }
+  setSupplierComboItems(suppliers);
   renderSelectOptions(productSelect, config.products, (item) => `${item.name} (${item.code})`, "Selecteaza produs");
   renderSelectOptions(locationSelect, config.storageLocations, (item) => item.name, "Selecteaza locatie");
   renderSelectOptions(userSelect, operators, (item) => item.name, "Selecteaza utilizator");
@@ -2129,7 +2394,7 @@ function renderReceiptSelectors(config) {
     "Selecteaza partener"
   );
 
-  setSelectValue(supplierSelect, [currentSelections.supplierId, suppliers[0]?.id]);
+  restoreSupplierSelection(currentSelections.supplierId);
   setSelectValue(productSelect, [currentSelections.productId, config.products[0]?.id]);
   setSelectValue(locationSelect, [currentSelections.locationId, config.storageLocations[0]?.id]);
   setSelectValue(userSelect, [currentSessionUser?.id, currentSelections.receivedBy, operators[0]?.id]);
@@ -2401,6 +2666,23 @@ function getCellValue(item, col) {
   return formatCellValue(val, col.format);
 }
 
+// #3 Filtru parteneri: nume/IDNO/telefon (fara diacritice) + rol + statut fiscal + stare.
+function applyPartnerFilters(items) {
+  const norm = (v) =>
+    typeof normalizeComboText === "function"
+      ? normalizeComboText(v || "")
+      : String(v || "").toLowerCase().trim();
+  const q = norm(partnerFilters.q);
+  return items.filter((p) => {
+    if (partnerFilters.role && String(p.role || "") !== partnerFilters.role) return false;
+    if (partnerFilters.fiscal && String(p.fiscalProfile || "") !== partnerFilters.fiscal) return false;
+    if (partnerFilters.status === "temporar" && p.status !== "temporar") return false;
+    if (partnerFilters.status === "validat" && p.status === "temporar") return false;
+    if (q && !norm(`${p.name || ""} ${p.idno || ""} ${p.phone || ""}`).includes(q)) return false;
+    return true;
+  });
+}
+
 function renderMiniList(entity, items) {
   const target = document.getElementById(`${entity}-list`);
   if (!target) {
@@ -2462,7 +2744,12 @@ function renderMiniList(entity, items) {
   // Admin poate modifica orice nomenclator; contabilul poate edita/valida partenerii.
   const canModify =
     canAccess("nomenclator-update") || (entity === "partners" && canAccess("nomenclator-create"));
-  const rows = displayItems
+  const rowSource = entity === "partners" ? applyPartnerFilters(displayItems) : displayItems;
+  if (entity === "partners") {
+    const cEl = document.getElementById("partner-filter-count");
+    if (cEl) cEl.textContent = `${rowSource.length} / ${displayItems.length}`;
+  }
+  const rows = rowSource
     .map((item) => {
       const cells = cols.map((col) => `<td>${getCellValue(item, col)}</td>`).join("");
       const canToggle = Object.prototype.hasOwnProperty.call(item, "active");
@@ -2562,6 +2849,18 @@ function renderSetupSelectors(config) {
   fiscalProfileOptions.innerHTML = config.fiscalProfiles
     .map((item) => `<option value="${item.name}">${item.name}</option>`)
     .join("");
+
+  // #3 Optiuni statut fiscal in filtrul de parteneri (pastreaza selectia curenta).
+  const partnerFiscalFilter = document.getElementById("partner-filter-fiscal");
+  if (partnerFiscalFilter) {
+    const prev = partnerFilters.fiscal;
+    partnerFiscalFilter.innerHTML =
+      '<option value="">Toate statuturile fiscale</option>' +
+      config.fiscalProfiles
+        .map((item) => `<option value="${item.name}">${item.name}</option>`)
+        .join("");
+    partnerFiscalFilter.value = prev || "";
+  }
 
   roleOptions.innerHTML = config.roles
     .map((item) => `<option value="${item.code}">${item.name}</option>`)
@@ -2919,13 +3218,15 @@ function getReceiptEstimate() {
     (item) => String(item.id) === String(productSelect.value)
   );
   const selectedPartner = currentConfig.partners.find(
-    (item) => String(item.id) === String(supplierSelect.value)
+    (item) => String(item.id) === String(supplierIdInput.value)
   );
   const fiscalProfile = currentConfig.fiscalProfiles.find(
     (item) => item.name === selectedPartner?.fiscalProfile
   );
-  // Cantitatea se introduce in kg; calculul intern (net, servicii, stoc) e in tone.
-  const quantity = Number(formEl.elements.quantity.value || 0) / 1000;
+  // Cantarire in 2 pasi: net (kg) = brut − tara; calculul intern (servicii, stoc) e in tone.
+  const grossKg = Number(grossWeightInput.value || 0);
+  const tareKg = Number(tareWeightInput.value || 0);
+  const quantity = Math.max(grossKg - tareKg, 0) / 1000;
   const price = Number(formEl.elements.price.value || 0);
   const humidity = Number(humidityInput.value || 0);
   const impurity = Number(impurityInput.value || 0);
@@ -2968,17 +3269,14 @@ function getReceiptEstimate() {
 }
 
 function toggleNewSupplierInput() {
-  const isNew = supplierSelect.value === "__new__";
+  const isNew = supplierIdInput.value === "__new__";
   if (newSupplierWrap) {
     newSupplierWrap.hidden = !isNew;
   }
   if (newSupplierNameInput) {
     newSupplierNameInput.required = isNew;
-    if (!isNew) {
-      newSupplierNameInput.value = "";
-    } else {
-      newSupplierNameInput.focus();
-    }
+    // Numele e setat de chooseSupplier() din textul tastat; nu golim/focusam aici
+    // (focus() ar muta tastatura de pe combobox pe telefon).
   }
 }
 
@@ -2995,10 +3293,18 @@ function renderReceiptEstimate() {
   estimateServicesEl.textContent = currency.format(estimate.preliminaryServicesTotal || 0);
   estimatePayableEl.textContent = currency.format(estimate.preliminaryPayableAmount || 0);
 
-  // Hint sub cantitate: echivalentul in tone
-  if (quantityTonsHintEl) {
-    const kg = Number(formEl.elements.quantity.value || 0);
-    quantityTonsHintEl.textContent = kg > 0 ? `= ${formatNumber(kg / 1000)} tone` : " ";
+  // Hint sub tara: net = brut - tara. Daca tara goala -> receptie "in descarcare".
+  if (netQtyHintEl) {
+    const grossKg = Number(grossWeightInput.value || 0);
+    const tareKg = Number(tareWeightInput.value || 0);
+    if (grossKg > 0 && tareKg > 0) {
+      const netKg = Math.max(grossKg - tareKg, 0);
+      netQtyHintEl.textContent = "Net: " + formatNumber(netKg) + " kg = " + formatNumber(netKg / 1000) + " tone";
+    } else if (grossKg > 0) {
+      netQtyHintEl.textContent = "Fara tara -> se salveaza \u00abin descarcare\u00bb";
+    } else {
+      netQtyHintEl.textContent = " ";
+    }
   }
 }
 
@@ -3349,12 +3655,19 @@ async function createReceipt(formData) {
     (item) => String(item.id) === String(formData.get("productId"))
   );
 
+  const grossKg = Number(formData.get("grossWeightKg") || 0);
+  const tareKg = Number(formData.get("tareWeightKg") || 0);
+  const isPending = !(tareKg > 0); // fara tara -> receptie "in descarcare" (asteapta a 2-a cantarire)
+  const netKg = Math.max(grossKg - tareKg, 0);
+
   const payload = {
     supplierId: supplierId,
     supplier: partner?.name || "",
     productId: formData.get("productId"),
     product: product?.name || "",
-    quantity: String(Number(formData.get("quantity") || 0) / 1000),
+    quantity: String(isPending ? 0 : netKg / 1000),
+    grossWeight: String(grossKg),
+    tareWeight: String(isPending ? 0 : tareKg),
     enteredUnit: "kg",
     unit: product?.unit || formData.get("unit"),
     price: formData.get("price") || "0",
@@ -3365,7 +3678,8 @@ async function createReceipt(formData) {
     locationId: formData.get("locationId"),
     location: location?.name || "",
     receivedBy: receiver?.name || currentSessionUser?.name || "",
-    source: "dashboard"
+    source: "dashboard",
+    status: isPending ? "In descarcare" : "Draft"
   };
 
   const response = await fetch("/api/receipts", {
@@ -3389,16 +3703,13 @@ function validateReceiptForm(formData) {
   }
 
   const supplierId = formData.get("supplierId");
-  if (!supplierId) {
-    return "Selecteaza furnizorul.";
-  }
-
-  // Furnizor nou (persoana fizica) introdus pe loc de operator
+  // Furnizorul e OPTIONAL: poate fi lasat gol (contabilul completeaza ulterior).
   if (supplierId === "__new__") {
+    // Furnizor nou (persoana fizica) introdus pe loc de operator
     if (!String(formData.get("newSupplierName") || "").trim()) {
       return "Scrie numele furnizorului nou.";
     }
-  } else {
+  } else if (supplierId) {
     // Verify the selected supplier actually exists in our cached config
     const supplierExists = currentConfig.partners.some(
       (item) => String(item.id) === String(supplierId)
@@ -3412,8 +3723,13 @@ function validateReceiptForm(formData) {
     return "Selecteaza produsul.";
   }
 
-  if (Number(formData.get("quantity") || 0) <= 0) {
-    return "Cantitatea trebuie sa fie mai mare ca zero.";
+  const grossKg = Number(formData.get("grossWeightKg") || 0);
+  const tareKg = Number(formData.get("tareWeightKg") || 0);
+  if (!(grossKg > 0)) {
+    return "Introdu masa brută (camion plin).";
+  }
+  if (tareKg > 0 && tareKg >= grossKg) {
+    return "Tara trebuie să fie mai mică decât masa brută.";
   }
 
   if (Number(formData.get("price") || 0) < 0) {
@@ -3471,7 +3787,7 @@ function getFormSubmitMode(form) {
 function resetReceiptForm(mode = "save") {
   const preserveContext = mode !== "save-new";
   const preservedValues = {
-    supplierId: preserveContext ? supplierSelect.value : "",
+    supplierId: preserveContext ? supplierIdInput.value : "",
     productId: preserveContext ? productSelect.value : "",
     locationId: preserveContext ? locationSelect.value : "",
     receivedBy: preserveContext ? userSelect.value : "",
@@ -3486,7 +3802,7 @@ function resetReceiptForm(mode = "save") {
   }
 
   if (preserveContext) {
-    setSelectValue(supplierSelect, [preservedValues.supplierId]);
+    restoreSupplierSelection(preservedValues.supplierId);
     setSelectValue(productSelect, [preservedValues.productId]);
     setSelectValue(locationSelect, [preservedValues.locationId]);
     setSelectValue(userSelect, [preservedValues.receivedBy, currentSessionUser?.id]);
@@ -3495,11 +3811,12 @@ function resetReceiptForm(mode = "save") {
   formEl.elements.price.value = preservedValues.price || "";
   humidityInput.value = preservedValues.humidity || "";
   impurityInput.value = preservedValues.impurity || "";
-  formEl.elements.quantity.value = "";
+  if (grossWeightInput) grossWeightInput.value = "";
+  if (tareWeightInput) tareWeightInput.value = "";
   formEl.elements.vehicle.value = "";
   formEl.elements.note.value = "";
   syncUnitByProduct();
-  formEl.elements.quantity.focus();
+  if (grossWeightInput) grossWeightInput.focus();
 }
 
 function resetTransactionForm(mode = "save") {
@@ -4744,13 +5061,62 @@ productSelect.addEventListener("change", () => {
   impurityInput.value = "";
   syncUnitByProduct();
 });
-supplierSelect.addEventListener("change", () => {
+supplierSearchInput.addEventListener("input", () => {
+  // Orice editare manuala invalideaza selectia anterioara (forteaza alegere constienta)
+  const hadSupplier = supplierIdInput.value !== "";
+  supplierIdInput.value = "";
+  if (newSupplierNameInput) newSupplierNameInput.value = "";
   toggleNewSupplierInput();
-  renderReceiptEstimate();
+  renderSupplierSuggestions();
+  // Recalculam estimate-ul DOAR cand chiar s-a golit o selectie (nu la fiecare tasta).
+  if (hadSupplier) renderReceiptEstimate();
+});
+supplierSearchInput.addEventListener("focus", () => {
+  renderSupplierSuggestions();
+});
+supplierSearchInput.addEventListener("blur", () => {
+  // mic delay ca pointerdown/mousedown pe sugestie sa apuce sa ruleze
+  window.setTimeout(closeSupplierSuggestions, 120);
+});
+supplierSearchInput.addEventListener("keydown", (event) => {
+  if (supplierSuggestionsEl.hidden) return;
+  const items = Array.from(supplierSuggestionsEl.querySelectorAll(".combobox-item"));
+  if (!items.length) return;
+  if (event.key === "ArrowDown") {
+    event.preventDefault();
+    supplierActiveIndex = Math.min(supplierActiveIndex + 1, items.length - 1);
+    updateActiveSuggestion();
+  } else if (event.key === "ArrowUp") {
+    event.preventDefault();
+    supplierActiveIndex = Math.max(supplierActiveIndex - 1, 0);
+    updateActiveSuggestion();
+  } else if (event.key === "Enter") {
+    if (supplierActiveIndex >= 0 && items[supplierActiveIndex]) {
+      event.preventDefault();
+      handleSuggestionPick(items[supplierActiveIndex]);
+    }
+  } else if (event.key === "Escape") {
+    closeSupplierSuggestions();
+  }
+});
+// Selectie touch/mouse: pointerdown + preventDefault ca blur sa nu inchida lista inainte de alegere.
+supplierSuggestionsEl.addEventListener("pointerdown", (event) => {
+  const li = event.target.closest(".combobox-item");
+  if (!li) return;
+  event.preventDefault();
+  handleSuggestionPick(li);
+});
+supplierSuggestionsEl.addEventListener("mousedown", (event) => {
+  if (window.PointerEvent) return;
+  const li = event.target.closest(".combobox-item");
+  if (!li) return;
+  event.preventDefault();
+  handleSuggestionPick(li);
 });
 humidityInput.addEventListener("input", renderReceiptEstimate);
 impurityInput.addEventListener("input", renderReceiptEstimate);
-formEl.elements.quantity.addEventListener("input", renderReceiptEstimate);
+grossWeightInput.addEventListener("input", renderReceiptEstimate);
+tareWeightInput.addEventListener("input", renderReceiptEstimate);
 formEl.elements.price.addEventListener("input", renderReceiptEstimate);
 receiptStatusFilterEl.addEventListener("change", () => renderReceipts(receiptsCache));
 receiptProductFilterEl.addEventListener("change", () => renderReceipts(receiptsCache));
@@ -4758,6 +5124,31 @@ receiptSupplierFilterEl?.addEventListener("change", () => renderReceipts(receipt
 receiptPaymentFilterEl?.addEventListener("change", () => renderReceipts(receiptsCache));
 receiptDateFromEl?.addEventListener("change", () => renderReceipts(receiptsCache));
 receiptDateToEl?.addEventListener("change", () => renderReceipts(receiptsCache));
+
+// #3 Filtru parteneri (toolbar static -> re-randeaza doar lista, focusul ramane pe input).
+const partnerFilterQ = document.getElementById("partner-filter-q");
+const partnerFilterRole = document.getElementById("partner-filter-role");
+const partnerFilterFiscal = document.getElementById("partner-filter-fiscal");
+const partnerFilterStatus = document.getElementById("partner-filter-status");
+function rerenderPartners() {
+  renderMiniList("partners", (currentConfig && currentConfig.partners) || []);
+}
+partnerFilterQ?.addEventListener("input", () => {
+  partnerFilters.q = partnerFilterQ.value;
+  rerenderPartners();
+});
+partnerFilterRole?.addEventListener("change", () => {
+  partnerFilters.role = partnerFilterRole.value;
+  rerenderPartners();
+});
+partnerFilterFiscal?.addEventListener("change", () => {
+  partnerFilters.fiscal = partnerFilterFiscal.value;
+  rerenderPartners();
+});
+partnerFilterStatus?.addEventListener("change", () => {
+  partnerFilters.status = partnerFilterStatus.value;
+  rerenderPartners();
+});
 
 // "Achită" buttons in receipts table (Modul Achitări)
 bodyEl?.addEventListener("click", (event) => {
@@ -4901,8 +5292,10 @@ function findDuplicateReceiptToday(formData) {
     (p) => String(p.id) === String(formData.get("productId"))
   );
   const productName = String(product?.name || "").toLowerCase();
-  // Cantitatea din formular e in kg; receptiile stocate sunt in tone.
-  const quantity = Number(formData.get("quantity") || 0) / 1000;
+  // Cantitatea (net) din formular = brut − tara (kg); receptiile stocate sunt in tone.
+  const grossKg = Number(formData.get("grossWeightKg") || 0);
+  const tareKg = Number(formData.get("tareWeightKg") || 0);
+  const quantity = Math.max(grossKg - tareKg, 0) / 1000;
   const today = new Date().toISOString().slice(0, 10);
 
   return receiptsCache.find((r) => {
