@@ -776,12 +776,16 @@ function renderSilosGrid(summary) {
       const fillY = 28 + (120 - fillH);
       const isEmpty = filled <= 0;
       const ringClass = pct >= 95 ? " is-crit-ring" : pct >= 80 ? " is-warn-ring" : "";
+      const tonsLabel = filled.toFixed(3).replace(".", ",");
+      const productHead = dominantProduct
+        ? `<span class="silo-product" style="color:${palette.edge};" title="${productsTooltip}"><span class="silo-product-dot" style="background:${palette.fill};border-color:${palette.edge};"></span>${productsLabel}</span>`
+        : '<span class="silo-product silo-product-empty">gol</span>';
 
       return `
         <article class="silo-card${ringClass}" data-id="${cyl.id}" title="${cyl.name} · ${formatNumber(filled)}/${formatNumber(capacity)} t · ${productsTooltip || 'gol'}">
           <div class="silo-card-head">
             <span class="silo-name">${cyl.name}</span>
-            <span class="silo-pct ${pctClass}">${pct.toFixed(0)}%</span>
+            ${productHead}
           </div>
           <div class="silo-visual">
             <svg viewBox="0 0 100 180" preserveAspectRatio="xMidYMax meet">
@@ -810,18 +814,15 @@ function renderSilosGrid(summary) {
               <!-- ground line -->
               <line x1="6" y1="150" x2="94" y2="150" stroke="#D4B262" stroke-width="1.5"/>
               <!-- pct label inside -->
-              <text x="50" y="${isEmpty ? 92 : Math.max(fillY + 14, 42)}" font-family="DM Mono, monospace" font-size="11" font-weight="700" text-anchor="middle" fill="${isEmpty ? '#0F3D27' : (pct >= 25 ? palette.label : '#0F3D27')}">${pct.toFixed(0)}%</text>
+              <text x="50" y="${isEmpty ? 92 : Math.max(fillY + 14, 42)}" font-family="DM Mono, monospace" font-size="9" font-weight="700" text-anchor="middle" fill="${isEmpty ? '#0F3D27' : (pct >= 25 ? palette.label : '#0F3D27')}">${isEmpty ? '' : tonsLabel + ' t'}</text>
             </svg>
           </div>
           <div class="silo-stored-line">
-            <span class="silo-stored-qty">${formatNumber(filled)} t</span>
-            <span class="silo-stored-kg">${formatNumber(filled * 1000)} kg</span>
+            <span class="silo-stored-qty">${tonsLabel} t</span>
+            <span class="silo-stored-pct ${pctClass}">${pct.toFixed(0)}%</span>
           </div>
           <div class="silo-meta">
             <span>Liber <b>${formatNumber(free)}t</b></span>
-            ${dominantProduct
-              ? `<span class="silo-product" style="color:${palette.edge};" title="${productsTooltip}"><span class="silo-product-dot" style="background:${palette.fill};border-color:${palette.edge};"></span>${productsLabel}</span>`
-              : '<span class="silo-product silo-product-empty">gol</span>'}
           </div>
         </article>
       `;
@@ -910,6 +911,7 @@ function renderStockSummary(summary) {
     .join("");
 
   stocksBodyEl.innerHTML = summary.byLocation
+    .filter((item) => Number(item.quantity || 0) > 0)
     .map(
       (item) => `
         <tr>
@@ -1450,7 +1452,7 @@ function renderReceiptTotals(rows) {
     .map(([prod, v]) => fin
       ? `${prod}: ${formatNumber(v.net)} t (${formatNumber(v.net * 1000)} kg) / plată ${currency.format(v.pay)} / achitat ${currency.format(v.paid)}`
       : `${prod}: ${formatNumber(v.net)} t (${formatNumber(v.net * 1000)} kg)`)
-    .join("  ·  ");
+    .join("<br>");
   const finPart = fin
     ? `&nbsp;·&nbsp; Plată: <b>${currency.format(totalPay)}</b> · Achitat: <b>${currency.format(totalPaid)}</b> · Rest: <b>${currency.format(Math.max(totalPay - totalPaid, 0))}</b>`
     : "";
@@ -5523,6 +5525,17 @@ formEl.addEventListener("submit", async (event) => {
       loadAuditLogs(),
       loadDailyReport()
     ]);
+    // Auto-afișare: derulează la "Recepții recente" și evidențiază rândul nou salvat,
+    // ca operatorul să vadă imediat că s-a salvat (fără refresh / re-navigare).
+    const recentReceiptsTable = document.getElementById("receipts-table");
+    if (recentReceiptsTable) {
+      recentReceiptsTable.scrollIntoView({ behavior: "smooth", block: "start" });
+      const newRow = document.querySelector("#receipts-body tr");
+      if (newRow) {
+        newRow.classList.add("row-flash");
+        setTimeout(() => newRow.classList.remove("row-flash"), 2400);
+      }
+    }
   } catch (error) {
     messageEl.textContent = error.message;
   }

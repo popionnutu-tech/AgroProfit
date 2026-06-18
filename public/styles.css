@@ -2302,6 +2302,15 @@ dialog.billing-dialog .form-actions { display: flex; gap: 12px; margin-top: 16px
   font-size: 11px;
   color: var(--muted);
 }
+.silo-stored-pct {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 18px;
+  letter-spacing: -0.03em;
+  color: var(--accent-deep);
+}
+.silo-stored-pct.is-warn { color: var(--accent-2); }
+.silo-stored-pct.is-crit { color: var(--danger); }
 
 .silo-meta {
   display: flex;
@@ -2319,11 +2328,11 @@ dialog.billing-dialog .form-actions { display: flex; gap: 12px; margin-top: 16px
   font-weight: 600;
 }
 .silo-product {
-  font-size: 10px;
-  letter-spacing: 0.16em;
+  font-size: 15px;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--accent);
-  font-weight: 700;
+  font-weight: 800;
 }
 
 @media (max-width: 980px) {
@@ -2363,13 +2372,60 @@ dialog.billing-dialog .form-actions { display: flex; gap: 12px; margin-top: 16px
   box-shadow: inset 0 0 0 1px rgba(181, 62, 34, 0.35), 0 0 0 1px rgba(181, 62, 34, 0.12);
 }
 
+/* Bara de navigare jos pe telefon (operator) + flash rând nou */
+.bottom-nav { display: none; }
+.row-flash > td { animation: rowFlash 2.4s ease; }
+@keyframes rowFlash {
+  0% { background: rgba(176, 136, 40, 0.42); }
+  100% { background: transparent; }
+}
+@media (max-width: 640px) {
+  .bottom-nav {
+    display: flex;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 40;
+    background: #0F3D27;
+    border-top: 1px solid rgba(0, 0, 0, 0.25);
+    padding: 4px 2px;
+    padding-bottom: calc(4px + env(safe-area-inset-bottom, 0px));
+    box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.22);
+  }
+  .bottom-nav-item {
+    flex: 1 1 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 6px 1px;
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.66);
+    cursor: pointer;
+  }
+  .bottom-nav-item.is-active { color: #fff; }
+  .bottom-nav-item .bottom-nav-icon svg { width: 22px; height: 22px; display: block; }
+  .bottom-nav-label { font-size: 10px; letter-spacing: 0.01em; white-space: nowrap; }
+}
+
 /* ===========================================================
    Mobile / Telegram Mini App adaptation (≤640px width)
    =========================================================== */
 @media (max-width: 640px) {
   .main-area {
-    padding: 14px 12px 24px;
+    padding: 14px 12px 84px;
   }
+
+  /* Carduri silozuri mai compacte pe telefon (imagine mai mica, text echilibrat) */
+  .silo-card { padding: 12px 12px 12px; gap: 8px; }
+  .silo-visual { height: 110px; }
+  .silo-name { font-size: 14px; }
+  .silo-product { font-size: 14px; }
+  .silo-stored-qty { font-size: 17px; }
+  .silo-stored-pct { font-size: 16px; }
 
   .panel {
     padding: 14px 14px 16px;

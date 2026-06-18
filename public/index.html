@@ -58,6 +58,28 @@
     <div class="page-shell" id="page-shell" hidden>
       <button class="sidebar-toggle" id="sidebar-toggle" type="button" aria-label="Meniu">☰</button>
       <div class="sidebar-backdrop" id="sidebar-backdrop" aria-hidden="true"></div>
+      <nav class="bottom-nav" id="bottom-nav" aria-label="Navigare rapidă">
+        <button class="view-tab bottom-nav-item" data-view="acasa" type="button">
+          <span class="bottom-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11.5 12 4l9 7.5"/><path d="M5 10.5V20a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1v-9.5"/></svg></span>
+          <span class="bottom-nav-label">Acasă</span>
+        </button>
+        <button class="view-tab bottom-nav-item" data-view="receptii" data-access="receipts-read" type="button">
+          <span class="bottom-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/><path d="M12 4v10"/><path d="m7 9 5 5 5-5"/></svg></span>
+          <span class="bottom-nav-label">Recepții</span>
+        </button>
+        <button class="view-tab bottom-nav-item" data-view="procesare" data-access="processings-read" type="button">
+          <span class="bottom-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.55V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1.03H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1.03-1.55V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15 4.6a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.1.36.36.69.69.92.34.23.74.36 1.16.36H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1.03Z"/></svg></span>
+          <span class="bottom-nav-label">Procesare</span>
+        </button>
+        <button class="view-tab bottom-nav-item" data-view="stoc" data-access="stocks-read" type="button">
+          <span class="bottom-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8 12 3 3 8v8l9 5 9-5V8Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg></span>
+          <span class="bottom-nav-label">Stoc</span>
+        </button>
+        <button class="view-tab bottom-nav-item" data-view="livrari" data-access="deliveries-read" type="button">
+          <span class="bottom-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 16V6a1 1 0 0 1 1-1h10v11"/><path d="M14 9h4l3 3v4h-7"/><circle cx="7.5" cy="18.5" r="2"/><circle cx="16.5" cy="18.5" r="2"/></svg></span>
+          <span class="bottom-nav-label">Livrări</span>
+        </button>
+      </nav>
       <div class="layout">
         <aside class="sidebar" id="sidebar">
           <div class="sidebar-brand">
@@ -203,6 +225,26 @@
           <div class="stock-by-product" id="stock-by-product"></div>
         </section>
 
+        <section class="panel table-panel" data-view="acasa">
+          <div class="panel-head">
+            <h2>Stoc neprocesat pe produs</h2>
+            <p>Produs recepționat care încă nu a fost procesat</p>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Produs</th>
+                  <th>Tone</th>
+                  <th>Kg</th>
+                  <th>Recepții</th>
+                </tr>
+              </thead>
+              <tbody id="unprocessed-stock-body"></tbody>
+            </table>
+          </div>
+        </section>
+
         <section class="dashboard" data-view="acasa">
           <div class="dash-grid">
 
@@ -281,107 +323,6 @@
               <strong class="dash-value" id="dash-value-complaints">0</strong>
               <div class="dash-meta"><span>deschise</span><b id="dash-meta-modifications">0</b></div>
             </article>
-          </div>
-        </section>
-
-        <section class="panel table-panel" data-view="acasa">
-          <div class="panel-head">
-            <h2>Stoc neprocesat pe produs</h2>
-            <p>Produs recepționat care încă nu a fost procesat</p>
-          </div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Produs</th>
-                  <th>Tone</th>
-                  <th>Kg</th>
-                  <th>Recepții</th>
-                </tr>
-              </thead>
-              <tbody id="unprocessed-stock-body"></tbody>
-            </table>
-          </div>
-        </section>
-
-        <section class="panel filters-panel" data-view="receptii">
-          <div class="panel-head">
-            <h2>Filtre receptii</h2>
-          </div>
-          <div class="filter-grid">
-            <label>
-              Filtru dupa status
-              <select id="receipt-status-filter">
-                <option value="">Toate</option>
-                <option value="Draft">Draft</option>
-                <option value="Confirmat">Confirmat</option>
-                <option value="Procesata">Procesata</option>
-                <option value="Inchis">Inchis</option>
-                <option value="Anulat">Anulat</option>
-                <option value="Redeschis">Redeschis</option>
-                <option value="Noua">Noua</option>
-                <option value="Verificata">Verificata</option>
-                <option value="Finalizata">Finalizata</option>
-              </select>
-            </label>
-            <label>
-              Filtru dupa produs
-              <select id="receipt-product-filter">
-                <option value="">Toate produsele</option>
-              </select>
-            </label>
-            <label>
-              Filtru dupa furnizor
-              <select id="receipt-supplier-filter">
-                <option value="">Toti furnizorii</option>
-              </select>
-            </label>
-            <label>
-              Stare plată
-              <select id="receipt-payment-filter">
-                <option value="">Toate</option>
-                <option value="restanta">Cu restanță (datorăm)</option>
-                <option value="Neachitat">Neachitat</option>
-                <option value="Partial">Parțial</option>
-                <option value="Achitat">Achitat</option>
-              </select>
-            </label>
-            <label>
-              Perioada de la
-              <input type="date" id="receipt-date-from" />
-            </label>
-            <label>
-              Pana la
-              <input type="date" id="receipt-date-to" />
-            </label>
-          </div>
-        </section>
-
-        <section class="panel filters-panel" data-view="procesare">
-          <div class="panel-head">
-            <h2>Filtre procesari</h2>
-          </div>
-          <div class="filter-grid">
-            <label>
-              Filtru dupa tip
-              <select id="processing-type-filter">
-                <option value="">Toate procesarile</option>
-              </select>
-            </label>
-            <label>
-              Filtru dupa produs
-              <select id="processing-product-filter">
-                <option value="">Toate produsele</option>
-              </select>
-            </label>
-            <label>
-              Perioada de la
-              <input type="date" id="processing-date-from" />
-            </label>
-            <label>
-              Pana la
-              <input type="date" id="processing-date-to" />
-            </label>
           </div>
         </section>
 
@@ -635,6 +576,59 @@
             <span class="eod-status" id="close-day-status"></span>
           </div>
 
+          <section class="panel filters-panel" style="grid-column: 1 / -1;">
+            <div class="panel-head">
+              <h2>Filtre receptii</h2>
+            </div>
+            <div class="filter-grid">
+              <label>
+                Filtru dupa status
+                <select id="receipt-status-filter">
+                  <option value="">Toate</option>
+                  <option value="Draft">Draft</option>
+                  <option value="Confirmat">Confirmat</option>
+                  <option value="Procesata">Procesata</option>
+                  <option value="Inchis">Inchis</option>
+                  <option value="Anulat">Anulat</option>
+                  <option value="Redeschis">Redeschis</option>
+                  <option value="Noua">Noua</option>
+                  <option value="Verificata">Verificata</option>
+                  <option value="Finalizata">Finalizata</option>
+                </select>
+              </label>
+              <label>
+                Filtru dupa produs
+                <select id="receipt-product-filter">
+                  <option value="">Toate produsele</option>
+                </select>
+              </label>
+              <label>
+                Filtru dupa furnizor
+                <select id="receipt-supplier-filter">
+                  <option value="">Toti furnizorii</option>
+                </select>
+              </label>
+              <label>
+                Stare plată
+                <select id="receipt-payment-filter">
+                  <option value="">Toate</option>
+                  <option value="restanta">Cu restanță (datorăm)</option>
+                  <option value="Neachitat">Neachitat</option>
+                  <option value="Partial">Parțial</option>
+                  <option value="Achitat">Achitat</option>
+                </select>
+              </label>
+              <label>
+                Perioada de la
+                <input type="date" id="receipt-date-from" />
+              </label>
+              <label>
+                Pana la
+                <input type="date" id="receipt-date-to" />
+              </label>
+            </div>
+          </section>
+
           <section class="panel table-panel">
             <div class="panel-head">
               <h2>Receptii recente</h2>
@@ -761,6 +755,34 @@
             </div>
             <p class="form-message" id="processing-message"></p>
           </form>
+
+          <section class="panel filters-panel" style="grid-column: 1 / -1;">
+            <div class="panel-head">
+              <h2>Filtre procesari</h2>
+            </div>
+            <div class="filter-grid">
+              <label>
+                Filtru dupa tip
+                <select id="processing-type-filter">
+                  <option value="">Toate procesarile</option>
+                </select>
+              </label>
+              <label>
+                Filtru dupa produs
+                <select id="processing-product-filter">
+                  <option value="">Toate produsele</option>
+                </select>
+              </label>
+              <label>
+                Perioada de la
+                <input type="date" id="processing-date-from" />
+              </label>
+              <label>
+                Pana la
+                <input type="date" id="processing-date-to" />
+              </label>
+            </div>
+          </section>
 
           <section class="panel table-panel">
             <div class="panel-head">
