@@ -1152,6 +1152,7 @@ function normalizeEntityPayload(entity, payload) {
         name: requiredText(payload.name, "Denumirea locatiei"),
         type: requiredText(payload.type || "cilindru", "Tipul locatiei"),
         capacity: sanitizeNumber(payload.capacity),
+        capacitySunflower: sanitizeNumber(payload.capacitySunflower),
         costCategory: requiredText(
           payload.costCategory || "neprocesat",
           "Categoria de cost"
