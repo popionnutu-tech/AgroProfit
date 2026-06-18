@@ -860,8 +860,8 @@
 
             <div class="split">
               <label>
-                Cantitate
-                <input name="quantity" id="transfer-quantity-input" type="number" min="0" step="0.01" required />
+                Cantitate (kg)
+                <input name="quantity" id="transfer-quantity-input" type="number" min="0" step="1" required />
                 <span class="field-hint" id="transfer-available-hint">&nbsp;</span>
               </label>
               <label>
@@ -891,6 +891,14 @@
               <label>
                 Filtru dupa cilindru
                 <select id="transfer-loc-filter"><option value="">Toate locatiile</option></select>
+              </label>
+              <label>
+                Perioada de la
+                <input type="date" id="transfer-date-from" />
+              </label>
+              <label>
+                Pana la
+                <input type="date" id="transfer-date-to" />
               </label>
             </div>
           </section>

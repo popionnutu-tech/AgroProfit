@@ -3440,10 +3440,13 @@ function renderTransfers(transfers) {
   if (!transfersBodyEl) return;
   const fProd = document.getElementById("transfer-product-filter")?.value || "";
   const fLoc = document.getElementById("transfer-loc-filter")?.value || "";
+  const dFrom = document.getElementById("transfer-date-from");
+  const dTo = document.getElementById("transfer-date-to");
   const filtered = (transfers || []).filter(
     (t) =>
       (!fProd || t.product === fProd) &&
-      (!fLoc || t.fromLocation === fLoc || t.toLocation === fLoc)
+      (!fLoc || t.fromLocation === fLoc || t.toLocation === fLoc) &&
+      withinDateRange(t, ["createdAt"], dFrom, dTo)
   );
   transfersBodyEl.innerHTML = filtered
     .map(
@@ -3454,7 +3457,7 @@ function renderTransfers(transfers) {
           <td>${item.product}</td>
           <td>${item.fromLocation}</td>
           <td>${item.toLocation}</td>
-          <td>${formatNumber(item.quantity)} ${item.unit || ""}</td>
+          <td>${formatNumber(Math.round(Number(item.quantity || 0) * 1000))} kg</td>
           <td>${item.operator || "-"}</td>
         </tr>
       `
@@ -3479,7 +3482,7 @@ function updateTransferAvailableHint() {
     (item) => item.location === fromLoc.name && item.product === product.name
   );
   const available = Number(row?.quantity || 0);
-  let html = `Disponibil în ${fromLoc.name}: ${formatNumber(available)} ${product.unit || "tone"}`;
+  let html = `Disponibil în ${fromLoc.name}: ${formatNumber(Math.round(available * 1000))} kg (${formatNumber(available)} t)`;
   // #12: avertizare destinatie — alt produs in cilindru sau capacitate.
   const toLoc = currentConfig.storageLocations.find(
     (item) => String(item.id) === String(transferToSelect.value)
@@ -3497,7 +3500,7 @@ function updateTransferAvailableHint() {
       html += `<br><span class="transfer-warn">⚠ În ${toLoc.name} este deja ${other.product} — un cilindru = un singur produs.</span>`;
     } else if (cap > 0) {
       const liber = Math.max(cap - destCurrent, 0);
-      html += `<br><span class="field-hint">Mai încap în ${toLoc.name}: ${formatNumber(liber)} / ${formatNumber(cap)} t</span>`;
+      html += `<br><span class="field-hint">Mai încap în ${toLoc.name}: ${formatNumber(Math.round(liber * 1000))} kg (${formatNumber(liber)} t)</span>`;
     }
   }
   transferAvailableHintEl.innerHTML = html;
@@ -5714,6 +5717,8 @@ if (transferFormEl) {
   transferToSelect.addEventListener("change", updateTransferAvailableHint);
   document.getElementById("transfer-product-filter")?.addEventListener("change", () => renderTransfers(transfersCache));
   document.getElementById("transfer-loc-filter")?.addEventListener("change", () => renderTransfers(transfersCache));
+  document.getElementById("transfer-date-from")?.addEventListener("change", () => renderTransfers(transfersCache));
+  document.getElementById("transfer-date-to")?.addEventListener("change", () => renderTransfers(transfersCache));
 
   transferFormEl.addEventListener("keydown", (event) => {
     if (
@@ -5729,6 +5734,8 @@ if (transferFormEl) {
     event.preventDefault();
     transferMessageEl.textContent = "Se salveaza...";
     const payload = Object.fromEntries(new FormData(transferFormEl).entries());
+    // Cantitatea se introduce in KG (ca la receptii/procesare/livrari); stocul intern e in tone.
+    payload.quantity = String(Number(payload.quantity || 0) / 1000);
 
     try {
       const response = await fetch("/api/transfers", {

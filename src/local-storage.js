@@ -3212,9 +3212,10 @@ async function createTransfer(payload) {
       (item) => item.location === fromLocation.name && item.product === product.name
     ) || {}).quantity || 0
   );
-  if (quantity > available) {
+  // Comparam in kg rotunjit (la fel ca afisarea) ca "muta tot" sa nu pice din zecimale.
+  if (Math.round(quantity * 1000) > Math.round(available * 1000)) {
     throw new Error(
-      `Stoc insuficient in ${fromLocation.name}: disponibil ${available} ${product.unit || "tone"}.`
+      `Stoc insuficient in ${fromLocation.name}: disponibil ${Math.round(available * 1000)} kg, cerut ${Math.round(quantity * 1000)} kg.`
     );
   }
 
@@ -3234,10 +3235,10 @@ async function createTransfer(payload) {
   // #12: capacitatea maxima a locatiei destinatie (ex: cilindru = 2000 t = 2.000.000 kg).
   const destCurrent = destItems.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
   const capacity = Number(toLocation.capacity || 0) / 1000; // kg -> tone
-  if (capacity > 0 && destCurrent + quantity > capacity) {
+  if (capacity > 0 && Math.round((destCurrent + quantity) * 1000) > Math.round(capacity * 1000)) {
     const liber = Math.max(capacity - destCurrent, 0);
     throw new Error(
-      `Capacitate depasita in ${toLocation.name}: maxim ${capacity} t, ocupat ${destCurrent} t, mai incap ${liber} t (transfer cerut ${quantity} t).`
+      `Capacitate depasita in ${toLocation.name}: maxim ${Math.round(capacity * 1000)} kg, ocupat ${Math.round(destCurrent * 1000)} kg, mai incap ${Math.round(liber * 1000)} kg.`
     );
   }
 
