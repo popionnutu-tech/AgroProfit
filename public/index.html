@@ -75,6 +75,10 @@
           <span class="bottom-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8 12 3 3 8v8l9 5 9-5V8Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg></span>
           <span class="bottom-nav-label">Stoc</span>
         </button>
+        <button class="view-tab bottom-nav-item" data-view="transferuri" data-access="processings-read" type="button">
+          <span class="bottom-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m17 4 4 4-4 4"/><path d="M3 8h18"/><path d="m7 20-4-4 4-4"/><path d="M21 16H3"/></svg></span>
+          <span class="bottom-nav-label">Transfer</span>
+        </button>
         <button class="view-tab bottom-nav-item" data-view="livrari" data-access="deliveries-read" type="button">
           <span class="bottom-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 16V6a1 1 0 0 1 1-1h10v11"/><path d="M14 9h4l3 3v4h-7"/><circle cx="7.5" cy="18.5" r="2"/><circle cx="16.5" cy="18.5" r="2"/></svg></span>
           <span class="bottom-nav-label">Livrări</span>
@@ -105,6 +109,11 @@
               <span class="sidebar-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8 12 3 3 8v8l9 5 9-5V8Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
               </span><span>Stoc</span>
+            </button>
+            <button class="view-tab sidebar-item" data-view="transferuri" data-access="processings-read" type="button">
+              <span class="sidebar-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m17 4 4 4-4 4"/><path d="M3 8h18"/><path d="m7 20-4-4 4-4"/><path d="M21 16H3"/></svg>
+              </span><span>Transferuri</span>
             </button>
             <button class="view-tab sidebar-item" data-view="livrari" data-access="deliveries-read" type="button">
               <span class="sidebar-icon" aria-hidden="true">
@@ -811,7 +820,22 @@
           </section>
         </section>
 
-        <section class="grid processing-grid" data-view="procesare">
+        <section class="panel table-panel" data-view="transferuri">
+          <div class="panel-head">
+            <h2>Stoc pe cilindru</h2>
+            <p>Ce produs și cât e în fiecare locație — ca să alegi corect transferul.</p>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Locație</th><th>Produs</th><th>Tone</th><th>Kg</th></tr>
+              </thead>
+              <tbody id="transfer-stock-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="grid processing-grid" data-view="transferuri">
           <form class="panel form-panel" id="transfer-form" data-access="processing-write">
             <div class="panel-head">
               <h2>Transfer între cilindri</h2>
@@ -854,6 +878,22 @@
             <button type="submit">Salveaza transferul</button>
             <p class="form-message" id="transfer-message"></p>
           </form>
+
+          <section class="panel filters-panel" style="grid-column: 1 / -1;">
+            <div class="panel-head">
+              <h2>Filtre transferuri</h2>
+            </div>
+            <div class="filter-grid">
+              <label>
+                Filtru dupa produs
+                <select id="transfer-product-filter"><option value="">Toate produsele</option></select>
+              </label>
+              <label>
+                Filtru dupa cilindru
+                <select id="transfer-loc-filter"><option value="">Toate locatiile</option></select>
+              </label>
+            </div>
+          </section>
 
           <section class="panel table-panel">
             <div class="panel-head">

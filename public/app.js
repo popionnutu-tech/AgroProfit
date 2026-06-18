@@ -919,6 +919,30 @@ function renderStockSummary(summary) {
       `
     )
     .join("");
+
+  renderTransferStockTable(summary);
+}
+
+// Tabel stoc pe cilindru pentru pagina Transferuri (text, fara desene de cilindri).
+function renderTransferStockTable(summary) {
+  const el = document.getElementById("transfer-stock-body");
+  if (!el) return;
+  const data = summary || lastStockSummary || { byLocation: [] };
+  const rows = (data.byLocation || [])
+    .filter((i) => Number(i.quantity || 0) > 0)
+    .sort((a, b) => String(a.location || "").localeCompare(String(b.location || ""), "ro", { numeric: true }))
+    .map((i) => {
+      const palette = getProductPalette(i.product);
+      return `
+        <tr>
+          <td>${escapeComboHtml(i.location || "—")}</td>
+          <td><span class="sbp-dot" style="background:${palette.fill};border-color:${palette.edge};"></span>${escapeComboHtml(i.product || "—")}</td>
+          <td>${formatNumber(Number(i.quantity || 0))} t</td>
+          <td>${formatNumber(Number(i.quantity || 0) * 1000)} kg</td>
+        </tr>`;
+    })
+    .join("");
+  el.innerHTML = rows || '<tr><td colspan="4">Niciun stoc.</td></tr>';
 }
 
 // Modul F: mișcarea stocului pe perioadă (stoc inițial / recepții / livrări / stoc final)
@@ -2534,6 +2558,23 @@ function renderReceiptSelectors(config) {
     renderSelectOptions(transferFromSelect, cylinders, (item) => item.name, "Din cilindru");
     renderSelectOptions(transferToSelect, cylinders, (item) => item.name, "In cilindru");
     renderSelectOptions(transferUserSelect, operators, (item) => item.name, "Selecteaza operator");
+    // Optiuni pentru filtrele de pe pagina Transferuri (produs + cilindru), pastrand selectia.
+    const tProdFilter = document.getElementById("transfer-product-filter");
+    if (tProdFilter) {
+      const prev = tProdFilter.value;
+      tProdFilter.innerHTML =
+        '<option value="">Toate produsele</option>' +
+        config.products.map((p) => `<option value="${escapeComboHtml(p.name)}">${escapeComboHtml(p.name)}</option>`).join("");
+      tProdFilter.value = prev;
+    }
+    const tLocFilter = document.getElementById("transfer-loc-filter");
+    if (tLocFilter) {
+      const prev = tLocFilter.value;
+      tLocFilter.innerHTML =
+        '<option value="">Toate locatiile</option>' +
+        cylinders.map((l) => `<option value="${escapeComboHtml(l.name)}">${escapeComboHtml(l.name)}</option>`).join("");
+      tLocFilter.value = prev;
+    }
     setSelectValue(transferProductSelect, [prevProd, config.products[0]?.id]);
     setSelectValue(transferFromSelect, [prevFrom, cylinders[0]?.id]);
     setSelectValue(transferToSelect, [prevTo, cylinders[1]?.id || cylinders[0]?.id]);
@@ -3397,7 +3438,14 @@ async function loadTransfers() {
 
 function renderTransfers(transfers) {
   if (!transfersBodyEl) return;
-  transfersBodyEl.innerHTML = transfers
+  const fProd = document.getElementById("transfer-product-filter")?.value || "";
+  const fLoc = document.getElementById("transfer-loc-filter")?.value || "";
+  const filtered = (transfers || []).filter(
+    (t) =>
+      (!fProd || t.product === fProd) &&
+      (!fLoc || t.fromLocation === fLoc || t.toLocation === fLoc)
+  );
+  transfersBodyEl.innerHTML = filtered
     .map(
       (item) => `
         <tr>
@@ -5143,6 +5191,8 @@ async function refreshViewData(view) {
       await Promise.all([loadReceipts(), loadDailyReport()]);
     } else if (view === "procesare") {
       await Promise.all([loadProcessings(), loadReceipts(), loadStocks(), loadTransfers()]);
+    } else if (view === "transferuri") {
+      await Promise.all([loadStocks(), loadTransfers()]);
     } else if (view === "livrari") {
       await Promise.all([loadDeliveries(), loadReceipts()]);
     } else if (view === "reclamatii") {
@@ -5662,6 +5712,8 @@ if (transferFormEl) {
   transferProductSelect.addEventListener("change", updateTransferAvailableHint);
   transferFromSelect.addEventListener("change", updateTransferAvailableHint);
   transferToSelect.addEventListener("change", updateTransferAvailableHint);
+  document.getElementById("transfer-product-filter")?.addEventListener("change", () => renderTransfers(transfersCache));
+  document.getElementById("transfer-loc-filter")?.addEventListener("change", () => renderTransfers(transfersCache));
 
   transferFormEl.addEventListener("keydown", (event) => {
     if (
