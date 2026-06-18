@@ -1352,12 +1352,44 @@ async function createOpeningDocument(payload) {
   return openingDocument;
 }
 
+// Detecteaza daca un cilindru contine deja ALT produs decat cel care intra. Intoarce
+// numele produsului in conflict (sau null daca e gol / acelasi produs / nu e cilindru).
+// Sursa unica pentru regula "un produs / cilindru" (receptie, procesare, transfer).
+function findCylinderConflict(summary, toLocation, productName) {
+  if (!toLocation || String(toLocation.type || "").toLowerCase() !== "cilindru") return null;
+  const destItems = ((summary && summary.byLocation) || []).filter(
+    (item) => item.location === toLocation.name && Number(item.quantity || 0) > 0
+  );
+  const other = destItems.find((item) => item.product !== productName);
+  return other ? other.product : null;
+}
+
 async function createReceipt(payload) {
   const state = readReceiptsState();
   const grossWeight = sanitizeNumber(payload.grossWeight);
   const tareWeight = sanitizeNumber(payload.tareWeight);
   const rawNetWeight = sanitizeNumber(payload.netWeight);
   const netWeight = rawNetWeight > 0 ? rawNetWeight : Math.max(grossWeight - tareWeight, 0);
+
+  // Garda soft "un produs / cilindru": daca locatia aleasa e un cilindru care contine
+  // deja alt produs, cerem confirmare explicita (allowMixedProduct) din interfata.
+  const receiptConfig = readConfigState();
+  const receiptLocation = payload.locationId
+    ? receiptConfig.storageLocations.find((l) => Number(l.id) === Number(payload.locationId))
+    : receiptConfig.storageLocations.find((l) => l.name === payload.location);
+  let mixedProductConfirmed = false;
+  // Doar cilindrii au regula "un produs / cilindru" — evitam getStockSummary pe non-cilindru.
+  if (receiptLocation && String(receiptLocation.type || "").toLowerCase() === "cilindru") {
+    const conflict = findCylinderConflict(await getStockSummary(), receiptLocation, payload.product || "");
+    if (conflict) {
+      if (!payload.allowMixedProduct) {
+        throw new Error(
+          `Cilindrul ${receiptLocation.name} conține deja ${conflict} (un cilindru = un singur produs). Confirmă pe ecran sau reîncarcă pagina.`
+        );
+      }
+      mixedProductConfirmed = true;
+    }
+  }
 
   const receipt = {
     id: state.lastId + 1,
@@ -1397,6 +1429,7 @@ async function createReceipt(payload) {
     receivedBy: payload.receivedBy || "",
     location: payload.location || "",
     locationId: payload.locationId ? Number(payload.locationId) : null,
+    mixedProductConfirmed,
     reservedQuantity: 0,
     deliveredQuantity: 0,
     availableQuantity: 0,
@@ -1689,6 +1722,23 @@ async function createProcessing(payload) {
     );
   }
 
+  // Garda soft "un produs / cilindru" pe cilindrul destinatie (reutilizam summary-ul de mai sus).
+  const destName = destLocation || sourceLocation;
+  const destConflict = findCylinderConflict(
+    summary,
+    config.storageLocations.find((l) => l.name === destName),
+    productName
+  );
+  let mixedProductConfirmed = false;
+  if (destConflict) {
+    if (!payload.allowMixedProduct) {
+      throw new Error(
+        `Cilindrul ${destName} conține deja ${destConflict} (un cilindru = un singur produs). Confirmă pe ecran sau reîncarcă pagina.`
+      );
+    }
+    mixedProductConfirmed = true;
+  }
+
   const status = payload.status === "In lucru" ? "In lucru" : payload.status || "Confirmat";
 
   const state = readReceiptsState();
@@ -1706,6 +1756,7 @@ async function createProcessing(payload) {
     destLocation: destLocation || sourceLocation,
     processingType: payload.processingType || "",
     lossMethod,
+    mixedProductConfirmed,
     processedQuantity,
     confirmedWaste,
     initialHumidity,
@@ -3172,15 +3223,12 @@ async function createTransfer(payload) {
     (item) => item.location === toLocation.name && Number(item.quantity || 0) > 0
   );
 
-  // #12: intr-un cilindru poate fi un singur produs. Daca destinatia are deja alt
-  // produs, operatiunea este gresita si nu se permite salvarea.
-  if (String(toLocation.type || "").toLowerCase() === "cilindru") {
-    const otherProduct = destItems.find((item) => item.product !== product.name);
-    if (otherProduct) {
-      throw new Error(
-        `Operatiune gresita: in ${toLocation.name} se afla deja ${otherProduct.product}. Intr-un cilindru poate fi un singur produs.`
-      );
-    }
+  // #12: intr-un cilindru poate fi un singur produs (regula comuna cu receptia/procesarea).
+  const transferConflict = findCylinderConflict(summary, toLocation, product.name);
+  if (transferConflict) {
+    throw new Error(
+      `Operatiune gresita: in ${toLocation.name} se afla deja ${transferConflict}. Intr-un cilindru poate fi un singur produs.`
+    );
   }
 
   // #12: capacitatea maxima a locatiei destinatie (ex: cilindru = 2000 t = 2.000.000 kg).

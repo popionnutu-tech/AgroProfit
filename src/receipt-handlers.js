@@ -207,7 +207,7 @@ async function createReceiptHandler(req, res) {
     return response;
   } catch (error) {
     console.error("Failed to create receipt:", error.message);
-    return sendJson(res, 500, { error: "Nu am putut salva receptia." });
+    return sendJson(res, 400, { error: error.message || "Nu am putut salva receptia." });
   }
 }
 

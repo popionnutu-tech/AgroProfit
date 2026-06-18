@@ -3447,6 +3447,64 @@ function updateTransferAvailableHint() {
   transferAvailableHintEl.innerHTML = html;
 }
 
+// Produsul aflat deja in cilindrul ales, daca difera de cel care intra (sau null).
+// Citeste din ultimul stoc incarcat (lastStockSummary). Regula "un produs / cilindru".
+function cylinderConflictProduct(locationName, productName) {
+  const loc = (currentConfig?.storageLocations || []).find((l) => l.name === locationName);
+  if (!loc || String(loc.type || "").toLowerCase() !== "cilindru") return null;
+  const other = ((lastStockSummary && lastStockSummary.byLocation) || [])
+    .filter((i) => i.location === locationName && Number(i.quantity || 0) > 0)
+    .find((i) => i.product !== productName);
+  return other ? other.product : null;
+}
+
+// Hint sub selectorul de locatie la RECEPTIE: arata ce contine cilindrul ales si
+// avertizeaza rosu daca produsul receptionat difera (un cilindru = un singur produs).
+function updateReceiptLocationHint() {
+  const hintEl = document.getElementById("receipt-location-hint");
+  if (!hintEl || !currentConfig) return;
+  const loc = currentConfig.storageLocations.find((l) => String(l.id) === String(locationSelect.value));
+  const product = currentConfig.products.find((p) => String(p.id) === String(productSelect.value));
+  if (!loc || String(loc.type || "").toLowerCase() !== "cilindru" || !lastStockSummary) {
+    hintEl.innerHTML = "";
+    return;
+  }
+  const items = (lastStockSummary.byLocation || []).filter(
+    (i) => i.location === loc.name && Number(i.quantity || 0) > 0
+  );
+  if (!items.length) {
+    hintEl.innerHTML = `<span class="field-hint">${escapeComboHtml(loc.name)}: gol</span>`;
+    return;
+  }
+  const other = product ? items.find((i) => i.product !== product.name) : null;
+  if (other) {
+    hintEl.innerHTML = `<span class="transfer-warn">⚠ ${escapeComboHtml(loc.name)} conține deja ${escapeComboHtml(other.product)} — un cilindru = un singur produs.</span>`;
+  } else {
+    const content = items
+      .map((i) => `${escapeComboHtml(i.product)} (${formatNumber(Number(i.quantity || 0))} t)`)
+      .join(", ");
+    hintEl.innerHTML = `<span class="field-hint">${escapeComboHtml(loc.name)} conține: ${content}</span>`;
+  }
+}
+
+// Hint la PROCESARE (cilindru destinatie): avertizare rosie daca cilindrul are alt produs.
+function updateProcessingDestHint() {
+  const hintEl = document.getElementById("processing-dest-hint");
+  if (!hintEl || !currentConfig) return;
+  const loc = currentConfig.storageLocations.find((l) => l.name === processingDestSelect.value);
+  const productName = processingProductSelect.value;
+  if (!loc || String(loc.type || "").toLowerCase() !== "cilindru" || !lastStockSummary) {
+    hintEl.innerHTML = "";
+    return;
+  }
+  const other = (lastStockSummary.byLocation || [])
+    .filter((i) => i.location === loc.name && Number(i.quantity || 0) > 0)
+    .find((i) => i.product !== productName);
+  hintEl.innerHTML = other
+    ? `<span class="transfer-warn">⚠ ${escapeComboHtml(loc.name)} conține deja ${escapeComboHtml(other.product)} — un cilindru = un singur produs.</span>`
+    : "";
+}
+
 async function loadTransactions() {
   if (!canAccess("finance")) {
     transactionsCache = [];
@@ -3698,6 +3756,20 @@ async function createReceipt(formData) {
     source: "dashboard",
     status: isPending ? "In descarcare" : "Draft"
   };
+
+  // Avertizare "un produs / cilindru": daca cilindrul ales are deja alt produs, confirma.
+  const receiptConflict = cylinderConflictProduct(location?.name, product?.name);
+  if (receiptConflict) {
+    const ok = window.confirm(
+      `Atenție! Recepționezi ${product?.name || "produsul"} în ${location?.name}, dar acolo este deja ${receiptConflict}.\nUn cilindru ar trebui să aibă un singur produs. Continui?`
+    );
+    if (!ok) {
+      const cancelErr = new Error("Recepție anulată — cilindru cu alt produs.");
+      cancelErr.cancelled = true;
+      throw cancelErr;
+    }
+    payload.allowMixedProduct = true;
+  }
 
   const response = await fetch("/api/receipts", {
     method: "POST",
@@ -4052,6 +4124,21 @@ async function createProcessing(formData, status) {
     note: formData.get("note"),
     status: status === "In lucru" ? "In lucru" : "Confirmat"
   };
+
+  // Avertizare "un produs / cilindru" pe cilindrul destinatie.
+  const procDestName = formData.get("destLocation") || formData.get("sourceLocation");
+  const procConflict = cylinderConflictProduct(procDestName, formData.get("product"));
+  if (procConflict) {
+    const ok = window.confirm(
+      `Atenție! Pui ${formData.get("product")} în ${procDestName}, dar acolo este deja ${procConflict}.\nUn cilindru ar trebui să aibă un singur produs. Continui?`
+    );
+    if (!ok) {
+      const cancelErr = new Error("Procesare anulată — cilindru cu alt produs.");
+      cancelErr.cancelled = true;
+      throw cancelErr;
+    }
+    payload.allowMixedProduct = true;
+  }
 
   const response = await fetch("/api/processings", {
     method: "POST",
@@ -5281,6 +5368,10 @@ confirmedWasteInput.addEventListener("input", renderProcessingEstimate);
 processingInitialHumidityInput.addEventListener("input", renderProcessingEstimate);
 processingFinalHumidityInput.addEventListener("input", renderProcessingEstimate);
 processingTypeSelect.addEventListener("change", updateProcessingTypeUI);
+processingDestSelect.addEventListener("change", updateProcessingDestHint);
+processingProductSelect.addEventListener("change", updateProcessingDestHint);
+locationSelect.addEventListener("change", updateReceiptLocationHint);
+productSelect.addEventListener("change", updateReceiptLocationHint);
 transactionReferenceTypeSelect.addEventListener("change", () => {
   renderTransactionReferenceOptions();
   syncTransactionDirection();
