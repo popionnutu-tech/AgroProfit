@@ -90,10 +90,10 @@ const defaultConfigState = {
     { id: 2, name: "Porumb", code: "PORUMB", unit: "tone", humidityNorm: 14, impurityNorm: 2, active: true }
   ],
   storageLocations: [
-    { id: 1, name: "Cilindru 1", type: "cilindru", capacity: 2000, capacitySunflower: 1100, costCategory: "procesat", active: true },
-    { id: 2, name: "Cilindru 2", type: "cilindru", capacity: 2000, capacitySunflower: 1100, costCategory: "procesat", active: true },
-    { id: 3, name: "Cilindru 3", type: "cilindru", capacity: 2000, capacitySunflower: 1100, costCategory: "procesat", active: true },
-    { id: 4, name: "Cilindru 4", type: "cilindru", capacity: 2000, capacitySunflower: 1100, costCategory: "procesat", active: true }
+    { id: 1, name: "Cilindru 1", type: "cilindru", capacity: 2000000, capacitySunflower: 1100000, costCategory: "procesat", active: true },
+    { id: 2, name: "Cilindru 2", type: "cilindru", capacity: 2000000, capacitySunflower: 1100000, costCategory: "procesat", active: true },
+    { id: 3, name: "Cilindru 3", type: "cilindru", capacity: 2000000, capacitySunflower: 1100000, costCategory: "procesat", active: true },
+    { id: 4, name: "Cilindru 4", type: "cilindru", capacity: 2000000, capacitySunflower: 1100000, costCategory: "procesat", active: true }
   ],
   tariffs: [
     {
@@ -3233,7 +3233,7 @@ async function createTransfer(payload) {
 
   // #12: capacitatea maxima a locatiei destinatie (ex: cilindru = 2000 t = 2.000.000 kg).
   const destCurrent = destItems.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
-  const capacity = Number(toLocation.capacity || 0);
+  const capacity = Number(toLocation.capacity || 0) / 1000; // kg -> tone
   if (capacity > 0 && destCurrent + quantity > capacity) {
     const liber = Math.max(capacity - destCurrent, 0);
     throw new Error(

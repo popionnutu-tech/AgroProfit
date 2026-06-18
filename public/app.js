@@ -681,8 +681,10 @@ function isSunflowerProduct(name) {
 }
 
 function getLocationCapacity(loc, productName) {
-  const base = Number(loc?.capacity || 0);
-  const sunCap = Number(loc?.capacitySunflower || 0);
+  // Capacitatea e stocata in KG in nomenclator; o intoarcem in TONE (÷1000), ca sa se
+  // potriveasca cu stocul (tinut intern in tone).
+  const base = Number(loc?.capacity || 0) / 1000;
+  const sunCap = Number(loc?.capacitySunflower || 0) / 1000;
   if (productName && isSunflowerProduct(productName) && sunCap > 0) {
     return sunCap;
   }
@@ -736,8 +738,8 @@ function renderSilosGrid(summary) {
   const subEl = document.getElementById("silos-sub");
   if (titleEl && subEl) {
     const n = cylinders.length;
-    const totalCap = cylinders.reduce((s, c) => s + Number(c.capacity || 0), 0);
-    const totalSun = cylinders.reduce((s, c) => s + Number(c.capacitySunflower || c.capacity || 0), 0);
+    const totalCap = cylinders.reduce((s, c) => s + Number(c.capacity || 0), 0) / 1000;
+    const totalSun = cylinders.reduce((s, c) => s + Number(c.capacitySunflower || c.capacity || 0), 0) / 1000;
     titleEl.textContent = `${n} ${n === 1 ? "cilindru" : "cilindri"} · ${formatNumber(totalCap)} t`;
     subEl.textContent = `Capacitate totală ${formatNumber(totalCap)} t pentru grâu/porumb · ${formatNumber(totalSun)} t pentru floarea soarelui`;
   }
@@ -3438,7 +3440,7 @@ function updateTransferAvailableHint() {
       ? destItems.find((item) => item.product !== product.name)
       : null;
     const destCurrent = destItems.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
-    const cap = Number(toLoc.capacity || 0);
+    const cap = Number(toLoc.capacity || 0) / 1000; // kg -> tone
     if (other) {
       html += `<br><span class="transfer-warn">⚠ În ${toLoc.name} este deja ${other.product} — un cilindru = un singur produs.</span>`;
     } else if (cap > 0) {
