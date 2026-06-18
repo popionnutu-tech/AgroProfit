@@ -1294,7 +1294,17 @@ async function handleCompleteWeighing(id, grossWeight) {
       const err = await response.json().catch(() => ({}));
       throw new Error(err.error || "Nu am putut finaliza cântărirea.");
     }
-    await Promise.all([loadReceipts(), loadStocks(), loadDailyReport()]);
+    // Afisare optimista (ca la creare): folosim recepatia finalizata din raspuns, ca sa apara
+    // instant ca finalizata in "Receptii recente" si sa iasa din "in descarcare", fara refresh.
+    const updated = await response.json().catch(() => null);
+    if (updated && updated.id) {
+      receiptsCache = (Array.isArray(receiptsCache) ? receiptsCache : []).map(
+        (r) => (r.id === updated.id ? updated : r)
+      );
+      renderReceipts(receiptsCache);
+      if (typeof renderPendingWeighing === "function") renderPendingWeighing(receiptsCache);
+    }
+    await Promise.all([loadStocks(), loadDailyReport()]);
   } catch (error) {
     window.alert(error.message);
   }
