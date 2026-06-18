@@ -129,9 +129,9 @@ const defaultConfigState = {
     { id: 3, name: "Persoana juridica neplatitor TVA", withholdingPercent: 0, vat: false, active: true }
   ],
   processingTypes: [
-    { id: 1, name: "Curatire", consumptionNorm: 0.5, resource: "energie", active: true },
-    { id: 2, name: "Uscare", consumptionNorm: 1.2, resource: "gaz", active: true },
-    { id: 3, name: "Pastrare", consumptionNorm: 0, resource: "spatiu", active: true }
+    { id: 1, name: "Curatire", consumptionNorm: 0.5, resource: "energie", lossMethod: "deseu", active: true },
+    { id: 2, name: "Uscare", consumptionNorm: 1.2, resource: "gaz", lossMethod: "umiditate", active: true },
+    { id: 3, name: "Pastrare", consumptionNorm: 0, resource: "spatiu", lossMethod: "fara", active: true }
   ],
   vehicles: [],
   labReports: [],
@@ -462,6 +462,13 @@ function readConfigState() {
       state[entity] = [...defaultConfigState[entity]];
     }
   }
+
+  // Backfill lossMethod pe tipurile de procesare vechi (salvate inainte de
+  // introducerea categoriei de calcul). Cloneaza obiectele ca sa nu mutam cache-ul.
+  state.processingTypes = (state.processingTypes || []).map((item) => ({
+    ...item,
+    lossMethod: resolveLossMethod(item)
+  }));
 
   state.nextIds = { ...defaultConfigState.nextIds, ...(state.nextIds || {}) };
   state.systemSettings = {
@@ -1204,6 +1211,7 @@ function normalizeEntityPayload(entity, payload) {
         name: requiredText(payload.name, "Tipul de procesare"),
         consumptionNorm: sanitizeNumber(payload.consumptionNorm),
         resource: requiredText(payload.resource, "Resursa"),
+        lossMethod: resolveLossMethod({ lossMethod: payload.lossMethod, name: payload.name }),
         active: sanitizeBoolean(payload.active ?? true)
       };
     default:
@@ -1580,6 +1588,26 @@ async function getSupplierStatement(partnerId, fromDate, toDate) {
   };
 }
 
+// Categoria de calcul a pierderii pentru un tip de procesare:
+//   "umiditate" (uscare)  -> scade apa din umiditate (initiala - finala)
+//   "deseu" (curatire)    -> pierderea = doar deseul confirmat (masurat fizic)
+//   "fara" (pastrare/alt) -> fara pierdere automata
+// Pentru tipuri vechi fara lossMethod salvat, se deduce din nume (compat).
+const PROCESSING_LOSS_METHODS = ["umiditate", "deseu", "fara"];
+function resolveLossMethod(type) {
+  const explicit = type && type.lossMethod;
+  if (PROCESSING_LOSS_METHODS.includes(explicit)) return explicit;
+  const name = String((type && type.name) || "")
+    .toLowerCase()
+    .replace(/[ăâ]/g, "a")
+    .replace(/[îí]/g, "i")
+    .replace(/[șş]/g, "s")
+    .replace(/[țţ]/g, "t");
+  if (name.includes("uscare") || name.includes("usca")) return "umiditate";
+  if (name.includes("curat")) return "deseu";
+  return "fara";
+}
+
 // Procesare pe PRODUS (model "miscare"): operatorul alege produs + cilindru sursa
 // (+ cilindru destinatie la uscare) si cantitatea. Stocul se actualizeaza prin
 // miscarea din createStockSummary (movement===true), nu prin editarea receptiei.
@@ -1613,13 +1641,28 @@ async function createProcessing(payload) {
   }
 
   const confirmedWaste = sanitizeNumber(payload.confirmedWaste);
-  const initialHumidity = sanitizeNumber(payload.initialHumidity);
-  const finalHumidity = sanitizeNumber(payload.finalHumidity);
+
+  // Apa se scade DOAR la tipurile de tip "uscare" (lossMethod === "umiditate").
+  // La curatire/pastrare umiditatile se ignora complet (pierderea = doar deseul
+  // confirmat, masurat fizic), chiar daca au fost tastate din greseala.
+  const lossMethod = resolveLossMethod(
+    config.processingTypes.find((t) => t.name === (payload.processingType || "")) || {
+      name: payload.processingType
+    }
+  );
+  const usesHumidity = lossMethod === "umiditate";
+  const initialHumidity = usesHumidity ? sanitizeNumber(payload.initialHumidity) : 0;
+  const finalHumidity = usesHumidity ? sanitizeNumber(payload.finalHumidity) : 0;
+
+  // Garda: la uscare, umiditatea finala nu poate depasi cea initiala (apa negativa).
+  if (usesHumidity && initialHumidity > 0 && finalHumidity > initialHumidity) {
+    throw new Error("Umiditatea final\u0103 nu poate fi mai mare dec\u00e2t cea ini\u021bial\u0103 la uscare.");
+  }
 
   // #10 uscare: apa eliminata = cantitate \u00d7 (umiditate initiala \u2212 finala) %.
   const humidityDrop = Math.max(initialHumidity - finalHumidity, 0);
   const waterRemoved =
-    initialHumidity > 0 && finalHumidity > 0
+    usesHumidity && initialHumidity > 0 && finalHumidity > 0
       ? Number(((processedQuantity * humidityDrop) / 100).toFixed(3))
       : 0;
 
@@ -1662,6 +1705,7 @@ async function createProcessing(payload) {
     sourceLocation,
     destLocation: destLocation || sourceLocation,
     processingType: payload.processingType || "",
+    lossMethod,
     processedQuantity,
     confirmedWaste,
     initialHumidity,

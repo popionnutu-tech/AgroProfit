@@ -2507,6 +2507,7 @@ function renderReceiptSelectors(config) {
     processingTypeSelect,
     [currentSelections.processingType, config.processingTypes.find((item) => item.active)?.name]
   );
+  updateProcessingTypeUI();
   setSelectValue(processingUserSelect, [currentSelections.processingUserId, currentSessionUser?.id, operators[0]?.id]);
   setSelectValue(transactionPaymentTypeSelect, [currentSelections.paymentType, activePaymentType?.name]);
   setSelectValue(deliveryProductSelect, [currentSelections.deliveryProduct, config.products[0]?.name]);
@@ -2650,6 +2651,7 @@ const ENTITY_COLUMNS = {
   ],
   processingTypes: [
     { key: "name", label: "Tip" },
+    { key: "lossMethod", label: "Calcul pierdere", format: "lossMethod" },
     { key: "resource", label: "Resursa" },
     { key: "consumptionNorm", label: "Norma consum" }
   ]
@@ -2663,6 +2665,12 @@ function formatCellValue(value, format) {
   }
   if (value === null || value === undefined || value === "") return "—";
   if (format === "bool") return value ? "Da" : "Nu";
+  if (format === "lossMethod") {
+    if (value === "umiditate") return "Uscare (umiditate)";
+    if (value === "deseu") return "Curățire (deșeu)";
+    if (value === "fara") return "Fără pierdere";
+    return String(value);
+  }
   if (format === "number" && typeof formatNumber === "function") return formatNumber(value);
   return String(value);
 }
@@ -3929,16 +3937,57 @@ function getProcessingAvailable() {
   return Number(row?.quantity || 0);
 }
 
+const PROCESSING_LOSS_METHODS = ["umiditate", "deseu", "fara"];
+// Oglinda backend-ului (src/local-storage.js): categoria de calcul a pierderii
+// pentru un tip de procesare. Date vechi fara lossMethod -> deducem din nume.
+function resolveLossMethod(type) {
+  const explicit = type && type.lossMethod;
+  if (PROCESSING_LOSS_METHODS.includes(explicit)) return explicit;
+  const name = String((type && type.name) || "")
+    .toLowerCase()
+    .replace(/[ăâ]/g, "a")
+    .replace(/[îí]/g, "i")
+    .replace(/[șş]/g, "s")
+    .replace(/[țţ]/g, "t");
+  if (name.includes("uscare") || name.includes("usca")) return "umiditate";
+  if (name.includes("curat")) return "deseu";
+  return "fara";
+}
+function selectedProcessingLossMethod() {
+  const name = processingTypeSelect?.value || "";
+  const list = (currentConfig && currentConfig.processingTypes) || [];
+  return resolveLossMethod(list.find((t) => t.name === name) || { name });
+}
+// Arata/ascunde rândul de umiditate + cardul de apa dupa tipul ales. La non-uscare
+// goleste umiditatile (sa nu ramana valori stale) si reseteaza estimatul.
+function updateProcessingTypeUI() {
+  const usesHumidity = selectedProcessingLossMethod() === "umiditate";
+  const humidityRow = document.getElementById("processing-humidity-row");
+  const waterCard = document.getElementById("processing-water-card");
+  if (humidityRow) humidityRow.style.display = usesHumidity ? "" : "none";
+  if (waterCard) waterCard.style.display = usesHumidity ? "" : "none";
+  if (!usesHumidity) {
+    if (processingInitialHumidityInput) processingInitialHumidityInput.value = "";
+    if (processingFinalHumidityInput) processingFinalHumidityInput.value = "";
+  } else {
+    autofillProcessingInitialHumidity();
+  }
+  renderProcessingEstimate();
+}
+
 function renderProcessingEstimate() {
   // Inputurile sunt in KG (ca la recepții și livrări); stocul intern e in tone.
   const availableT = getProcessingAvailable();
   const availableKg = availableT * 1000;
   const processedKg = Number(processedQuantityInput.value || 0);
   const wasteKg = Number(confirmedWasteInput.value || 0);
-  const initialHum = Number(processingInitialHumidityInput?.value || 0);
-  const finalHum = Number(processingFinalHumidityInput?.value || 0);
+  const usesHumidity = selectedProcessingLossMethod() === "umiditate";
+  const initialHum = usesHumidity ? Number(processingInitialHumidityInput?.value || 0) : 0;
+  const finalHum = usesHumidity ? Number(processingFinalHumidityInput?.value || 0) : 0;
+  // Apa se scade DOAR la uscare; la curatire/pastrare umiditatile se ignora.
+  const humidityInverted = usesHumidity && initialHum > 0 && finalHum > initialHum;
   const waterKg =
-    initialHum > 0 && finalHum > 0
+    usesHumidity && initialHum > 0 && finalHum > 0 && !humidityInverted
       ? Math.max((processedKg * (initialHum - finalHum)) / 100, 0)
       : 0;
   const finalNetKg = Math.max(processedKg - wasteKg - waterKg, 0);
@@ -3947,7 +3996,12 @@ function renderProcessingEstimate() {
     processingAvailableEl.textContent = `${formatNumber(availableKg)} kg (${formatNumber(availableT)} t)`;
     processingAvailableEl.style.color = processedKg > availableKg ? "#b3261e" : "";
   }
-  if (processingWaterEl) processingWaterEl.textContent = `${formatNumber(Number(waterKg.toFixed(1)))} kg`;
+  if (processingWaterEl) {
+    processingWaterEl.textContent = humidityInverted
+      ? "finală > inițială"
+      : `${formatNumber(Number(waterKg.toFixed(1)))} kg`;
+    processingWaterEl.style.color = humidityInverted ? "#b3261e" : "";
+  }
   if (processingFinalNetEl) {
     processingFinalNetEl.textContent = `${formatNumber(Number(finalNetKg.toFixed(1)))} kg`;
     // Avertizare vizuală dacă net rămas ar fi 0 (deșeu/apă mai mari decât cantitatea)
@@ -3977,6 +4031,13 @@ async function createProcessing(formData, status) {
   // Inputurile sunt in KG; stocul intern e in tone → împărțim la 1000.
   const processedKg = Number(formData.get("processedQuantity") || 0);
   const wasteKg = Number(formData.get("confirmedWaste") || 0);
+  // Umiditatile se trimit DOAR la uscare; altfel backend-ul oricum le ignora.
+  const usesHumidity =
+    resolveLossMethod(
+      (currentConfig?.processingTypes || []).find(
+        (t) => t.name === formData.get("processingType")
+      ) || { name: formData.get("processingType") }
+    ) === "umiditate";
   const payload = {
     product: formData.get("product"),
     sourceLocation: formData.get("sourceLocation"),
@@ -3984,8 +4045,8 @@ async function createProcessing(formData, status) {
     processingType: formData.get("processingType"),
     processedQuantity: String(processedKg / 1000),
     confirmedWaste: String(wasteKg / 1000),
-    initialHumidity: formData.get("initialHumidity"),
-    finalHumidity: formData.get("finalHumidity"),
+    initialHumidity: usesHumidity ? formData.get("initialHumidity") : "",
+    finalHumidity: usesHumidity ? formData.get("finalHumidity") : "",
     enteredUnit: "kg",
     operator: operator?.name || "",
     note: formData.get("note"),
@@ -5219,6 +5280,7 @@ processedQuantityInput.addEventListener("input", renderProcessingEstimate);
 confirmedWasteInput.addEventListener("input", renderProcessingEstimate);
 processingInitialHumidityInput.addEventListener("input", renderProcessingEstimate);
 processingFinalHumidityInput.addEventListener("input", renderProcessingEstimate);
+processingTypeSelect.addEventListener("change", updateProcessingTypeUI);
 transactionReferenceTypeSelect.addEventListener("change", () => {
   renderTransactionReferenceOptions();
   syncTransactionDirection();
