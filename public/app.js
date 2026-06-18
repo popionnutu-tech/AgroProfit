@@ -3787,6 +3787,18 @@ async function createReceipt(formData) {
     const error = await response.json();
     throw new Error(error.error || "Eroare la salvare.");
   }
+
+  // Afisare optimista: folosim recepatia creata din raspuns si o punem direct in lista.
+  // Pe serverless, un GET imediat dupa POST poate citi KV-ul inca nesincronizat (flush dupa
+  // raspuns), deci recepatia "lipsea" pana la refresh. Asa apare instant, fara re-fetch.
+  const createdReceipt = await response.json().catch(() => null);
+  if (createdReceipt && createdReceipt.id) {
+    receiptsCache = [
+      createdReceipt,
+      ...(Array.isArray(receiptsCache) ? receiptsCache.filter((r) => r.id !== createdReceipt.id) : [])
+    ];
+    renderReceipts(receiptsCache);
+  }
 }
 
 function validateReceiptForm(formData) {
@@ -5517,8 +5529,10 @@ formEl.addEventListener("submit", async (event) => {
     await createReceipt(formData);
     resetReceiptForm(submitMode);
     messageEl.textContent = "Receptia a fost salvata.";
+    // NU reincarcam receptiile aici: afisarea optimista din createReceipt le-a pus deja in
+    // lista (evitam cursa KV pe serverless care le-ar sterge la loc). Restul datelor derivate
+    // (stoc, rapoarte) se reincarca normal — se ajusteaza si la urmatoarea navigare.
     await Promise.all([
-      loadReceipts(),
       loadProcessings(),
       loadStocks(),
       loadTransactions(),
