@@ -680,15 +680,10 @@ function isSunflowerProduct(name) {
   return /floar/i.test(String(name || ""));
 }
 
-function getLocationCapacity(loc, productName) {
-  // Capacitatea e stocata in KG in nomenclator; o intoarcem in TONE (÷1000), ca sa se
-  // potriveasca cu stocul (tinut intern in tone).
-  const base = Number(loc?.capacity || 0) / 1000;
-  const sunCap = Number(loc?.capacitySunflower || 0) / 1000;
-  if (productName && isSunflowerProduct(productName) && sunCap > 0) {
-    return sunCap;
-  }
-  return base;
+function getLocationCapacity(loc) {
+  // O singura capacitate pe locatie, stocata in KG in nomenclator -> o intoarcem in TONE
+  // (÷1000) ca sa se potriveasca cu stocul (tinut intern in tone).
+  return Number(loc?.capacity || 0) / 1000;
 }
 
 // Brand colours per product type. Returns { fill, edge, label } palette for SVG.
@@ -739,9 +734,8 @@ function renderSilosGrid(summary) {
   if (titleEl && subEl) {
     const n = cylinders.length;
     const totalCap = cylinders.reduce((s, c) => s + Number(c.capacity || 0), 0) / 1000;
-    const totalSun = cylinders.reduce((s, c) => s + Number(c.capacitySunflower || c.capacity || 0), 0) / 1000;
     titleEl.textContent = `${n} ${n === 1 ? "cilindru" : "cilindri"} · ${formatNumber(totalCap)} t`;
-    subEl.textContent = `Capacitate totală ${formatNumber(totalCap)} t pentru grâu/porumb · ${formatNumber(totalSun)} t pentru floarea soarelui`;
+    subEl.textContent = `Capacitate totală ${formatNumber(totalCap)} t`;
   }
 
   if (!cylinders.length) {
