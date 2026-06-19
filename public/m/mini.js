@@ -7,6 +7,8 @@ const state = {
   tg: null,
   receipts: [],
   deliveries: [],
+  processings: [],
+  transfers: [],
   transactions: [],
   complaints: [],
   auditLogs: [],
@@ -32,12 +34,16 @@ const els = {
   actionsGrid: $("#tg-actions-grid"),
   kReceipts: $("#tg-k-receipts"),
   kDeliveries: $("#tg-k-deliveries"),
-  kCollections: $("#tg-k-collections"),
-  kComplaints: $("#tg-k-complaints"),
+  kProcessings: $("#tg-k-processings"),
+  kTransfers: $("#tg-k-transfers"),
   feedList: $("#tg-feed-list"),
   receiptsList: $("#tg-receipts-list"),
   deliveriesList: $("#tg-deliveries-list"),
+  processingsList: $("#tg-processings-list"),
+  transfersList: $("#tg-transfers-list"),
+  stocksList: $("#tg-stocks-list"),
   transactionsList: $("#tg-transactions-list"),
+  accountBtn: $("#tg-account-btn"),
   profileAvatar: $("#tg-profile-avatar"),
   profileName: $("#tg-profile-name"),
   profileRole: $("#tg-profile-role"),
@@ -105,19 +111,19 @@ function initials(name) {
 
 // --- Permissions (mirror server-side roles)
 const ROLE_PERMS = {
-  admin: ["receipts-read", "receipts-write", "deliveries-read", "deliveries-write",
-    "complaints-read", "complaints-write", "finance", "reports", "audit",
-    "setup", "security-admin", "stocks-read"],
-  manager: ["receipts-read", "deliveries-read", "complaints-read", "finance",
-    "reports", "stocks-read", "audit"],
-  accountant: ["receipts-read", "deliveries-read", "complaints-read", "finance",
-    "reports", "stocks-read"],
-  "accountant-sef": ["receipts-read", "deliveries-read", "complaints-read",
-    "complaints-write", "finance", "reports", "stocks-read", "audit"],
-  operator: ["receipts-read", "receipts-write", "deliveries-read", "deliveries-write",
-    "stocks-read"],
-  control: ["receipts-read", "deliveries-read", "complaints-read", "reports", "audit",
-    "stocks-read"]
+  admin: ["receipts-read", "receipts-write", "processings-read", "processing-write",
+    "deliveries-read", "deliveries-write", "complaints-read", "complaints-write",
+    "finance", "reports", "audit", "setup", "security-admin", "stocks-read"],
+  manager: ["receipts-read", "processings-read", "processing-write", "deliveries-read",
+    "complaints-read", "finance", "reports", "stocks-read", "audit"],
+  accountant: ["receipts-read", "processings-read", "deliveries-read", "complaints-read",
+    "finance", "reports", "stocks-read"],
+  "accountant-sef": ["receipts-read", "processings-read", "deliveries-read",
+    "complaints-read", "complaints-write", "finance", "reports", "stocks-read", "audit"],
+  operator: ["receipts-read", "receipts-write", "processings-read", "processing-write",
+    "deliveries-read", "deliveries-write", "stocks-read"],
+  control: ["receipts-read", "processings-read", "deliveries-read", "complaints-read",
+    "reports", "audit", "stocks-read"]
 };
 
 function canDo(cap) {
@@ -238,6 +244,14 @@ function renderActions() {
       icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/><path d="M12 4v10"/><path d="m7 9 5 5 5-5"/></svg>'
     });
   }
+  if (canDo("processing-write")) {
+    actions.push({ id: "new-processing", label: "+ Procesare",
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>'
+    });
+    actions.push({ id: "new-transfer", label: "+ Transfer",
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m17 2 4 4-4 4"/><path d="M21 6H7"/><path d="m7 22-4-4 4-4"/><path d="M3 18h14"/></svg>'
+    });
+  }
   if (canDo("deliveries-write")) {
     actions.push({ id: "new-delivery", label: "+ Livrare",
       icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 16V6a1 1 0 0 1 1-1h10v11"/><path d="M14 9h4l3 3v4h-7"/><circle cx="7.5" cy="18.5" r="2"/><circle cx="16.5" cy="18.5" r="2"/></svg>'
@@ -286,6 +300,8 @@ function handleAction(actionId) {
   // mini-app forms later for the most-used ones.
   const routes = {
     "new-receipt": "/?v=receptii",
+    "new-processing": "/?v=procesare",
+    "new-transfer": "/?v=transferuri",
     "new-delivery": "/?v=livrari",
     "new-transaction": "/?v=financiar",
     "new-complaint": "/?v=reclamatii",
@@ -307,15 +323,13 @@ function renderTodayKPI() {
 
   const receiptsToday = state.receipts.filter((r) => isToday(r.createdAt || r.receivedAt)).length;
   const deliveriesToday = state.deliveries.filter((d) => isToday(d.createdAt || d.deliveredAt)).length;
-  const collectionsToday = state.transactions
-    .filter((t) => t.direction === "collection" && isToday(t.createdAt || t.transactedAt))
-    .reduce((acc, t) => acc + Number(t.amount || 0), 0);
-  const openComplaints = state.complaints.filter((c) => (c.status || "").toLowerCase() === "deschisa" || (c.status || "").toLowerCase() === "open").length;
+  const processingsToday = state.processings.filter((p) => isToday(p.createdAt || p.processedAt)).length;
+  const transfersToday = state.transfers.filter((t) => isToday(t.createdAt)).length;
 
   els.kReceipts.textContent = receiptsToday;
   els.kDeliveries.textContent = deliveriesToday;
-  els.kCollections.textContent = formatNumber(collectionsToday);
-  els.kComplaints.textContent = openComplaints;
+  if (els.kProcessings) els.kProcessings.textContent = processingsToday;
+  if (els.kTransfers) els.kTransfers.textContent = transfersToday;
 }
 
 function renderFeed() {
@@ -380,6 +394,59 @@ function renderDeliveriesList() {
   `).join("");
 }
 
+function renderProcessingsList() {
+  const items = (state.processings || []).slice(0, 30);
+  if (!items.length) {
+    els.processingsList.innerHTML = '<p class="tg-muted">Nu există procesări.</p>';
+    return;
+  }
+  els.processingsList.innerHTML = items.map((p) => {
+    const inLucru = p.status === "In lucru" ? " · în lucru" : "";
+    return `
+    <article class="tg-list-card">
+      <div class="tg-list-card-info">
+        <div class="tg-list-card-title">#${p.id || "—"} · ${p.product || "—"}${inLucru}</div>
+        <div class="tg-list-card-meta">${p.processingType || "—"} · ${p.sourceLocation || "—"} · ${formatTime(p.createdAt || p.processedAt)}</div>
+      </div>
+      <div class="tg-list-card-amount">${formatNumber(Math.round(Number(p.processedQuantity || 0) * 1000))} kg</div>
+    </article>`;
+  }).join("");
+}
+
+function renderTransfersList() {
+  const items = (state.transfers || []).slice(0, 30);
+  if (!items.length) {
+    els.transfersList.innerHTML = '<p class="tg-muted">Nu există transferuri.</p>';
+    return;
+  }
+  els.transfersList.innerHTML = items.map((t) => `
+    <article class="tg-list-card">
+      <div class="tg-list-card-info">
+        <div class="tg-list-card-title">#${t.id || "—"} · ${t.product || "—"}</div>
+        <div class="tg-list-card-meta">${t.fromLocation || "—"} → ${t.toLocation || "—"} · ${formatTime(t.createdAt)}</div>
+      </div>
+      <div class="tg-list-card-amount">${formatNumber(Math.round(Number(t.quantity || 0) * 1000))} kg</div>
+    </article>
+  `).join("");
+}
+
+function renderStocksList() {
+  const items = ((state.stocks && state.stocks.byLocation) || []).filter((s) => Number(s.quantity || 0) > 0);
+  if (!items.length) {
+    els.stocksList.innerHTML = '<p class="tg-muted">Nu există stoc.</p>';
+    return;
+  }
+  els.stocksList.innerHTML = items.map((s) => `
+    <article class="tg-list-card">
+      <div class="tg-list-card-info">
+        <div class="tg-list-card-title">${s.location || "—"}</div>
+        <div class="tg-list-card-meta">${s.product || "—"}</div>
+      </div>
+      <div class="tg-list-card-amount">${formatNumber(s.quantity || 0)} t</div>
+    </article>
+  `).join("");
+}
+
 function renderTransactionsList() {
   const items = (state.transactions || []).slice(0, 30);
   if (!items.length) {
@@ -413,19 +480,25 @@ async function safeLoad(path, key, transform) {
 }
 
 async function loadAll() {
+  // Incarcam DOAR resursele permise rolului — altfel un 401 ar sterge token-ul (vezi api()).
   await Promise.allSettled([
-    safeLoad("/api/receipts", "receipts", (d) => d.receipts || []),
-    safeLoad("/api/deliveries", "deliveries", (d) => d.deliveries || []),
-    safeLoad("/api/transactions", "transactions", (d) => d.transactions || []),
-    safeLoad("/api/complaints", "complaints", (d) => d.complaints || []),
-    safeLoad("/api/audit-logs", "auditLogs", (d) => d.auditLogs || []),
-    safeLoad("/api/stocks", "stocks", (d) => d || {})
-  ]);
+    canDo("receipts-read") && safeLoad("/api/receipts", "receipts", (d) => d.receipts || []),
+    canDo("deliveries-read") && safeLoad("/api/deliveries", "deliveries", (d) => d.deliveries || []),
+    canDo("processings-read") && safeLoad("/api/processings", "processings", (d) => d.processings || []),
+    canDo("processings-read") && safeLoad("/api/transfers", "transfers", (d) => d.transfers || []),
+    canDo("stocks-read") && safeLoad("/api/stocks", "stocks", (d) => d || {}),
+    canDo("finance") && safeLoad("/api/transactions", "transactions", (d) => d.transactions || []),
+    canDo("complaints-read") && safeLoad("/api/complaints", "complaints", (d) => d.complaints || []),
+    canDo("audit") && safeLoad("/api/audit-logs", "auditLogs", (d) => d.auditLogs || [])
+  ].filter(Boolean));
   renderStocHero();
   renderTodayKPI();
   renderFeed();
   renderReceiptsList();
   renderDeliveriesList();
+  renderProcessingsList();
+  renderTransfersList();
+  renderStocksList();
   renderTransactionsList();
 }
 
@@ -459,6 +532,10 @@ function setupNavigation() {
 
   if (els.logoutBtn) {
     els.logoutBtn.addEventListener("click", () => logout());
+  }
+
+  if (els.accountBtn) {
+    els.accountBtn.addEventListener("click", () => switchView("cont"));
   }
 }
 

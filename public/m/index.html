@@ -40,7 +40,12 @@
           <div class="tg-hi-eyebrow" id="tg-hi-eyebrow">SALUT</div>
           <div class="tg-hi-name" id="tg-hi-name">—</div>
         </div>
-        <div class="tg-role" id="tg-role">—</div>
+        <div class="tg-header-right">
+          <span class="tg-role" id="tg-role">—</span>
+          <button class="tg-account-btn" id="tg-account-btn" type="button" aria-label="Cont">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>
+          </button>
+        </div>
       </header>
 
       <main class="tg-main">
@@ -76,12 +81,12 @@
                 <strong class="tg-kpi-value" id="tg-k-deliveries">0</strong>
               </article>
               <article class="tg-kpi">
-                <span class="tg-kpi-label">ÎNCASĂRI</span>
-                <strong class="tg-kpi-value" id="tg-k-collections">0</strong>
+                <span class="tg-kpi-label">PROCESĂRI</span>
+                <strong class="tg-kpi-value" id="tg-k-processings">0</strong>
               </article>
               <article class="tg-kpi">
-                <span class="tg-kpi-label">RECLAMAȚII</span>
-                <strong class="tg-kpi-value" id="tg-k-complaints">0</strong>
+                <span class="tg-kpi-label">TRANSFERURI</span>
+                <strong class="tg-kpi-value" id="tg-k-transfers">0</strong>
               </article>
             </div>
           </section>
@@ -107,6 +112,30 @@
         <section class="tg-view" data-tgview="livrari">
           <h3 class="tg-view-title">Livrări recente</h3>
           <div class="tg-list" id="tg-deliveries-list">
+            <p class="tg-muted">Se încarcă…</p>
+          </div>
+        </section>
+
+        <!-- PROCESARE view -->
+        <section class="tg-view" data-tgview="procesare">
+          <h3 class="tg-view-title">Procesări recente</h3>
+          <div class="tg-list" id="tg-processings-list">
+            <p class="tg-muted">Se încarcă…</p>
+          </div>
+        </section>
+
+        <!-- STOC view -->
+        <section class="tg-view" data-tgview="stoc">
+          <h3 class="tg-view-title">Stoc pe locație</h3>
+          <div class="tg-list" id="tg-stocks-list">
+            <p class="tg-muted">Se încarcă…</p>
+          </div>
+        </section>
+
+        <!-- TRANSFER view -->
+        <section class="tg-view" data-tgview="transfer">
+          <h3 class="tg-view-title">Transferuri recente</h3>
+          <div class="tg-list" id="tg-transfers-list">
             <p class="tg-muted">Se încarcă…</p>
           </div>
         </section>
@@ -152,17 +181,21 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/><path d="M12 4v10"/><path d="m7 9 5 5 5-5"/></svg>
           <span>Recepții</span>
         </button>
+        <button class="tg-nav-btn" data-target="procesare" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          <span>Procesare</span>
+        </button>
+        <button class="tg-nav-btn" data-target="stoc" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8 12 3 3 8v8l9 5 9-5V8Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
+          <span>Stoc</span>
+        </button>
+        <button class="tg-nav-btn" data-target="transfer" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m17 2 4 4-4 4"/><path d="M21 6H7"/><path d="m7 22-4-4 4-4"/><path d="M3 18h14"/></svg>
+          <span>Transfer</span>
+        </button>
         <button class="tg-nav-btn" data-target="livrari" type="button">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 16V6a1 1 0 0 1 1-1h10v11"/><path d="M14 9h4l3 3v4h-7"/><circle cx="7.5" cy="18.5" r="2"/><circle cx="16.5" cy="18.5" r="2"/></svg>
           <span>Livrări</span>
-        </button>
-        <button class="tg-nav-btn" data-target="bani" type="button">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M14.8 9.3a3 3 0 0 0-5.3 1.6c0 1.4 1 2.3 3 2.8 2 .5 3 1.4 3 2.8a3 3 0 0 1-5.3 1.6"/></svg>
-          <span>Bani</span>
-        </button>
-        <button class="tg-nav-btn" data-target="cont" type="button">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>
-          <span>Cont</span>
         </button>
       </nav>
     </div>
