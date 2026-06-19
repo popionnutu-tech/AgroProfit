@@ -93,6 +93,9 @@ const processingInlucruBtn = document.getElementById("processing-inlucru-btn");
 const processingFinalizeBanner = document.getElementById("processing-finalize-banner");
 const processingFinalizeText = document.getElementById("processing-finalize-text");
 const processingFinalizeCancel = document.getElementById("processing-finalize-cancel");
+const processingInlucruPanel = document.getElementById("processing-inlucru-panel");
+const processingInlucruBody = document.getElementById("processing-inlucru-body");
+const processingInlucruCount = document.getElementById("processing-inlucru-count");
 // Id-ul procesarii "in lucru" pe care o finalizam (reincarcata in formular). null = procesare noua.
 let finalizeProcessingId = null;
 const transferFormEl = document.getElementById("transfer-form");
@@ -1596,13 +1599,7 @@ function renderProcessings(processings) {
           <td>
             <div>${formatNumber(item.outputQuantity ?? item.finalNetQuantity)}</div>
             ${item.status === "In lucru"
-              ? (canEditStatuses
-                  ? `<div class="proc-inlucru-actions">
-                       <span class="badge-inlucru">În lucru</span>
-                       <button type="button" class="cell-btn cell-btn-primary processing-finalize-btn" data-id="${item.id}">Finalizează</button>
-                       <button type="button" class="cell-btn cell-btn-danger processing-cancel-btn" data-id="${item.id}">Anulează</button>
-                     </div>`
-                  : `<span class="badge-inlucru">În lucru</span>`)
+              ? `<span class="badge-inlucru" title="Se finalizează din panoul „Procesări în lucru» de mai sus">În lucru</span>`
               : `<select class="processing-status" data-id="${item.id}" ${canEditStatuses ? "" : "disabled"}>
                   ${["Confirmat", "Inchis", "Anulat", "Redeschis"].map((status) => {
                     const selected = item.status === status ? "selected" : "";
@@ -1618,6 +1615,45 @@ function renderProcessings(processings) {
   if (processingsFootEl) {
     renderProcessingTotals(filteredProcessings);
   }
+
+  // Panou separat „Procesări în lucru" (oglinda „Recepții în descărcare"): TOATE procesarile
+  // in lucru, independent de filtrele tabelului de mai jos, ca sa fie clar ce mai trebuie finalizat.
+  renderProcessingInlucru(processings);
+}
+
+// Panou „Procesări în lucru" — todo de finalizat, cu actiuni (Finalizează / Anulează).
+function renderProcessingInlucru(processings) {
+  if (!processingInlucruBody || !processingInlucruPanel) {
+    return;
+  }
+  const canEdit = canAccess("processing-write");
+  const inLucru = (processings || []).filter((item) => item.status === "In lucru");
+  if (processingInlucruCount) {
+    processingInlucruCount.textContent = inLucru.length ? String(inLucru.length) : "";
+  }
+  processingInlucruPanel.hidden = inLucru.length === 0;
+  processingInlucruBody.innerHTML = inLucru
+    .map(
+      (item) => `
+        <tr class="row-pending">
+          <td>#${item.id}</td>
+          <td>${formatDateShort(item.createdAt || item.processedAt)}</td>
+          <td>${escapeComboHtml(item.product || "")}</td>
+          <td>${escapeComboHtml(item.sourceLocation || "-")}</td>
+          <td>${escapeComboHtml(item.processingType || "-")}</td>
+          <td>${formatNumber(Math.round(Number(item.processedQuantity || 0) * 1000))} kg</td>
+          <td>
+            ${canEdit
+              ? `<div class="proc-inlucru-actions">
+                   <button type="button" class="cell-btn cell-btn-primary processing-finalize-btn" data-id="${item.id}">Finalizează</button>
+                   <button type="button" class="cell-btn cell-btn-danger processing-cancel-btn" data-id="${item.id}">Anulează</button>
+                 </div>`
+              : `<span class="badge-inlucru">În lucru</span>`}
+          </td>
+        </tr>
+      `
+    )
+    .join("");
 }
 
 function renderProcessingTotals(rows) {
@@ -6382,7 +6418,7 @@ complaintsBodyEl.addEventListener("change", async (event) => {
   }
 });
 
-processingsBodyEl.addEventListener("click", async (event) => {
+async function handleProcessingActionClick(event) {
   const finalizeBtn = event.target.closest(".processing-finalize-btn");
   if (finalizeBtn) {
     startFinalizeProcessing(finalizeBtn.dataset.id);
@@ -6403,7 +6439,12 @@ processingsBodyEl.addEventListener("click", async (event) => {
     }
     return;
   }
-});
+}
+// Acelasi handler pe tabelul „recente" (compat) si pe panoul nou „Procesări în lucru".
+processingsBodyEl.addEventListener("click", handleProcessingActionClick);
+if (processingInlucruBody) {
+  processingInlucruBody.addEventListener("click", handleProcessingActionClick);
+}
 
 processingsBodyEl.addEventListener("change", async (event) => {
   const target = event.target;

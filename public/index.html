@@ -718,11 +718,11 @@
             <div class="split">
               <label>
                 Cantitate procesată (kg)
-                <input name="processedQuantity" id="processed-quantity-input" type="number" min="0" step="1" required />
+                <input name="processedQuantity" id="processed-quantity-input" type="number" min="0" step="any" required />
               </label>
               <label id="processing-waste-field">
                 Deșeu confirmat (kg)
-                <input name="confirmedWaste" id="confirmed-waste-input" type="number" min="0" step="1" />
+                <input name="confirmedWaste" id="confirmed-waste-input" type="number" min="0" step="any" />
               </label>
             </div>
 
@@ -765,10 +765,33 @@
 
             <div class="form-actions">
               <button type="submit">Salveaza procesarea</button>
-              <button type="button" id="processing-inlucru-btn" class="cell-btn">Salveaza «în lucru»</button>
+              <button type="button" id="processing-inlucru-btn" class="secondary-submit">Salveaza «în lucru»</button>
             </div>
             <p class="form-message" id="processing-message"></p>
           </form>
+
+          <section class="panel table-panel" id="processing-inlucru-panel" style="grid-column: 1 / -1;" hidden>
+            <div class="panel-head">
+              <h2>Procesări în lucru <span id="processing-inlucru-count" class="status-badge badge-warn"></span></h2>
+              <p>Procesări pornite care așteaptă finalizare. Apasă „Finalizează" ca să confirmi parametrii (deșeu/umiditate) și destinația.</p>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Data</th>
+                    <th>Produs</th>
+                    <th>Sursă</th>
+                    <th>Tip</th>
+                    <th>Cantitate</th>
+                    <th>Acțiuni</th>
+                  </tr>
+                </thead>
+                <tbody id="processing-inlucru-body"></tbody>
+              </table>
+            </div>
+          </section>
 
           <section class="panel filters-panel" style="grid-column: 1 / -1;">
             <div class="panel-head">
