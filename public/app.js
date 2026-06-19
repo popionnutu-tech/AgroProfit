@@ -150,7 +150,7 @@ const deliverySourceSelect = document.getElementById("delivery-source-select");
 const deliveryCustomerSelect = document.getElementById("delivery-customer-select");
 const deliveryGrossInput = document.getElementById("delivery-gross-input");
 const deliveryTareInput = document.getElementById("delivery-tare-input");
-const deliveryVehicleInput = document.getElementById("delivery-vehicle-input");
+const deliveryVehicleSelect = document.getElementById("delivery-vehicle-select");
 const deliveryAvailableEl = document.getElementById("delivery-available");
 const deliveryNetEl = document.getElementById("delivery-net");
 const deliveryStatusPreviewEl = document.getElementById("delivery-status");
@@ -2562,6 +2562,7 @@ function renderReceiptSelectors(config) {
   setSelectValue(transactionPaymentTypeSelect, [currentSelections.paymentType, activePaymentType?.name]);
   setSelectValue(deliveryProductSelect, [currentSelections.deliveryProduct, config.products[0]?.name]);
   setSelectValue(deliverySourceSelect, [currentSelections.deliverySource, config.storageLocations[0]?.name]);
+  updateDeliverySourceOptions();
   renderDeliveryPreview();
   setSelectValue(deliveryCustomerSelect, [currentSelections.deliveryCustomerId, customers[0]?.id]);
   setSelectValue(complaintDeliverySelect, [currentSelections.complaintDeliveryId, deliveriesCache[0]?.id]);
@@ -2965,6 +2966,20 @@ function renderSetupSelectors(config) {
         return `<option value="${v.number}">${v.number}${extra ? " — " + extra : ""}</option>`;
       })
       .join("");
+  }
+  // Select mașină la livrare (din nomenclator); gol = mașina cumpărătorului (la observații).
+  if (deliveryVehicleSelect) {
+    const prevV = deliveryVehicleSelect.value;
+    deliveryVehicleSelect.innerHTML =
+      `<option value="">Mașina cumpărătorului (notează la Observații)</option>` +
+      (config.vehicles || [])
+        .filter((v) => v.active !== false)
+        .map((v) => {
+          const extra = [v.series, v.driver].filter(Boolean).join(" · ");
+          return `<option value="${escapeComboHtml(v.number)}">${escapeComboHtml(v.number)}${extra ? " — " + escapeComboHtml(extra) : ""}</option>`;
+        })
+        .join("");
+    if (prevV) deliveryVehicleSelect.value = prevV;
   }
 
   // Populate supplier select for Act de verificare (Etapa 7)
@@ -3440,6 +3455,7 @@ async function loadStocks() {
   const data = await response.json();
   renderStockSummary(data);
   updateTransferAvailableHint();
+  updateDeliverySourceOptions();
 }
 
 async function loadTransfers() {
@@ -4371,6 +4387,37 @@ function getDeliveryAvailable() {
     (i) => sameLocation(i.location, source) && i.product === product
   );
   return Number(row?.quantity || 0);
+}
+
+// La LIVRARE, sursa = doar locatiile unde produsul ales e in stoc (din ultimul stoc incarcat).
+function updateDeliverySourceOptions() {
+  if (!deliverySourceSelect || !currentConfig) return;
+  const productName = deliveryProductSelect?.value || "";
+  const prev = deliverySourceSelect.value;
+  let rows = [];
+  if (productName && lastStockSummary && Array.isArray(lastStockSummary.byLocation)) {
+    rows = lastStockSummary.byLocation
+      .filter((i) => i.product === productName && Number(i.quantity || 0) > 0)
+      .map((i) => ({ name: i.location, qty: Number(i.quantity || 0) }));
+  }
+  if (rows.length) {
+    deliverySourceSelect.innerHTML = rows
+      .map(
+        (r) =>
+          `<option value="${escapeComboHtml(r.name)}">${escapeComboHtml(r.name)} (${formatNumber(r.qty)} t)</option>`
+      )
+      .join("");
+  } else {
+    // Stoc neincarcat sau produs fara stoc: aratam toate locatiile ca fallback.
+    deliverySourceSelect.innerHTML =
+      `<option value="">Din cilindru / locatie</option>` +
+      (currentConfig.storageLocations || [])
+        .map((l) => `<option value="${escapeComboHtml(l.name)}">${escapeComboHtml(l.name)}</option>`)
+        .join("");
+  }
+  if (prev && [...deliverySourceSelect.options].some((o) => o.value === prev)) {
+    deliverySourceSelect.value = prev;
+  }
 }
 
 // Calculează în timp real „Rest de plată" = țintă − deja achitat − suma curentă; semnalează și avansul (surplus).
@@ -5497,7 +5544,10 @@ document.getElementById("transaction-partial-check")?.addEventListener("change",
 openReceiptStatusFilterEl.addEventListener("change", renderOpenJournal);
 openDeliveryStatusFilterEl.addEventListener("change", renderOpenJournal);
 openPartnerFilterEl.addEventListener("input", renderOpenJournal);
-deliveryProductSelect.addEventListener("change", renderDeliveryPreview);
+deliveryProductSelect.addEventListener("change", () => {
+  updateDeliverySourceOptions();
+  renderDeliveryPreview();
+});
 deliverySourceSelect.addEventListener("change", renderDeliveryPreview);
 deliveryGrossInput.addEventListener("input", renderDeliveryPreview);
 deliveryTareInput.addEventListener("input", renderDeliveryPreview);

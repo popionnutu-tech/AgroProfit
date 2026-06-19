@@ -1119,10 +1119,12 @@
             </label>
 
             <label>
-              Mașină (nr.)
-              <input name="vehicle" id="delivery-vehicle-input" list="vehicles-datalist" placeholder="Ex: AG-102" />
+              Mașină (din nomenclator)
+              <select name="vehicle" id="delivery-vehicle-select">
+                <option value="">Mașina cumpărătorului (notează la Observații)</option>
+              </select>
               <datalist id="vehicles-datalist"></datalist>
-              <small class="field-hint">Numărul mașinii care a încărcat.</small>
+              <small class="field-hint">Alege mașina companiei; pentru mașina cumpărătorului lasă gol și scrie-o la Observații.</small>
             </label>
 
             <div class="split">
@@ -1769,8 +1771,8 @@
             </div>
             <form class="mini-form" data-entity-form="vehicles">
               <div class="split">
-                <input name="number" placeholder="Nr. mașină (ex: AG-102)" required />
-                <input name="series" placeholder="Serie" />
+                <input name="number" placeholder="Număr și serie" required />
+                <input name="series" placeholder="Model mașină" />
               </div>
               <div class="split">
                 <input name="driver" placeholder="Șofer (opțional)" />
