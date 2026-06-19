@@ -1777,9 +1777,10 @@ async function createProcessing(payload) {
       (i) => sameLocation(i.location, sourceLocation) && i.product === productName
     ) || {}).quantity || 0
   );
-  if (processedQuantity > available) {
+  // Comparam in kg rotunjit (la fel ca afisarea) ca "proceseaza tot stocul" sa nu pice din zecimale.
+  if (Math.round(processedQuantity * 1000) > Math.round(available * 1000)) {
     throw new Error(
-      `Stoc insuficient pentru ${productName} in ${sourceLocation}: disponibil ${available} t, cerut ${processedQuantity} t.`
+      `Stoc insuficient pentru ${productName} in ${sourceLocation}: disponibil ${Math.round(available * 1000)} kg, cerut ${Math.round(processedQuantity * 1000)} kg.`
     );
   }
 
@@ -2131,9 +2132,10 @@ async function updateProcessing(id, payload = {}) {
           (i) => sameLocation(i.location, processing.sourceLocation) && i.product === processing.product
         ) || {}).quantity || 0
       );
-      if (Number(processing.processedQuantity || 0) > available) {
+      const requestedQty = Number(processing.processedQuantity || 0);
+      if (Math.round(requestedQty * 1000) > Math.round(available * 1000)) {
         throw new Error(
-          `Stoc insuficient pentru ${processing.product} in ${processing.sourceLocation}: disponibil ${available} t, necesar ${processing.processedQuantity} t.`
+          `Stoc insuficient pentru ${processing.product} in ${processing.sourceLocation}: disponibil ${Math.round(available * 1000)} kg, necesar ${Math.round(requestedQty * 1000)} kg.`
         );
       }
     }
@@ -2353,9 +2355,9 @@ async function createDelivery(payload) {
       )
       .reduce((sum, d) => sum + Number(d.plannedQuantity || 0), 0);
     const available = inStock - reservedPending;
-    if (plannedQuantity > available) {
+    if (Math.round(plannedQuantity * 1000) > Math.round(available * 1000)) {
       throw new Error(
-        `Stoc insuficient pentru ${productName} in ${sourceLocation}: disponibil ${available} t (din ${inStock} t, rezervat ${reservedPending} t), cerut ${plannedQuantity} t.`
+        `Stoc insuficient pentru ${productName} in ${sourceLocation}: disponibil ${Math.round(available * 1000)} kg (din ${Math.round(inStock * 1000)} kg, rezervat ${Math.round(reservedPending * 1000)} kg), cerut ${Math.round(plannedQuantity * 1000)} kg.`
       );
     }
   }

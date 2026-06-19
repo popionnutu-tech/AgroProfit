@@ -4189,7 +4189,8 @@ function renderProcessingEstimate() {
 
   if (processingAvailableEl) {
     processingAvailableEl.textContent = `${formatNumber(availableKg)} kg (${formatNumber(availableT)} t)`;
-    processingAvailableEl.style.color = processedKg > availableKg ? "#b3261e" : "";
+    processingAvailableEl.style.color =
+      Math.round(processedKg) > Math.round(availableKg) ? "#b3261e" : "";
   }
   if (processingWaterEl) {
     processingWaterEl.textContent = humidityInverted
