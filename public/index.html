@@ -686,6 +686,11 @@
               <p>Alege produsul, cilindrul sursă și (la uscare) cilindrul destinație. Cantitatea nu poate depăși stocul. La uscare se scade automat apa după umiditate.</p>
             </div>
 
+            <div id="processing-finalize-banner" class="finalize-banner" hidden>
+              <span id="processing-finalize-text"></span>
+              <button type="button" id="processing-finalize-cancel" class="cell-btn">Renunță la finalizare</button>
+            </div>
+
             <div class="split">
               <label>
                 Tip procesare
@@ -715,9 +720,9 @@
                 Cantitate procesată (kg)
                 <input name="processedQuantity" id="processed-quantity-input" type="number" min="0" step="1" required />
               </label>
-              <label>
+              <label id="processing-waste-field">
                 Deșeu confirmat (kg)
-                <input name="confirmedWaste" id="confirmed-waste-input" type="number" min="0" step="1" value="0" />
+                <input name="confirmedWaste" id="confirmed-waste-input" type="number" min="0" step="1" />
               </label>
             </div>
 
@@ -851,6 +856,7 @@
               <label>
                 Din cilindru
                 <select name="fromLocationId" id="transfer-from-select" required></select>
+                <span class="field-hint" id="transfer-from-hint">&nbsp;</span>
               </label>
               <label>
                 În cilindru

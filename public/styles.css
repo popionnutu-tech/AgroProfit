@@ -781,6 +781,39 @@ button {
   font-weight: 700;
 }
 
+.finalize-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: #FFF4D6;
+  border: 1px solid #E6C56B;
+  color: #6B4E00;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.proc-inlucru-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.badge-inlucru {
+  display: inline-block;
+  background: #FFF4D6;
+  color: #6B4E00;
+  border: 1px solid #E6C56B;
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
 .form-actions {
   display: flex;
   gap: 12px;

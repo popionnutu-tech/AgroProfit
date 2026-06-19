@@ -90,6 +90,11 @@ const processingAvailableEl = document.getElementById("processing-available");
 const processingWaterEl = document.getElementById("processing-water");
 const processingFinalNetEl = document.getElementById("processing-final-net");
 const processingInlucruBtn = document.getElementById("processing-inlucru-btn");
+const processingFinalizeBanner = document.getElementById("processing-finalize-banner");
+const processingFinalizeText = document.getElementById("processing-finalize-text");
+const processingFinalizeCancel = document.getElementById("processing-finalize-cancel");
+// Id-ul procesarii "in lucru" pe care o finalizam (reincarcata in formular). null = procesare noua.
+let finalizeProcessingId = null;
 const transferFormEl = document.getElementById("transfer-form");
 const transferProductSelect = document.getElementById("transfer-product-select");
 const transferFromSelect = document.getElementById("transfer-from-select");
@@ -1585,12 +1590,20 @@ function renderProcessings(processings) {
           <td>${formatNumber(item.confirmedWaste)}</td>
           <td>
             <div>${formatNumber(item.outputQuantity ?? item.finalNetQuantity)}</div>
-            <select class="processing-status" data-id="${item.id}" ${canEditStatuses ? "" : "disabled"}>
-              ${["Confirmat", "In lucru", "Inchis", "Anulat", "Redeschis"].map((status) => {
-                const selected = item.status === status ? "selected" : "";
-                return `<option value="${status}" ${selected}>${status}</option>`;
-              }).join("")}
-            </select>
+            ${item.status === "In lucru"
+              ? (canEditStatuses
+                  ? `<div class="proc-inlucru-actions">
+                       <span class="badge-inlucru">În lucru</span>
+                       <button type="button" class="cell-btn cell-btn-primary processing-finalize-btn" data-id="${item.id}">Finalizează</button>
+                       <button type="button" class="cell-btn cell-btn-danger processing-cancel-btn" data-id="${item.id}">Anulează</button>
+                     </div>`
+                  : `<span class="badge-inlucru">În lucru</span>`)
+              : `<select class="processing-status" data-id="${item.id}" ${canEditStatuses ? "" : "disabled"}>
+                  ${["Confirmat", "Inchis", "Anulat", "Redeschis"].map((status) => {
+                    const selected = item.status === status ? "selected" : "";
+                    return `<option value="${status}" ${selected}>${status}</option>`;
+                  }).join("")}
+                </select>`}
           </td>
         </tr>
       `
@@ -3482,8 +3495,13 @@ function updateTransferAvailableHint() {
     (item) => item.location === fromLoc.name && item.product === product.name
   );
   const available = Number(row?.quantity || 0);
-  let html = `Disponibil în ${fromLoc.name}: ${formatNumber(Math.round(available * 1000))} kg (${formatNumber(available)} t)`;
-  // #12: avertizare destinatie — alt produs in cilindru sau capacitate.
+  // Stoc disponibil afisat sub selectul "Din cilindru".
+  const fromHintEl = document.getElementById("transfer-from-hint");
+  if (fromHintEl) {
+    fromHintEl.innerHTML = `Disponibil: ${formatNumber(Math.round(available * 1000))} kg (${formatNumber(available)} t)`;
+  }
+  // #12: avertizare destinatie (sub Cantitate) — alt produs in cilindru sau capacitate.
+  let html = "&nbsp;";
   const toLoc = currentConfig.storageLocations.find(
     (item) => String(item.id) === String(transferToSelect.value)
   );
@@ -3497,10 +3515,10 @@ function updateTransferAvailableHint() {
     const destCurrent = destItems.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
     const cap = Number(toLoc.capacity || 0) / 1000; // kg -> tone
     if (other) {
-      html += `<br><span class="transfer-warn">⚠ În ${toLoc.name} este deja ${other.product} — un cilindru = un singur produs.</span>`;
+      html = `<span class="transfer-warn">⚠ În ${escapeComboHtml(toLoc.name)} este deja ${escapeComboHtml(other.product)} — un cilindru = un singur produs.</span>`;
     } else if (cap > 0) {
       const liber = Math.max(cap - destCurrent, 0);
-      html += `<br><span class="field-hint">Mai încap în ${toLoc.name}: ${formatNumber(Math.round(liber * 1000))} kg (${formatNumber(liber)} t)</span>`;
+      html = `<span class="field-hint">Mai încap în ${escapeComboHtml(toLoc.name)}: ${formatNumber(Math.round(liber * 1000))} kg (${formatNumber(liber)} t)</span>`;
     }
   }
   transferAvailableHintEl.innerHTML = html;
@@ -4104,17 +4122,23 @@ function selectedProcessingLossMethod() {
 // Arata/ascunde rândul de umiditate + cardul de apa dupa tipul ales. La non-uscare
 // goleste umiditatile (sa nu ramana valori stale) si reseteaza estimatul.
 function updateProcessingTypeUI() {
-  const usesHumidity = selectedProcessingLossMethod() === "umiditate";
+  const method = selectedProcessingLossMethod();
+  const usesHumidity = method === "umiditate";
+  const usesWaste = method === "deseu";
   const humidityRow = document.getElementById("processing-humidity-row");
   const waterCard = document.getElementById("processing-water-card");
+  const wasteField = document.getElementById("processing-waste-field");
   if (humidityRow) humidityRow.style.display = usesHumidity ? "" : "none";
   if (waterCard) waterCard.style.display = usesHumidity ? "" : "none";
+  // "Deseu confirmat" apare doar la curatire; la uscare/ventilare/pastrare se ascunde.
+  if (wasteField) wasteField.style.display = usesWaste ? "" : "none";
   if (!usesHumidity) {
     if (processingInitialHumidityInput) processingInitialHumidityInput.value = "";
     if (processingFinalHumidityInput) processingFinalHumidityInput.value = "";
   } else {
     autofillProcessingInitialHumidity();
   }
+  if (!usesWaste && confirmedWasteInput) confirmedWasteInput.value = "";
   renderProcessingEstimate();
 }
 
@@ -4223,6 +4247,7 @@ async function createProcessing(formData, status) {
     const error = await response.json();
     throw new Error(error.error || "Eroare la salvarea procesarii.");
   }
+  return await response.json().catch(() => null);
 }
 
 function getTransactionReferenceType() {
@@ -5646,19 +5671,164 @@ processingFormEl.addEventListener("keydown", (event) => {
   }
 });
 
-async function saveProcessing(status) {
-  processingMessageEl.textContent = "Se salveaza...";
-  try {
-    await createProcessing(new FormData(processingFormEl), status);
+// Validare la FINALIZARE (status Confirmat). La "in lucru" nu se cere nimic.
+function validateFinalizeFields() {
+  const method = selectedProcessingLossMethod();
+  const needsDest = method === "umiditate" || method === "deseu";
+  if (needsDest && !processingDestSelect.value) {
+    return "Alege cilindrul destinație pentru a finaliza procesarea.";
+  }
+  if (method === "umiditate") {
+    const ih = Number(processingInitialHumidityInput?.value || 0);
+    const fh = Number(processingFinalHumidityInput?.value || 0);
+    if (!(ih > 0) || !(fh > 0)) {
+      return "La uscare, completează umiditatea inițială și finală pentru a finaliza.";
+    }
+    if (fh > ih) {
+      return "Umiditatea finală nu poate fi mai mare decât cea inițială.";
+    }
+  } else if (method === "deseu") {
+    if (confirmedWasteInput.value === "" || confirmedWasteInput.value == null) {
+      return "La curățire, introdu deșeul confirmat (poate fi 0) pentru a finaliza.";
+    }
+  }
+  return null;
+}
+
+// Reincarca o procesare "in lucru" in formular pentru a fi finalizata.
+function startFinalizeProcessing(id) {
+  const p = (processingsCache || []).find((x) => x.id === Number(id));
+  if (!p) return;
+  finalizeProcessingId = p.id;
+  setView("procesare");
+  const method = resolveLossMethod(
+    (currentConfig?.processingTypes || []).find((t) => t.name === p.processingType) || { name: p.processingType }
+  );
+  if (processingTypeSelect) processingTypeSelect.value = p.processingType || "";
+  if (processingProductSelect) processingProductSelect.value = p.product || "";
+  if (processingSourceSelect) processingSourceSelect.value = p.sourceLocation || "";
+  if (processingDestSelect) {
+    processingDestSelect.value = p.destLocation && p.destLocation !== p.sourceLocation ? p.destLocation : "";
+  }
+  if (processedQuantityInput) processedQuantityInput.value = Math.round(Number(p.processedQuantity || 0) * 1000);
+  if (confirmedWasteInput) {
+    confirmedWasteInput.value = method === "deseu" && Number(p.confirmedWaste) > 0 ? Math.round(Number(p.confirmedWaste) * 1000) : "";
+  }
+  if (processingInitialHumidityInput) {
+    processingInitialHumidityInput.value = method === "umiditate" && Number(p.initialHumidity) > 0 ? p.initialHumidity : "";
+  }
+  if (processingFinalHumidityInput) {
+    processingFinalHumidityInput.value = method === "umiditate" && Number(p.finalHumidity) > 0 ? p.finalHumidity : "";
+  }
+  updateProcessingTypeUI();
+  updateProcessingDestHint();
+  renderProcessingEstimate();
+  if (processingFinalizeText) {
+    const ce = method === "umiditate" ? "umiditatea finală" : method === "deseu" ? "deșeul confirmat" : "datele";
+    processingFinalizeText.textContent = `Finalizezi procesarea #${p.id} — completează ${ce} + cilindrul destinație, apoi „Salveaza procesarea".`;
+  }
+  if (processingFinalizeBanner) processingFinalizeBanner.hidden = false;
+  if (processingInlucruBtn) processingInlucruBtn.style.display = "none";
+  if (processingFormEl && processingFormEl.scrollIntoView) {
+    processingFormEl.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  const focusEl = method === "umiditate" ? processingFinalHumidityInput : method === "deseu" ? confirmedWasteInput : processingDestSelect;
+  if (focusEl && focusEl.focus) setTimeout(() => focusEl.focus(), 200);
+}
+
+function cancelFinalizeProcessing(opts = {}) {
+  finalizeProcessingId = null;
+  if (processingFinalizeBanner) processingFinalizeBanner.hidden = true;
+  if (processingInlucruBtn) processingInlucruBtn.style.display = "";
+  if (!opts.silent) {
     processingFormEl.reset();
     renderProcessingEstimate();
+    updateProcessingTypeUI();
+    if (processingMessageEl) processingMessageEl.textContent = "";
+  }
+}
+
+// Finalizeaza o procesare "in lucru" existenta (PATCH), nu creeaza una noua.
+async function finalizeExistingProcessing(formData) {
+  const product = formData.get("product");
+  const destLocation = formData.get("destLocation") || "";
+  const method = resolveLossMethod(
+    (currentConfig?.processingTypes || []).find((t) => t.name === formData.get("processingType")) || { name: formData.get("processingType") }
+  );
+  const wasteKg = Number(formData.get("confirmedWaste") || 0);
+  const payload = {
+    status: "Confirmat",
+    destLocation,
+    confirmedWaste: method === "deseu" ? String(wasteKg / 1000) : "0",
+    initialHumidity: method === "umiditate" ? formData.get("initialHumidity") || "" : "",
+    finalHumidity: method === "umiditate" ? formData.get("finalHumidity") || "" : "",
+    changeReason: "Finalizare procesare",
+    changedBy: "dashboard"
+  };
+  // Avertizare "un produs / cilindru" pe cilindrul destinatie.
+  const conflict = cylinderConflictProduct(destLocation, product);
+  if (conflict) {
+    const ok = window.confirm(
+      `Atenție! Pui ${product} în ${destLocation}, dar acolo este deja ${conflict}.\nUn cilindru ar trebui să aibă un singur produs. Continui?`
+    );
+    if (!ok) {
+      const e = new Error("Finalizare anulată — cilindru cu alt produs.");
+      e.cancelled = true;
+      throw e;
+    }
+    payload.allowMixedProduct = true;
+  }
+  const response = await fetch(`/api/processings/${finalizeProcessingId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || "Nu am putut finaliza procesarea.");
+  }
+  return await response.json().catch(() => null);
+}
+
+async function saveProcessing(status) {
+  if (finalizeProcessingId) status = "Confirmat"; // finalizarea e mereu "Confirmat"
+  if (status !== "In lucru") {
+    const err = validateFinalizeFields();
+    if (err) {
+      processingMessageEl.textContent = err;
+      return;
+    }
+  }
+  processingMessageEl.textContent = "Se salveaza...";
+  const wasFinalize = !!finalizeProcessingId;
+  try {
+    const saved = wasFinalize
+      ? await finalizeExistingProcessing(new FormData(processingFormEl))
+      : await createProcessing(new FormData(processingFormEl), status);
+    cancelFinalizeProcessing({ silent: true });
+    processingFormEl.reset();
+    renderProcessingEstimate();
+    updateProcessingTypeUI();
     processingMessageEl.textContent =
       status === "In lucru"
-        ? "Procesarea a fost salvata «in lucru». Reia mai tarziu pentru a confirma."
-        : "Procesarea a fost salvata.";
+        ? "Procesarea a fost salvata «in lucru». Reia mai tarziu pentru a finaliza."
+        : wasFinalize
+          ? "Procesarea a fost finalizată."
+          : "Procesarea a fost salvata.";
+    // Afisare optimista din raspuns (evita cursa KV pe serverless).
+    if (saved && saved.id) {
+      const idx = processingsCache.findIndex((p) => p.id === saved.id);
+      if (idx >= 0) processingsCache[idx] = saved;
+      else processingsCache = [saved, ...processingsCache];
+      renderProcessings(processingsCache);
+      if (typeof renderFilterOptions === "function") renderFilterOptions();
+      if (typeof checkEndOfDayProcessing === "function") checkEndOfDayProcessing();
+      if (typeof renderDashFeed === "function") renderDashFeed();
+    }
+    // NU reincarcam loadProcessings imediat: pe serverless GET-ul de dupa scriere poate citi
+    // date vechi (cursa KV) si ar suprascrie randul optimist. Restul datelor se reincarca.
     await Promise.all([
       loadReceipts(),
-      loadProcessings(),
       loadStocks(),
       loadTransactions(),
       loadDeliveries(),
@@ -5667,7 +5837,7 @@ async function saveProcessing(status) {
       loadDailyReport()
     ]);
   } catch (error) {
-    processingMessageEl.textContent = error.message;
+    processingMessageEl.textContent = error.cancelled ? "Procesare anulată." : error.message;
   }
 }
 
@@ -5681,6 +5851,10 @@ if (processingInlucruBtn) {
     if (!processingFormEl.reportValidity()) return;
     saveProcessing("In lucru");
   });
+}
+
+if (processingFinalizeCancel) {
+  processingFinalizeCancel.addEventListener("click", () => cancelFinalizeProcessing());
 }
 
 // Confirmarea de la finele zilei ca nu s-a procesat nimic (rămâne confirmat toată ziua)
@@ -6142,6 +6316,29 @@ complaintsBodyEl.addEventListener("change", async (event) => {
   } catch (error) {
     window.alert(error.message);
     await loadComplaints();
+  }
+});
+
+processingsBodyEl.addEventListener("click", async (event) => {
+  const finalizeBtn = event.target.closest(".processing-finalize-btn");
+  if (finalizeBtn) {
+    startFinalizeProcessing(finalizeBtn.dataset.id);
+    return;
+  }
+  const cancelBtn = event.target.closest(".processing-cancel-btn");
+  if (cancelBtn) {
+    if (!window.confirm("Anulezi această procesare în lucru?")) return;
+    try {
+      await updateProcessingEntry(cancelBtn.dataset.id, {
+        status: "Anulat",
+        changeReason: "Anulare procesare in lucru",
+        changedBy: "dashboard"
+      });
+      await Promise.all([loadProcessings(), loadStocks(), loadAuditLogs(), loadDailyReport()]);
+    } catch (error) {
+      window.alert(error.message);
+    }
+    return;
   }
 });
 

@@ -470,6 +470,26 @@ function readConfigState() {
     lossMethod: resolveLossMethod(item)
   }));
 
+  // Asigura tipul "Ventilare" (fara pierdere cantitativa, iesire = intrare) — sa fie mereu
+  // disponibil pentru operator, inclusiv pe datele live. Idempotent (verificare dupa nume).
+  if (
+    !state.processingTypes.some(
+      (t) => String((t && t.name) || "").trim().toLowerCase() === "ventilare"
+    )
+  ) {
+    state.processingTypes = [
+      ...state.processingTypes,
+      {
+        id: nextId(state.processingTypes),
+        name: "Ventilare",
+        consumptionNorm: 0,
+        resource: "aer",
+        lossMethod: "fara",
+        active: true
+      }
+    ];
+  }
+
   state.nextIds = { ...defaultConfigState.nextIds, ...(state.nextIds || {}) };
   state.systemSettings = {
     ...defaultConfigState.systemSettings,
@@ -2076,6 +2096,78 @@ async function updateProcessing(id, payload = {}) {
         );
       }
     }
+
+    // FINALIZARE procesare "in lucru": recalculam outputul cu parametrii finali
+    // (deseu la curatire / umiditate la uscare) si aplicam cilindrul destinatie + regula un-produs.
+    const isFinalizing =
+      oldStatus === "In lucru" &&
+      willAffectStock &&
+      (payload.destLocation !== undefined ||
+        payload.confirmedWaste !== undefined ||
+        payload.finalHumidity !== undefined ||
+        payload.initialHumidity !== undefined);
+    if (isFinalizing) {
+      const cfg = readConfigState();
+      const lossMethod = resolveLossMethod(
+        cfg.processingTypes.find((t) => t.name === processing.processingType) || {
+          name: processing.processingType
+        }
+      );
+      const usesHumidity = lossMethod === "umiditate";
+      const destLocation =
+        (payload.destLocation && String(payload.destLocation)) ||
+        processing.destLocation ||
+        processing.sourceLocation;
+      if (
+        (lossMethod === "umiditate" || lossMethod === "deseu") &&
+        !payload.destLocation &&
+        (!processing.destLocation || processing.destLocation === processing.sourceLocation)
+      ) {
+        throw new Error("Alege cilindrul destinatie pentru a finaliza procesarea.");
+      }
+      const processedQuantity = Number(processing.processedQuantity || 0);
+      const confirmedWaste = lossMethod === "deseu" ? sanitizeNumber(payload.confirmedWaste) : 0;
+      const initialHumidity = usesHumidity ? sanitizeNumber(payload.initialHumidity) : 0;
+      const finalHumidity = usesHumidity ? sanitizeNumber(payload.finalHumidity) : 0;
+      if (usesHumidity && (!(initialHumidity > 0) || !(finalHumidity > 0))) {
+        throw new Error("La uscare, completeaza umiditatea initiala si finala pentru a finaliza.");
+      }
+      if (usesHumidity && initialHumidity > 0 && finalHumidity > initialHumidity) {
+        throw new Error("Umiditatea finala nu poate fi mai mare decat cea initiala la uscare.");
+      }
+      const humidityDrop = Math.max(initialHumidity - finalHumidity, 0);
+      const waterRemoved =
+        usesHumidity && initialHumidity > 0 && finalHumidity > 0
+          ? Number(((processedQuantity * humidityDrop) / 100).toFixed(3))
+          : 0;
+      if (confirmedWaste + waterRemoved >= processedQuantity) {
+        throw new Error(
+          `Deseu (${(confirmedWaste * 1000).toFixed(0)} kg) + apa (${(waterRemoved * 1000).toFixed(0)} kg) depasesc cantitatea procesata (${(processedQuantity * 1000).toFixed(0)} kg). Verifica valorile.`
+        );
+      }
+      const outputQuantity = Math.max(processedQuantity - confirmedWaste - waterRemoved, 0);
+      const finalizeSummary = await getStockSummary();
+      const destConflict = findCylinderConflict(
+        finalizeSummary,
+        cfg.storageLocations.find((l) => l.name === destLocation),
+        processing.product
+      );
+      if (destConflict && !payload.allowMixedProduct) {
+        throw new Error(
+          `Cilindrul ${destLocation} contine deja ${destConflict} (un cilindru = un singur produs). Confirma pe ecran sau reincarca pagina.`
+        );
+      }
+      processing.destLocation = destLocation;
+      processing.lossMethod = lossMethod;
+      processing.confirmedWaste = confirmedWaste;
+      processing.initialHumidity = initialHumidity;
+      processing.finalHumidity = finalHumidity;
+      processing.waterRemoved = waterRemoved;
+      processing.outputQuantity = outputQuantity;
+      processing.finalNetQuantity = outputQuantity;
+      processing.mixedProductConfirmed = !!destConflict;
+    }
+
     processing.status = newStatus;
   }
 
