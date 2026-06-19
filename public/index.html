@@ -1709,6 +1709,7 @@
                   <option value="tampon">Tampon</option>
                   <option value="cilindru">Cilindru</option>
                   <option value="depozit">Depozit</option>
+                  <option value="parcare">Parcare</option>
                 </select>
                 <input name="capacity" type="number" step="1" placeholder="Capacitate (kg)" required />
               </div>
@@ -1722,6 +1723,10 @@
                   <option value="false">Inactiv</option>
                 </select>
               </div>
+              <select name="multiProduct" title="Doar aici se pot tine mai multe produse (ex. Parcare afara)">
+                <option value="false">Un singur produs (implicit)</option>
+                <option value="true">Permite mai multe produse</option>
+              </select>
               <button type="submit">Adauga locatie</button>
             </form>
             <div class="list-block" id="storageLocations-list"></div>

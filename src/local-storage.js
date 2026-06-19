@@ -490,6 +490,20 @@ function readConfigState() {
     ];
   }
 
+  // Orice locatie de tip "parcare" (ex. Parcare afara) permite mai multe produse — singura
+  // exceptie de la regula un-produs. Fortat (robust la editari din nomenclator), conform cerintei.
+  state.storageLocations = (state.storageLocations || []).map((loc) => {
+    const n = String((loc && loc.name) || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[ăâ]/g, "a");
+    const isParcare = n.includes("parcare") || String((loc && loc.type) || "").toLowerCase() === "parcare";
+    if (isParcare && loc.multiProduct !== true) {
+      return { ...loc, multiProduct: true };
+    }
+    return loc;
+  });
+
   state.nextIds = { ...defaultConfigState.nextIds, ...(state.nextIds || {}) };
   state.systemSettings = {
     ...defaultConfigState.systemSettings,
@@ -838,11 +852,25 @@ function createStockSummary(receipts, deliveries = [], openingDocuments = [], tr
     }
   }
 
-  const byLocation = Array.from(stockByLocation.values()).map((item) => ({
+  const normLoc = (s) => String(s || "Fara locatie").trim().toLowerCase();
+  const rawByLocation = Array.from(stockByLocation.values()).map((item) => ({
     ...item,
     quantity: Number(item.quantity || 0),
     deliveredQuantity: 0
   }));
+  // Unim locatiile duplicate care difera doar prin litere mari/mici sau spatii
+  // (ex. "Groapa primire" vs "Groapa Primire"). Pastram prima denumire intalnita.
+  const mergedMap = new Map();
+  for (const item of rawByLocation) {
+    const mk = `${normLoc(item.location)}::${item.product}`;
+    const existingMerge = mergedMap.get(mk);
+    if (existingMerge) {
+      existingMerge.quantity += Number(item.quantity || 0);
+    } else {
+      mergedMap.set(mk, item);
+    }
+  }
+  const byLocation = Array.from(mergedMap.values());
 
   // Scadem fiecare livrare livrata: intai din locatia aleasa la livrare, apoi din
   // celelalte locatii ale produsului (cele mai pline intai) daca acolo nu ajunge —
@@ -852,7 +880,7 @@ function createStockSummary(receipts, deliveries = [], openingDocuments = [], tr
     let remaining = Number(d.deliveredQuantity || 0);
     if (remaining <= 0) continue;
     const product = d.product;
-    const primary = byLocation.find((i) => i.location === d.location && i.product === product);
+    const primary = byLocation.find((i) => normLoc(i.location) === normLoc(d.location) && i.product === product);
     if (primary && primary.quantity > 0) {
       const take = Math.min(primary.quantity, remaining);
       primary.quantity -= take;
@@ -1176,6 +1204,8 @@ function normalizeEntityPayload(entity, payload) {
           payload.costCategory || "neprocesat",
           "Categoria de cost"
         ),
+        // "Permite mai multe produse": doar aici (ex. Parcare afara) NU se aplica regula un-produs.
+        multiProduct: sanitizeBoolean(payload.multiProduct ?? false),
         active: sanitizeBoolean(payload.active ?? true)
       };
     case "roles":
@@ -1372,13 +1402,23 @@ async function createOpeningDocument(payload) {
   return openingDocument;
 }
 
-// Detecteaza daca un cilindru contine deja ALT produs decat cel care intra. Intoarce
-// numele produsului in conflict (sau null daca e gol / acelasi produs / nu e cilindru).
-// Sursa unica pentru regula "un produs / cilindru" (receptie, procesare, transfer).
+// Compara doua nume de locatie ignorand litere mari/mici si spatii. Locatiile cu duplicat de
+// caz (ex. "Groapa primire" vs "Groapa Primire") sunt unite in createStockSummary, deci toate
+// verificarile de stoc disponibil trebuie sa potriveasca la fel (case-insensitive).
+function sameLocation(a, b) {
+  return String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
+}
+
+// Detecteaza daca o locatie contine deja ALT produs decat cel care intra. Intoarce numele
+// produsului in conflict (sau null daca e gol / acelasi produs / locatie multiProduct).
+// Sursa unica pentru regula "un produs / locatie" (receptie, procesare, transfer).
 function findCylinderConflict(summary, toLocation, productName) {
-  if (!toLocation || String(toLocation.type || "").toLowerCase() !== "cilindru") return null;
+  if (!toLocation) return null;
+  // Regula "un produs / locatie" se aplica peste tot, EXCEPTAND locatiile marcate explicit
+  // "multiProduct" (ex. Parcare afara). Acopera cilindrii + groapa de primire etc.
+  if (toLocation.multiProduct === true) return null;
   const destItems = ((summary && summary.byLocation) || []).filter(
-    (item) => item.location === toLocation.name && Number(item.quantity || 0) > 0
+    (item) => sameLocation(item.location, toLocation.name) && Number(item.quantity || 0) > 0
   );
   const other = destItems.find((item) => item.product !== productName);
   return other ? other.product : null;
@@ -1398,13 +1438,14 @@ async function createReceipt(payload) {
     ? receiptConfig.storageLocations.find((l) => Number(l.id) === Number(payload.locationId))
     : receiptConfig.storageLocations.find((l) => l.name === payload.location);
   let mixedProductConfirmed = false;
-  // Doar cilindrii au regula "un produs / cilindru" — evitam getStockSummary pe non-cilindru.
-  if (receiptLocation && String(receiptLocation.type || "").toLowerCase() === "cilindru") {
+  // Regula "un produs / locatie" se aplica oriunde NU e bifat "Permite mai multe produse"
+  // (cilindri + groapa de primire etc.); doar Parcare afara (multiProduct) e exceptata.
+  if (receiptLocation && receiptLocation.multiProduct !== true) {
     const conflict = findCylinderConflict(await getStockSummary(), receiptLocation, payload.product || "");
     if (conflict) {
       if (!payload.allowMixedProduct) {
         throw new Error(
-          `Cilindrul ${receiptLocation.name} conține deja ${conflict} (un cilindru = un singur produs). Confirmă pe ecran sau reîncarcă pagina.`
+          `Locația ${receiptLocation.name} conține deja ${conflict} (o locație = un singur produs). Confirmă pe ecran sau reîncarcă pagina.`
         );
       }
       mixedProductConfirmed = true;
@@ -1733,7 +1774,7 @@ async function createProcessing(payload) {
   const summary = await getStockSummary();
   const available = Number(
     (summary.byLocation.find(
-      (i) => i.location === sourceLocation && i.product === productName
+      (i) => sameLocation(i.location, sourceLocation) && i.product === productName
     ) || {}).quantity || 0
   );
   if (processedQuantity > available) {
@@ -1753,7 +1794,7 @@ async function createProcessing(payload) {
   if (destConflict) {
     if (!payload.allowMixedProduct) {
       throw new Error(
-        `Cilindrul ${destName} conține deja ${destConflict} (un cilindru = un singur produs). Confirmă pe ecran sau reîncarcă pagina.`
+        `Locația ${destName} conține deja ${destConflict} (o locație = un singur produs). Confirmă pe ecran sau reîncarcă pagina.`
       );
     }
     mixedProductConfirmed = true;
@@ -2087,7 +2128,7 @@ async function updateProcessing(id, payload = {}) {
       const summary = await getStockSummary();
       const available = Number(
         (summary.byLocation.find(
-          (i) => i.location === processing.sourceLocation && i.product === processing.product
+          (i) => sameLocation(i.location, processing.sourceLocation) && i.product === processing.product
         ) || {}).quantity || 0
       );
       if (Number(processing.processedQuantity || 0) > available) {
@@ -2154,7 +2195,7 @@ async function updateProcessing(id, payload = {}) {
       );
       if (destConflict && !payload.allowMixedProduct) {
         throw new Error(
-          `Cilindrul ${destLocation} contine deja ${destConflict} (un cilindru = un singur produs). Confirma pe ecran sau reincarca pagina.`
+          `Locația ${destLocation} contine deja ${destConflict} (o locație = un singur produs). Confirma pe ecran sau reincarca pagina.`
         );
       }
       processing.destLocation = destLocation;
@@ -2296,7 +2337,7 @@ async function createDelivery(payload) {
     const summary = await getStockSummary();
     const inStock = Number(
       (summary.byLocation.find(
-        (i) => i.location === sourceLocation && i.product === productName
+        (i) => sameLocation(i.location, sourceLocation) && i.product === productName
       ) || {}).quantity || 0
     );
     // Rezervare: livrarile pe produs inca nelivrate (deliveredQuantity 0) nu au scazut
@@ -2306,7 +2347,7 @@ async function createDelivery(payload) {
         (d) =>
           !d.receiptId &&
           d.product === productName &&
-          d.location === sourceLocation &&
+          sameLocation(d.location, sourceLocation) &&
           Number(d.deliveredQuantity || 0) === 0 &&
           ["Proiect", "Confirmat", "Redeschis"].includes(d.status)
       )
@@ -3301,7 +3342,7 @@ async function createTransfer(payload) {
   const summary = await getStockSummary();
   const available = Number(
     (summary.byLocation.find(
-      (item) => item.location === fromLocation.name && item.product === product.name
+      (item) => sameLocation(item.location, fromLocation.name) && item.product === product.name
     ) || {}).quantity || 0
   );
   // Comparam in kg rotunjit (la fel ca afisarea) ca "muta tot" sa nu pice din zecimale.
@@ -3313,14 +3354,14 @@ async function createTransfer(payload) {
 
   // #12: continutul curent al cilindrului destinatie (doar produse cu stoc real).
   const destItems = summary.byLocation.filter(
-    (item) => item.location === toLocation.name && Number(item.quantity || 0) > 0
+    (item) => sameLocation(item.location, toLocation.name) && Number(item.quantity || 0) > 0
   );
 
   // #12: intr-un cilindru poate fi un singur produs (regula comuna cu receptia/procesarea).
   const transferConflict = findCylinderConflict(summary, toLocation, product.name);
   if (transferConflict) {
     throw new Error(
-      `Operatiune gresita: in ${toLocation.name} se afla deja ${transferConflict}. Intr-un cilindru poate fi un singur produs.`
+      `Operatiune gresita: in ${toLocation.name} se afla deja ${transferConflict}. O locatie poate avea un singur produs.`
     );
   }
 

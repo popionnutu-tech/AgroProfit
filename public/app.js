@@ -770,13 +770,16 @@ function renderSilosGrid(summary) {
       const capacity = getLocationCapacity(cyl, dominantProduct);
       const filled = Math.max(0, state.total);
       const pct = capacity > 0 ? Math.min(100, (filled / capacity) * 100) : 0;
+      const pctDisplay = capacity > 0 ? (filled / capacity) * 100 : 0;
+      const over = capacity > 0 && filled > capacity + 1e-6;
+      const overBy = over ? filled - capacity : 0;
       const free = Math.max(capacity - filled, 0);
-      const pctClass = pct >= 95 ? "is-crit" : pct >= 80 ? "is-warn" : "";
+      const pctClass = over ? "is-over" : pct >= 95 ? "is-crit" : pct >= 80 ? "is-warn" : "";
       const palette = getProductPalette(dominantProduct);
       const fillH = Math.max(0, Math.min(120, (pct / 100) * 120));
       const fillY = 28 + (120 - fillH);
       const isEmpty = filled <= 0;
-      const ringClass = pct >= 95 ? " is-crit-ring" : pct >= 80 ? " is-warn-ring" : "";
+      const ringClass = over ? " is-over-ring" : pct >= 95 ? " is-crit-ring" : pct >= 80 ? " is-warn-ring" : "";
       const tonsLabel = filled.toFixed(3).replace(".", ",");
       const productHead = dominantProduct
         ? `<span class="silo-product" style="color:${palette.edge};" title="${productsTooltip}"><span class="silo-product-dot" style="background:${palette.fill};border-color:${palette.edge};"></span>${productsLabel}</span>`
@@ -820,10 +823,12 @@ function renderSilosGrid(summary) {
           </div>
           <div class="silo-stored-line">
             <span class="silo-stored-qty">${tonsLabel} t</span>
-            <span class="silo-stored-pct ${pctClass}">${pct.toFixed(0)}%</span>
+            <span class="silo-stored-pct ${pctClass}">${pctDisplay.toFixed(0)}%</span>
           </div>
           <div class="silo-meta">
-            <span>Liber <b>${formatNumber(free)}t</b></span>
+            ${over
+              ? `<span class="silo-over">⚠ Peste capacitate cu ${formatNumber(Number(overBy.toFixed(3)))} t</span>`
+              : `<span>Liber <b>${formatNumber(free)}t</b></span>`}
           </div>
         </article>
       `;
@@ -3492,7 +3497,7 @@ function updateTransferAvailableHint() {
     return;
   }
   const row = (lastStockSummary.byLocation || []).find(
-    (item) => item.location === fromLoc.name && item.product === product.name
+    (item) => sameLocation(item.location, fromLoc.name) && item.product === product.name
   );
   const available = Number(row?.quantity || 0);
   // Stoc disponibil afisat sub selectul "Din cilindru".
@@ -3507,7 +3512,7 @@ function updateTransferAvailableHint() {
   );
   if (toLoc) {
     const destItems = (lastStockSummary.byLocation || []).filter(
-      (item) => item.location === toLoc.name && Number(item.quantity || 0) > 0
+      (item) => sameLocation(item.location, toLoc.name) && Number(item.quantity || 0) > 0
     );
     const other = String(toLoc.type || "").toLowerCase() === "cilindru"
       ? destItems.find((item) => item.product !== product.name)
@@ -3515,7 +3520,7 @@ function updateTransferAvailableHint() {
     const destCurrent = destItems.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
     const cap = Number(toLoc.capacity || 0) / 1000; // kg -> tone
     if (other) {
-      html = `<span class="transfer-warn">⚠ În ${escapeComboHtml(toLoc.name)} este deja ${escapeComboHtml(other.product)} — un cilindru = un singur produs.</span>`;
+      html = `<span class="transfer-warn">⚠ În ${escapeComboHtml(toLoc.name)} este deja ${escapeComboHtml(other.product)} — o locație = un singur produs.</span>`;
     } else if (cap > 0) {
       const liber = Math.max(cap - destCurrent, 0);
       html = `<span class="field-hint">Mai încap în ${escapeComboHtml(toLoc.name)}: ${formatNumber(Math.round(liber * 1000))} kg (${formatNumber(liber)} t)</span>`;
@@ -3526,28 +3531,35 @@ function updateTransferAvailableHint() {
 
 // Produsul aflat deja in cilindrul ales, daca difera de cel care intra (sau null).
 // Citeste din ultimul stoc incarcat (lastStockSummary). Regula "un produs / cilindru".
+// Compara doua nume de locatie ignorand litere mari/mici si spatii (locatiile cu duplicat de
+// caz sunt unite in stoc; potrivirile pe locatie trebuie sa fie la fel ca in backend).
+function sameLocation(a, b) {
+  return String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
+}
+
 function cylinderConflictProduct(locationName, productName) {
   const loc = (currentConfig?.storageLocations || []).find((l) => l.name === locationName);
-  if (!loc || String(loc.type || "").toLowerCase() !== "cilindru") return null;
+  // Regula un-produs se aplica oriunde NU e "multiProduct" (cilindri + groapa etc.).
+  if (!loc || loc.multiProduct === true) return null;
   const other = ((lastStockSummary && lastStockSummary.byLocation) || [])
-    .filter((i) => i.location === locationName && Number(i.quantity || 0) > 0)
+    .filter((i) => sameLocation(i.location, locationName) && Number(i.quantity || 0) > 0)
     .find((i) => i.product !== productName);
   return other ? other.product : null;
 }
 
 // Hint sub selectorul de locatie la RECEPTIE: arata ce contine cilindrul ales si
-// avertizeaza rosu daca produsul receptionat difera (un cilindru = un singur produs).
+// avertizeaza rosu daca produsul receptionat difera (o locație = un singur produs).
 function updateReceiptLocationHint() {
   const hintEl = document.getElementById("receipt-location-hint");
   if (!hintEl || !currentConfig) return;
   const loc = currentConfig.storageLocations.find((l) => String(l.id) === String(locationSelect.value));
   const product = currentConfig.products.find((p) => String(p.id) === String(productSelect.value));
-  if (!loc || String(loc.type || "").toLowerCase() !== "cilindru" || !lastStockSummary) {
+  if (!loc || loc.multiProduct === true || !lastStockSummary) {
     hintEl.innerHTML = "";
     return;
   }
   const items = (lastStockSummary.byLocation || []).filter(
-    (i) => i.location === loc.name && Number(i.quantity || 0) > 0
+    (i) => sameLocation(i.location, loc.name) && Number(i.quantity || 0) > 0
   );
   if (!items.length) {
     hintEl.innerHTML = `<span class="field-hint">${escapeComboHtml(loc.name)}: gol</span>`;
@@ -3555,7 +3567,7 @@ function updateReceiptLocationHint() {
   }
   const other = product ? items.find((i) => i.product !== product.name) : null;
   if (other) {
-    hintEl.innerHTML = `<span class="transfer-warn">⚠ ${escapeComboHtml(loc.name)} conține deja ${escapeComboHtml(other.product)} — un cilindru = un singur produs.</span>`;
+    hintEl.innerHTML = `<span class="transfer-warn">⚠ ${escapeComboHtml(loc.name)} conține deja ${escapeComboHtml(other.product)} — o locație = un singur produs.</span>`;
   } else {
     const content = items
       .map((i) => `${escapeComboHtml(i.product)} (${formatNumber(Number(i.quantity || 0))} t)`)
@@ -3570,15 +3582,15 @@ function updateProcessingDestHint() {
   if (!hintEl || !currentConfig) return;
   const loc = currentConfig.storageLocations.find((l) => l.name === processingDestSelect.value);
   const productName = processingProductSelect.value;
-  if (!loc || String(loc.type || "").toLowerCase() !== "cilindru" || !lastStockSummary) {
+  if (!loc || loc.multiProduct === true || !lastStockSummary) {
     hintEl.innerHTML = "";
     return;
   }
   const other = (lastStockSummary.byLocation || [])
-    .filter((i) => i.location === loc.name && Number(i.quantity || 0) > 0)
+    .filter((i) => sameLocation(i.location, loc.name) && Number(i.quantity || 0) > 0)
     .find((i) => i.product !== productName);
   hintEl.innerHTML = other
-    ? `<span class="transfer-warn">⚠ ${escapeComboHtml(loc.name)} conține deja ${escapeComboHtml(other.product)} — un cilindru = un singur produs.</span>`
+    ? `<span class="transfer-warn">⚠ ${escapeComboHtml(loc.name)} conține deja ${escapeComboHtml(other.product)} — o locație = un singur produs.</span>`
     : "";
 }
 
@@ -3838,7 +3850,7 @@ async function createReceipt(formData) {
   const receiptConflict = cylinderConflictProduct(location?.name, product?.name);
   if (receiptConflict) {
     const ok = window.confirm(
-      `Atenție! Recepționezi ${product?.name || "produsul"} în ${location?.name}, dar acolo este deja ${receiptConflict}.\nUn cilindru ar trebui să aibă un singur produs. Continui?`
+      `Atenție! Recepționezi ${product?.name || "produsul"} în ${location?.name}, dar acolo este deja ${receiptConflict}.\nO locație ar trebui să aibă un singur produs. Continui?`
     );
     if (!ok) {
       const cancelErr = new Error("Recepție anulată — cilindru cu alt produs.");
@@ -4093,7 +4105,7 @@ function getProcessingAvailable() {
   const source = processingSourceSelect.value;
   if (!product || !source || !lastStockSummary) return 0;
   const row = (lastStockSummary.byLocation || []).find(
-    (i) => i.location === source && i.product === product
+    (i) => sameLocation(i.location, source) && i.product === product
   );
   return Number(row?.quantity || 0);
 }
@@ -4225,7 +4237,7 @@ async function createProcessing(formData, status) {
   const procConflict = cylinderConflictProduct(procDestName, formData.get("product"));
   if (procConflict) {
     const ok = window.confirm(
-      `Atenție! Pui ${formData.get("product")} în ${procDestName}, dar acolo este deja ${procConflict}.\nUn cilindru ar trebui să aibă un singur produs. Continui?`
+      `Atenție! Pui ${formData.get("product")} în ${procDestName}, dar acolo este deja ${procConflict}.\nO locație ar trebui să aibă un singur produs. Continui?`
     );
     if (!ok) {
       const cancelErr = new Error("Procesare anulată — cilindru cu alt produs.");
@@ -4356,7 +4368,7 @@ function getDeliveryAvailable() {
   const source = deliverySourceSelect.value;
   if (!product || !source || !lastStockSummary) return 0;
   const row = (lastStockSummary.byLocation || []).find(
-    (i) => i.location === source && i.product === product
+    (i) => sameLocation(i.location, source) && i.product === product
   );
   return Number(row?.quantity || 0);
 }
@@ -5769,7 +5781,7 @@ async function finalizeExistingProcessing(formData) {
   const conflict = cylinderConflictProduct(destLocation, product);
   if (conflict) {
     const ok = window.confirm(
-      `Atenție! Pui ${product} în ${destLocation}, dar acolo este deja ${conflict}.\nUn cilindru ar trebui să aibă un singur produs. Continui?`
+      `Atenție! Pui ${product} în ${destLocation}, dar acolo este deja ${conflict}.\nO locație ar trebui să aibă un singur produs. Continui?`
     );
     if (!ok) {
       const e = new Error("Finalizare anulată — cilindru cu alt produs.");

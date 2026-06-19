@@ -2404,6 +2404,16 @@ dialog.billing-dialog .form-actions { display: flex; gap: 12px; margin-top: 16px
   border-color: var(--danger);
   box-shadow: inset 0 0 0 1px rgba(181, 62, 34, 0.35), 0 0 0 1px rgba(181, 62, 34, 0.12);
 }
+.silo-card.is-over-ring {
+  border-color: var(--danger);
+  box-shadow: inset 0 0 0 2px rgba(181, 62, 34, 0.55), 0 0 0 2px rgba(181, 62, 34, 0.18);
+}
+.silo-stored-pct.is-over { color: var(--danger); }
+.silo-over {
+  color: var(--danger);
+  font-weight: 800;
+  font-size: 11px;
+}
 
 /* Bara de navigare jos pe telefon (operator) + flash rând nou */
 .bottom-nav { display: none; }
