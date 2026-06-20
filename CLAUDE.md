@@ -64,8 +64,18 @@ npm run dev          # aplicația WEB pe http://localhost:3000
 
 ## Deploy
 - **Push pe `main` → Vercel publică automat** pe agroprofit-plus.vercel.app (integrare Git activă).
-- Lucrează pe o **ramură separată**, testează pe preview, apoi fă merge în `main`.
+- Lucrează pe o **ramură separată** (implicit `dev`), testează pe preview, apoi fă merge în `main`.
 - NU comite `.env`.
+
+## 🤖 Auto-commit (OBLIGATORIU, automat)
+După ORICE modificare de cod, codul se **comite și se face push automat** pe ramura de lucru curentă —
+printr-un hook PostToolUse (`.claude/hooks/auto-commit.sh`). Scop: istoric 100% + deploy de **PREVIEW** pe Vercel.
+- **NU se operează niciodată pe `main`.** Hook-ul refuză `main`/detached HEAD ca să nu declanșeze deploy în
+  PRODUCȚIE peste date reale. Lucrează mereu pe `dev` (`git checkout dev`) — altfel auto-commit-ul stă oprit.
+- Fiecare modificare → un commit `auto: modificare cod (timestamp)` + `git push origin <ramură>` → Vercel preview.
+- Mesajul hook-ului (additionalContext) confirmă „commit + push OK" sau semnalează dacă push-ul a eșuat.
+- Promovarea în producție (merge `dev` → `main`) rămâne **manuală și deliberată**, doar după ce `npm test` trece
+  și agenții de verificare nu au lăsat Critical/High. Nu o face fără decizia omului.
 
 ## Înainte să spui „gata"
 1. `npm test` trece.
