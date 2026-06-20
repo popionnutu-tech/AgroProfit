@@ -25,8 +25,8 @@ JSON
   exit 0
 fi
 
-# nimic de comis?
-if git diff --quiet 2>/dev/null && git diff --cached --quiet 2>/dev/null; then
+# nimic de comis? (porcelain prinde si fisierele noi/untracked)
+if [ -z "$(git status --porcelain 2>/dev/null)" ]; then
   exit 0
 fi
 
