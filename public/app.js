@@ -513,6 +513,7 @@ function photosMini(photos) {
 
 setupPhotoField("receipt-photo-brut", "receipt-photo-brut-preview", "brut");
 setupPhotoField("receipt-photo-masina", "receipt-photo-masina-preview", "masina");
+setupPhotoField("receipt-photo-neto", "receipt-photo-neto-preview", "neto");
 setupPhotoField("delivery-photo-brut", "delivery-photo-brut-preview", "brut");
 setupPhotoField("delivery-photo-neto", "delivery-photo-neto-preview", "neto");
 setupPhotoField("delivery-photo-masina", "delivery-photo-masina-preview", "masina");
@@ -4093,7 +4094,7 @@ async function createReceipt(formData) {
     impurity: formData.get("impurity") || String(selectedProduct?.impurityNorm ?? 0),
     vehicle: formData.get("vehicle"),
     note: formData.get("note"),
-    photos: gatherPhotos("receipt-photo-brut", "receipt-photo-masina"),
+    photos: gatherPhotos("receipt-photo-brut", "receipt-photo-neto", "receipt-photo-masina"),
     locationId: formData.get("locationId"),
     location: location?.name || "",
     receivedBy: receiver?.name || currentSessionUser?.name || "",
@@ -4139,7 +4140,7 @@ async function createReceipt(formData) {
     ];
     renderReceipts(receiptsCache);
   }
-  ["receipt-photo-brut", "receipt-photo-masina"].forEach((id) => resetPhotoField(id));
+  ["receipt-photo-brut", "receipt-photo-neto", "receipt-photo-masina"].forEach((id) => resetPhotoField(id));
 }
 
 function validateReceiptForm(formData) {
