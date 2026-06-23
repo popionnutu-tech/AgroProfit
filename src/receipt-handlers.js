@@ -313,6 +313,7 @@ async function completeWeighingHandler(req, res, id) {
       netWeight: netWeightKg,
       quantity: quantityTons,
       ...estimate,
+      photos: body.photos,
       changedBy: getActorLabel(req)
     });
     return sendJson(res, 200, updated);

@@ -585,7 +585,7 @@ function sanitizePhotos(value) {
     if (!isSafeStoredPath(p)) continue;
     out.push({
       path: p,
-      kind: ["cantar", "masina", "altul"].includes(raw.kind) ? raw.kind : "altul",
+      kind: ["brut", "neto", "masina", "altul"].includes(raw.kind) ? raw.kind : "altul",
       uploadedAt: typeof raw.uploadedAt === "string" ? raw.uploadedAt : new Date().toISOString()
     });
     if (out.length >= 12) break;
@@ -1566,6 +1566,12 @@ async function completeReceiptWeighing(id, payload = {}) {
       receipt[field] = sanitizeNumber(payload[field]);
     }
   }
+  // A doua cantarire poate aduce poza "neto" — o adaugam la pozele existente (brut/masina).
+  if (payload.photos !== undefined) {
+    const existing = Array.isArray(receipt.photos) ? receipt.photos : [];
+    receipt.photos = sanitizePhotos([...existing, ...(Array.isArray(payload.photos) ? payload.photos : [])]);
+  }
+
   receipt.status = "Draft";
   receipt.availableQuantity = getReceiptBaseQuantity(receipt);
   receipt.updatedAt = new Date().toISOString();

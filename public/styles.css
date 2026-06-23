@@ -799,6 +799,29 @@ button {
   display: block;
   margin-top: 6px;
 }
+.photo-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 4px;
+}
+.photo-slot-title {
+  font-weight: 700;
+  font-size: 0.86rem;
+  color: var(--ink-soft);
+}
+.complete-weighing-form {
+  margin: 12px 14px 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.55);
+}
+.complete-weighing-form h3 {
+  margin: 0 0 12px;
+  font-size: 1rem;
+  color: var(--accent-deep);
+}
 .photo-thumbs {
   display: flex;
   flex-wrap: wrap;

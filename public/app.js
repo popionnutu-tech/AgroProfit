@@ -15,6 +15,10 @@ const bodyEl = document.getElementById("receipts-body");
 const pendingWeighingPanel = document.getElementById("pending-weighing-panel");
 const pendingWeighingBody = document.getElementById("pending-weighing-body");
 const pendingWeighingCount = document.getElementById("pending-weighing-count");
+const completeWeighingForm = document.getElementById("complete-weighing-form");
+const completeWeighingTitle = document.getElementById("complete-weighing-title");
+const completeTareInput = document.getElementById("complete-tare-input");
+const completeWeighingCancel = document.getElementById("complete-weighing-cancel");
 const closeDayButton = document.getElementById("close-day-button");
 const closeDayStatus = document.getElementById("close-day-status");
 const openingDocumentFormEl = document.getElementById("opening-document-form");
@@ -446,11 +450,11 @@ function renderPhotoThumbs(previewEl, paths) {
 }
 
 // Leaga un input foto de o zona de previzualizare; pastreaza caile in photoFields[inputId].paths.
-function setupPhotoField(inputId, previewId) {
+function setupPhotoField(inputId, previewId, kind) {
   const input = document.getElementById(inputId);
   const preview = document.getElementById(previewId);
   if (!input || !preview) return null;
-  const state = { paths: [], preview };
+  const state = { paths: [], preview, kind: kind || "altul" };
   photoFields[inputId] = state;
   input.addEventListener("change", async () => {
     if (!input.files || !input.files.length) return;
@@ -477,7 +481,16 @@ function setupPhotoField(inputId, previewId) {
 
 function photoPathsFor(inputId) {
   const state = photoFields[inputId];
-  return state ? state.paths.slice() : [];
+  if (!state) return [];
+  return state.paths.map((p) => ({
+    path: typeof p === "string" ? p : (p && p.path) || "",
+    kind: state.kind
+  }));
+}
+
+// Aduna pozele din mai multe sloturi (fiecare cu kind-ul lui: brut/neto/masina).
+function gatherPhotos(...inputIds) {
+  return inputIds.flatMap((id) => photoPathsFor(id));
 }
 
 function resetPhotoField(inputId) {
@@ -498,8 +511,12 @@ function photosMini(photos) {
   return ` <span class="photos-mini">${thumbs}${extra}</span>`;
 }
 
-setupPhotoField("receipt-photos-input", "receipt-photos-preview");
-setupPhotoField("delivery-photos-input", "delivery-photos-preview");
+setupPhotoField("receipt-photo-brut", "receipt-photo-brut-preview", "brut");
+setupPhotoField("receipt-photo-masina", "receipt-photo-masina-preview", "masina");
+setupPhotoField("delivery-photo-brut", "delivery-photo-brut-preview", "brut");
+setupPhotoField("delivery-photo-neto", "delivery-photo-neto-preview", "neto");
+setupPhotoField("delivery-photo-masina", "delivery-photo-masina-preview", "masina");
+setupPhotoField("complete-neto-photo", "complete-neto-photo-preview", "neto");
 
 async function loadSession() {
   const response = await nativeFetch("/api/auth/me", {
@@ -1465,13 +1482,80 @@ async function handleCompleteWeighing(id, grossWeight) {
   }
 }
 
+// A doua cantarire: formular mic (tara + poza neto) in loc de window.prompt.
+let completeWeighingCtx = null;
+function openCompleteWeighing(id, grossWeight) {
+  if (!completeWeighingForm) {
+    return handleCompleteWeighing(id, grossWeight);
+  }
+  completeWeighingCtx = { id, gross: Number(grossWeight || 0) };
+  if (completeWeighingTitle) {
+    completeWeighingTitle.textContent = `Recepție #${id} · brut ${formatNumber(Number(grossWeight || 0))} kg`;
+  }
+  if (completeTareInput) completeTareInput.value = "";
+  resetPhotoField("complete-neto-photo");
+  completeWeighingForm.hidden = false;
+  if (completeTareInput) completeTareInput.focus();
+}
+function closeCompleteWeighing() {
+  completeWeighingCtx = null;
+  if (completeWeighingForm) completeWeighingForm.hidden = true;
+  resetPhotoField("complete-neto-photo");
+}
+async function submitCompleteWeighing() {
+  if (!completeWeighingCtx) return;
+  const { id, gross } = completeWeighingCtx;
+  const tareWeight = Number(String(completeTareInput ? completeTareInput.value : "").replace(",", ".").trim());
+  if (!(tareWeight > 0)) {
+    window.alert("Tara trebuie să fie un număr mai mare ca zero.");
+    return;
+  }
+  if (tareWeight >= gross) {
+    window.alert("Tara trebuie să fie mai mică decât masa brută.");
+    return;
+  }
+  try {
+    const response = await fetch(`/api/receipts/${id}/complete-weighing`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tareWeight, photos: gatherPhotos("complete-neto-photo") })
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || "Nu am putut finaliza cântărirea.");
+    }
+    const updated = await response.json().catch(() => null);
+    if (updated && updated.id) {
+      receiptsCache = (Array.isArray(receiptsCache) ? receiptsCache : []).map(
+        (r) => (r.id === updated.id ? updated : r)
+      );
+      renderReceipts(receiptsCache);
+      if (typeof renderPendingWeighing === "function") renderPendingWeighing(receiptsCache);
+    }
+    await Promise.all([loadStocks(), loadDailyReport()]);
+    closeCompleteWeighing();
+  } catch (error) {
+    window.alert(error.message);
+  }
+}
+
+if (completeWeighingForm) {
+  completeWeighingForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    submitCompleteWeighing();
+  });
+}
+if (completeWeighingCancel) {
+  completeWeighingCancel.addEventListener("click", () => closeCompleteWeighing());
+}
+
 if (pendingWeighingBody) {
   pendingWeighingBody.addEventListener("click", (event) => {
     const btn = event.target.closest('[data-action="complete-weighing"]');
     if (!btn) {
       return;
     }
-    handleCompleteWeighing(btn.dataset.id, Number(btn.dataset.gross || 0));
+    openCompleteWeighing(btn.dataset.id, Number(btn.dataset.gross || 0));
   });
 }
 
@@ -4009,7 +4093,7 @@ async function createReceipt(formData) {
     impurity: formData.get("impurity") || String(selectedProduct?.impurityNorm ?? 0),
     vehicle: formData.get("vehicle"),
     note: formData.get("note"),
-    photos: photoPathsFor("receipt-photos-input"),
+    photos: gatherPhotos("receipt-photo-brut", "receipt-photo-masina"),
     locationId: formData.get("locationId"),
     location: location?.name || "",
     receivedBy: receiver?.name || currentSessionUser?.name || "",
@@ -4055,7 +4139,7 @@ async function createReceipt(formData) {
     ];
     renderReceipts(receiptsCache);
   }
-  resetPhotoField("receipt-photos-input");
+  ["receipt-photo-brut", "receipt-photo-masina"].forEach((id) => resetPhotoField(id));
 }
 
 function validateReceiptForm(formData) {
@@ -4708,7 +4792,7 @@ async function createDelivery(formData) {
     payload.deliveredQuantity = String(Number(payload.deliveredQuantity || 0) / 1000);
   }
   payload.enteredUnit = "kg";
-  payload.photos = photoPathsFor("delivery-photos-input");
+  payload.photos = gatherPhotos("delivery-photo-brut", "delivery-photo-neto", "delivery-photo-masina");
   const response = await fetch("/api/deliveries", {
     method: "POST",
     headers: {
@@ -4721,7 +4805,7 @@ async function createDelivery(formData) {
     const error = await response.json();
     throw new Error(error.error || "Eroare la salvarea livrarii.");
   }
-  resetPhotoField("delivery-photos-input");
+  ["delivery-photo-brut", "delivery-photo-neto", "delivery-photo-masina"].forEach((id) => resetPhotoField(id));
 }
 
 async function createComplaint(formData) {
