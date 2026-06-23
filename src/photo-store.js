@@ -34,6 +34,25 @@ function isSafeStoredPath(p) {
   return typeof p === "string" && SAFE_PATH_RE.test(p);
 }
 
+// Detecteaza tipul REAL al imaginii din primii octeti (magic bytes) — nu ne bazam
+// pe Content-Type-ul declarat de client, care poate fi falsificat.
+function sniffImageMime(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 12) return null;
+  const b = buffer;
+  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return "image/jpeg";
+  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return "image/png";
+  if (
+    b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 &&
+    b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50
+  ) return "image/webp";
+  // HEIC/HEIF: box "ftyp" la offset 4, brand heic/heix/heif/hevc/mif1 la 8..12
+  if (b[4] === 0x66 && b[5] === 0x74 && b[6] === 0x79 && b[7] === 0x70) {
+    const brand = b.toString("ascii", 8, 12).toLowerCase();
+    if (/heic|heix|hevc|heif|mif1|msf1/.test(brand)) return "image/heic";
+  }
+  return null;
+}
+
 let supabaseClient = null;
 let bucketReady = false;
 
@@ -66,11 +85,12 @@ async function savePhoto(buffer, mime) {
   if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
     throw new Error("Fisier gol.");
   }
-  const normMime = String(mime || "").toLowerCase();
-  if (!isImageMime(normMime)) {
-    throw new Error("Se accepta doar imagini.");
+  // Validam CONTINUTUL real (magic bytes), nu Content-Type-ul declarat de client.
+  const realMime = sniffImageMime(buffer);
+  if (!realMime) {
+    throw new Error("Fisierul nu este o imagine valida.");
   }
-  const ext = MIME_EXT[normMime];
+  const ext = MIME_EXT[realMime];
   const id = crypto.randomUUID();
   const shard = id.slice(0, 2);
   const storedPath = `${shard}/${id}.${ext}`;
@@ -80,8 +100,11 @@ async function savePhoto(buffer, mime) {
     await ensureBucket(client);
     const { error } = await client.storage
       .from(BUCKET)
-      .upload(storedPath, buffer, { contentType: normMime, upsert: false });
-    if (error) throw new Error("Incarcare esuata: " + error.message);
+      .upload(storedPath, buffer, { contentType: realMime, upsert: false });
+    if (error) {
+      console.error("Supabase Storage upload:", error.message);
+      throw new Error("Nu am putut incarca poza.");
+    }
   } else {
     const dir = path.join(localDir, shard);
     fs.mkdirSync(dir, { recursive: true });
