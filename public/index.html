@@ -525,6 +525,13 @@
               </label>
             </details>
 
+            <label class="photo-field">
+              Poze (cântar + nr. mașină) — dovadă
+              <input type="file" id="receipt-photos-input" accept="image/*" multiple />
+              <span class="field-hint">Opțional. Se urcă automat și rămân ca dovadă informativă.</span>
+              <div class="photo-thumbs" id="receipt-photos-preview"></div>
+            </label>
+
             <section class="estimate-panel" id="receipt-estimate">
               <div class="estimate-card">
                 <span>Norma umiditate</span>
@@ -1181,6 +1188,13 @@
                 <strong id="delivery-status">Nelivrat</strong>
               </div>
             </section>
+
+            <label class="photo-field">
+              Poze (cântar + nr. mașină) — dovadă
+              <input type="file" id="delivery-photos-input" accept="image/*" multiple />
+              <span class="field-hint">Opțional. Se urcă automat și rămân ca dovadă informativă.</span>
+              <div class="photo-thumbs" id="delivery-photos-preview"></div>
+            </label>
 
             <div class="form-actions">
               <button type="submit">Salveaza</button>
