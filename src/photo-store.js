@@ -7,8 +7,12 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 
-const DRIVER = (process.env.STORAGE_DRIVER || "local").toLowerCase();
-const USE_SUPABASE = DRIVER === "supabase";
+// Citit la TIMPUL APELULUI (nu la incarcarea modulului) si cu .trim() — la fel ca
+// local-storage.js:19 — fiindca pe Vercel STORAGE_DRIVER poate avea spatii/newline,
+// altfel photo-store ar cadea pe disc local (read-only pe serverless) -> ENOENT.
+function useSupabase() {
+  return (process.env.STORAGE_DRIVER || "").trim().toLowerCase() === "supabase";
+}
 const BUCKET = (process.env.SUPABASE_PHOTO_BUCKET || "agro-photos").trim();
 const localDir = path.join(process.cwd(), ".runtime-data", "photos");
 const SIGNED_URL_TTL = 3600; // secunde
@@ -95,7 +99,7 @@ async function savePhoto(buffer, mime) {
   const shard = id.slice(0, 2);
   const storedPath = `${shard}/${id}.${ext}`;
 
-  if (USE_SUPABASE) {
+  if (useSupabase()) {
     const client = getClient();
     await ensureBucket(client);
     const { error } = await client.storage
@@ -120,7 +124,7 @@ async function resolvePhoto(storedPath) {
   if (!isSafeStoredPath(storedPath)) {
     throw new Error("Cale invalida.");
   }
-  if (USE_SUPABASE) {
+  if (useSupabase()) {
     const client = getClient();
     const { data, error } = await client.storage
       .from(BUCKET)
