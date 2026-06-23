@@ -4020,6 +4020,7 @@ function runMigrationIfNeeded() {
 }
 
 module.exports = {
+  defaultReceiptsState,
   initStorage,
   flushPendingWrites,
   reloadFromKv,
