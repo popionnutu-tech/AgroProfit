@@ -1435,6 +1435,7 @@ function renderPendingWeighing(receipts) {
           <td>${formatNumber(Number(item.grossWeight || 0))} kg</td>
           <td>
             <button type="button" class="cell-btn cell-btn-primary" data-action="complete-weighing" data-id="${item.id}" data-gross="${Number(item.grossWeight || 0)}">Completează tara</button>
+            <button type="button" class="cell-btn cell-btn-details" data-action="receipt-details" data-id="${item.id}">Detalii</button>
           </td>
         </tr>
       `
