@@ -6,7 +6,47 @@
 
 ---
 
-## 1. Ce poate face Managerul (pe scurt)
+## 1. Autentificare — cum intri în aplicație
+
+### A) Din browser (web)
+
+1. Deschide adresa: **https://agroprofit-plus.vercel.app**
+2. Pe ecranul **„Intrare în sistem"** completezi:
+   - **Utilizator** — numele de utilizator primit de la administrator
+   - **Parola** — parola primită de la administrator
+3. Apeși **Autentificare**.
+
+> La prima logare, parola îți este dată de **administrator**. Se recomandă să o schimbi imediat (vezi mai jos).
+
+### B) Din Telegram (Mini App)
+
+1. Deschide bot-ul: **@agroprofitmdbot** (link: https://t.me/agroprofitmdbot)
+2. Apeși **START**, apoi butonul de deschidere a aplicației (**Open App / Deschide**).
+3. **Prima dată** introduci **Utilizator** și **Parolă** (aceleași ca pe web).
+4. După prima logare, **intrarea este automată** prin contul tău de Telegram — nu mai ceri parola la fiecare accesare.
+
+### C) Schimbarea parolei
+
+1. După ce te-ai logat (pe web), apeși **„Schimbă parola"** (jos, în bara laterală stânga).
+2. Completezi: **Parola curentă**, **Parola nouă**, **Confirmă parola nouă**.
+3. Apeși **Salvează parola**.
+
+**Reguli pentru parola nouă:**
+- minim **10 caractere**;
+- cel puțin **o literă și o cifră**;
+- nu se acceptă parole comune (ex. „parola", „123456", „manager" etc.).
+
+### D) Reguli de securitate
+
+- După **5 încercări greșite**, contul se **blochează 15 minute**. Aștepți sau ceri administratorului deblocarea manuală.
+- Sesiunea durează maxim **12 ore** și se închide automat după **30 de minute** de inactivitate.
+- **Ieșire din cont:** butonul **„Ieșire"** (jos în bara laterală pe web / secțiunea Cont în Telegram).
+
+> Dacă ai uitat parola, **administratorul** o resetează — nu există recuperare automată.
+
+---
+
+## 2. Ce poate face Managerul (pe scurt)
 
 Managerul este responsabilul operațional al depozitului. Are acces la **operațiuni, finanțe, rapoarte și audit**. Concret:
 
@@ -22,7 +62,7 @@ Managerul este responsabilul operațional al depozitului. Are acces la **operaț
 
 ---
 
-## 2. Meniul (bara laterală)
+## 3. Meniul (bara laterală)
 
 | Meniu | Ce faci aici |
 |-------|--------------|
@@ -40,7 +80,7 @@ Managerul este responsabilul operațional al depozitului. Are acces la **operaț
 
 ---
 
-## 3. Recepții (intrări marfă)
+## 4. Recepții (intrări marfă)
 
 **Fluxul unei recepții:**
 1. Operatorul cântărește **brut** (camion + marfă) → recepția intră în „În descărcare".
@@ -57,7 +97,7 @@ Managerul este responsabilul operațional al depozitului. Are acces la **operaț
 
 ---
 
-## 4. Procesare (uscare / curățare)
+## 5. Procesare (uscare / curățare)
 
 1. Creezi o procesare: selectezi recepția/recepțiile, setezi parametrii (uscare, curățare %).
 2. Procesarea rulează pe **cilindri** (stoc intern în tone).
@@ -69,7 +109,7 @@ Managerul este responsabilul operațional al depozitului. Are acces la **operaț
 
 ---
 
-## 5. Stoc și Transfer
+## 6. Stoc și Transfer
 
 - **Stoc** (doar citire): stoc neprocesat pe produs, stoc pe cilindri, stoc pe locații; raport de stoc pe perioadă (sold inițial + recepții + procesare − livrări = sold final).
 - **Transfer:** muți produs dintr-un cilindru în altul; urmărirea locației se actualizează în timp real.
@@ -78,7 +118,7 @@ Managerul este responsabilul operațional al depozitului. Are acces la **operaț
 
 ---
 
-## 6. Livrări (ieșiri marfă)
+## 7. Livrări (ieșiri marfă)
 
 **Fluxul unei livrări:**
 1. **Creezi livrarea:** selectezi produs/client, introduci greutatea brută și tara.
@@ -102,7 +142,7 @@ Managerul este responsabilul operațional al depozitului. Are acces la **operaț
 
 ---
 
-## 7. Financiar (plăți și încasări)
+## 8. Financiar (plăți și încasări)
 
 Trei tipuri de operațiuni:
 
@@ -117,7 +157,7 @@ Trei tipuri de operațiuni:
 
 ---
 
-## 8. Reclamații
+## 9. Reclamații
 
 1. Înregistrezi reclamația: o legi de o **livrare**, alegi **tipul** (abatere calitate / lipsă greutate / eroare facturare) și suma dedusă.
 2. Stări: Deschisă → Acceptată / Respinsă → Închisă.
@@ -127,7 +167,7 @@ Trei tipuri de operațiuni:
 
 ---
 
-## 9. Rapoarte și Dashboard
+## 10. Rapoarte și Dashboard
 
 - **Acasă (dashboard):** recepții, cantitate procesată, randament %, livrări, plăți, încasări, stoc, reclamații; carduri financiare (total plătit/încasat azi); avertismente (recepții fără preț, abateri de calitate, livrări fără factură).
 - **Raport zilnic (Rapoarte):** filtru pe interval de date; sumar pentru recepții, procesări, livrări, tranzacții, reclamații; total cantități, prețuri, plăți, încasări, randament, cash-flow.
@@ -135,7 +175,7 @@ Trei tipuri de operațiuni:
 
 ---
 
-## 10. Audit
+## 11. Audit
 
 - Vezi **toate modificările** la documente: dată/oră, utilizator, tip entitate, acțiune (creare, editare, închidere, redeschidere) și detaliile schimbării.
 - Filtrare pe tip de entitate (recepție, livrare, procesare, tranzacție, reclamație).
@@ -145,14 +185,14 @@ Trei tipuri de operațiuni:
 
 ---
 
-## 11. Acces din Telegram (Mini App)
+## 12. Acces din Telegram (Mini App)
 
-Managerul are și acces din **Telegram Mini App** (`/m/`) cu un subset de funcții: Recepții (citire + creare), Procesare (citire), Livrări (citire), Reclamații (citire), Financiar (vizualizare + înregistrare), Rapoarte, Stoc, Audit.
+Managerul are acces din **Telegram Mini App** (`@agroprofitmdbot`) cu un subset de funcții: Recepții (citire + creare), Procesare (citire), Livrări (citire), Reclamații (citire), Financiar (vizualizare + înregistrare), Rapoarte, Stoc, Audit.
 *Nu* sunt disponibile în Telegram: ajustările de stoc/factură ale reclamațiilor, administrarea utilizatorilor, setările de sistem.
 
 ---
 
-## 12. Reguli de business cheie (de reținut)
+## 13. Reguli de business cheie (de reținut)
 
 1. Stocul intern e în **tone**; formularele acceptă **kg**.
 2. Facturare dublă: **MDL** (preț/kg) vs **valută** (preț/tonă × curs).
