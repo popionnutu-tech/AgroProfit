@@ -1705,7 +1705,7 @@ function renderReceiptTotals(rows) {
     : "";
   receiptsFootEl.innerHTML = `
     <tr class="totals-row">
-      <td colspan="15">TOTAL (${rows.length} recepții) &nbsp;·&nbsp; Net: <b>${formatNumber(totalNet)} t (${formatNumber(totalNet * 1000)} kg)</b>${finPart}<br>${perProduct}</td>
+      <td colspan="16">TOTAL (${rows.length} recepții) &nbsp;·&nbsp; Net: <b>${formatNumber(totalNet)} t (${formatNumber(totalNet * 1000)} kg)</b>${finPart}<br>${perProduct}</td>
     </tr>
   `;
 }
