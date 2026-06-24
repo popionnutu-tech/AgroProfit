@@ -795,6 +795,84 @@ button {
   margin-bottom: 10px;
 }
 
+.photo-field input[type="file"] {
+  display: block;
+  margin-top: 6px;
+}
+.photo-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 4px;
+}
+.photo-slot-title {
+  font-weight: 700;
+  font-size: 0.86rem;
+  color: var(--ink-soft);
+}
+.complete-weighing-form {
+  margin: 12px 14px 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.55);
+}
+.complete-weighing-form h3 {
+  margin: 0 0 12px;
+  font-size: 1rem;
+  color: var(--accent-deep);
+}
+.photo-thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.photo-thumb {
+  position: relative;
+  display: inline-block;
+}
+.photo-thumb img {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid rgba(17, 33, 26, 0.14);
+}
+.photo-thumb-x {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  border: 0;
+  background: #b3261e;
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.8rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+.photos-mini {
+  display: inline-flex;
+  gap: 3px;
+  vertical-align: middle;
+}
+.photo-mini img {
+  width: 22px;
+  height: 22px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid rgba(17, 33, 26, 0.14);
+}
+.photo-more {
+  font-size: 0.7rem;
+  color: #5a5a5a;
+  align-self: center;
+}
+
 .proc-inlucru-actions {
   display: flex;
   flex-wrap: wrap;

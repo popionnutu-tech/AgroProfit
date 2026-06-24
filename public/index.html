@@ -525,6 +525,25 @@
               </label>
             </details>
 
+            <div class="photo-fields">
+              <label class="photo-field">
+                <span class="photo-slot-title">📷 Poză masă brută (cântar)</span>
+                <input type="file" id="receipt-photo-brut" accept="image/*" capture="environment" />
+                <div class="photo-thumbs" id="receipt-photo-brut-preview"></div>
+              </label>
+              <label class="photo-field">
+                <span class="photo-slot-title">📷 Poză masă netă (cântar)</span>
+                <input type="file" id="receipt-photo-neto" accept="image/*" capture="environment" />
+                <div class="photo-thumbs" id="receipt-photo-neto-preview"></div>
+              </label>
+              <label class="photo-field">
+                <span class="photo-slot-title">📷 Poză nr. mașină <span class="field-hint">(opțional)</span></span>
+                <input type="file" id="receipt-photo-masina" accept="image/*" capture="environment" />
+                <div class="photo-thumbs" id="receipt-photo-masina-preview"></div>
+              </label>
+              <span class="field-hint">Dacă pui tara acum (o singură cântărire), fă și poza la masă netă aici. Dacă lași tara goală, poza netă o adaugi la a doua cântărire.</span>
+            </div>
+
             <section class="estimate-panel" id="receipt-estimate">
               <div class="estimate-card">
                 <span>Norma umiditate</span>
@@ -577,6 +596,25 @@
                 <tbody id="pending-weighing-body"></tbody>
               </table>
             </div>
+
+            <form class="complete-weighing-form" id="complete-weighing-form" hidden>
+              <h3 id="complete-weighing-title">Completează tara</h3>
+              <div class="split">
+                <label>
+                  Tara (kg) — camion gol
+                  <input type="number" id="complete-tare-input" min="0" step="1" />
+                </label>
+                <label class="photo-field">
+                  <span class="photo-slot-title">📷 Poză masă netă (cântar)</span>
+                  <input type="file" id="complete-neto-photo" accept="image/*" capture="environment" />
+                  <div class="photo-thumbs" id="complete-neto-photo-preview"></div>
+                </label>
+              </div>
+              <div class="form-actions">
+                <button type="submit">Confirmă</button>
+                <button type="button" id="complete-weighing-cancel" class="cell-btn">Anulează</button>
+              </div>
+            </form>
           </section>
 
           <div class="eod-bar">
@@ -1181,6 +1219,24 @@
                 <strong id="delivery-status">Nelivrat</strong>
               </div>
             </section>
+
+            <div class="photo-fields">
+              <label class="photo-field">
+                <span class="photo-slot-title">📷 Poză masă brută (cântar)</span>
+                <input type="file" id="delivery-photo-brut" accept="image/*" capture="environment" />
+                <div class="photo-thumbs" id="delivery-photo-brut-preview"></div>
+              </label>
+              <label class="photo-field">
+                <span class="photo-slot-title">📷 Poză masă netă (cântar)</span>
+                <input type="file" id="delivery-photo-neto" accept="image/*" capture="environment" />
+                <div class="photo-thumbs" id="delivery-photo-neto-preview"></div>
+              </label>
+              <label class="photo-field">
+                <span class="photo-slot-title">📷 Poză nr. mașină <span class="field-hint">(opțional)</span></span>
+                <input type="file" id="delivery-photo-masina" accept="image/*" capture="environment" />
+                <div class="photo-thumbs" id="delivery-photo-masina-preview"></div>
+              </label>
+            </div>
 
             <div class="form-actions">
               <button type="submit">Salveaza</button>

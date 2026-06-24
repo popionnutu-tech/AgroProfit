@@ -9,6 +9,7 @@ const {
 } = require("./permissions");
 const { backupRuntimeData } = require("./runtime-backup");
 const { writeJsonAtomic } = require("./atomic-write");
+const { isSafeStoredPath } = require("./photo-store");
 
 const dataDir = path.join(process.cwd(), ".runtime-data");
 const legacyDataDir = path.join(process.cwd(), "data");
@@ -570,6 +571,26 @@ function sanitizeNumber(value) {
 
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+// Pastreaza doar referintele valide de poze (cai sigure generate de photo-store).
+// Accepta string (cale) sau { path, kind }. Max 12 poze / inregistrare.
+function sanitizePhotos(value) {
+  if (!Array.isArray(value)) return [];
+  const out = [];
+  for (const item of value) {
+    const raw = typeof item === "string" ? { path: item } : (item && typeof item === "object" ? item : null);
+    if (!raw) continue;
+    const p = String(raw.path || "");
+    if (!isSafeStoredPath(p)) continue;
+    out.push({
+      path: p,
+      kind: ["brut", "neto", "masina", "altul"].includes(raw.kind) ? raw.kind : "altul",
+      uploadedAt: typeof raw.uploadedAt === "string" ? raw.uploadedAt : new Date().toISOString()
+    });
+    if (out.length >= 12) break;
+  }
+  return out;
 }
 
 // Generate a collision-proof next id based on the highest existing id,
@@ -1485,6 +1506,7 @@ async function createReceipt(payload) {
     preliminaryPayableAmount: sanitizeNumber(payload.preliminaryPayableAmount),
     vehicle: payload.vehicle || "",
     note: payload.note || "",
+    photos: sanitizePhotos(payload.photos),
     source: payload.source || "dashboard",
     status: payload.status || "Draft",
     receivedBy: payload.receivedBy || "",
@@ -1544,6 +1566,12 @@ async function completeReceiptWeighing(id, payload = {}) {
       receipt[field] = sanitizeNumber(payload[field]);
     }
   }
+  // A doua cantarire poate aduce poza "neto" — o adaugam la pozele existente (brut/masina).
+  if (payload.photos !== undefined) {
+    const existing = Array.isArray(receipt.photos) ? receipt.photos : [];
+    receipt.photos = sanitizePhotos([...existing, ...(Array.isArray(payload.photos) ? payload.photos : [])]);
+  }
+
   receipt.status = "Draft";
   receipt.availableQuantity = getReceiptBaseQuantity(receipt);
   receipt.updatedAt = new Date().toISOString();
@@ -2395,6 +2423,7 @@ async function createDelivery(payload) {
     enteredUnit: payload.enteredUnit === "kg" ? "kg" : "tone",
     invoiceNumber: payload.invoiceNumber || "",
     note: payload.note || "",
+    photos: sanitizePhotos(payload.photos),
     status: "Livrat",
     confirmedAt: new Date().toISOString(),
     deliveredAt: new Date().toISOString(),
@@ -2627,6 +2656,9 @@ async function updateDelivery(id, payload = {}) {
 
   if (payload.note !== undefined) {
     delivery.note = String(payload.note || "").trim();
+  }
+  if (payload.photos !== undefined) {
+    delivery.photos = sanitizePhotos(payload.photos);
   }
   if (payload.invoiceNumber !== undefined) {
     delivery.invoiceNumber = String(payload.invoiceNumber || "").trim();
@@ -3988,6 +4020,7 @@ function runMigrationIfNeeded() {
 }
 
 module.exports = {
+  defaultReceiptsState,
   initStorage,
   flushPendingWrites,
   reloadFromKv,

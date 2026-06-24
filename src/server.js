@@ -2,6 +2,8 @@ require("dotenv").config();
 
 const express = require("express");
 const path = require("path");
+const multer = require("multer");
+const photoStore = require("./photo-store");
 const { startBot } = require("./bot");
 const {
   getCriticalAlertsStatusHandler,
@@ -120,6 +122,64 @@ app.get("/api/auth/me", meHandler);
 app.post("/api/auth/change-password", requireAuth, changePasswordHandler);
 
 app.use("/api", requireAuth);
+
+// --- Fotografii (dovada informativa la receptii/livrari) ---
+// Upload multipart separat de express.json; doar imagini, max 8MB/poza, max 8 poze.
+const photoUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 8 * 1024 * 1024, files: 8 },
+  fileFilter: (req, file, cb) => cb(null, photoStore.isImageMime(file.mimetype))
+});
+
+app.post(
+  "/api/uploads",
+  requireRoles(["operator", "manager", "admin"]),
+  (req, res, next) => {
+    photoUpload.array("photos", 8)(req, res, (err) => {
+      if (err) {
+        const msg =
+          err.code === "LIMIT_FILE_SIZE"
+            ? "Imagine prea mare (max 8MB)."
+            : err.code === "LIMIT_FILE_COUNT"
+              ? "Prea multe imagini (max 8)."
+              : "Incarcare esuata.";
+        return res.status(400).json({ error: msg });
+      }
+      next();
+    });
+  },
+  async (req, res) => {
+    try {
+      const files = Array.isArray(req.files) ? req.files : [];
+      if (!files.length) {
+        return res.status(400).json({ error: "Nicio imagine primita." });
+      }
+      const paths = [];
+      for (const file of files) {
+        paths.push(await photoStore.savePhoto(file.buffer, file.mimetype));
+      }
+      return res.status(201).json({ paths });
+    } catch (error) {
+      console.error("Upload poze esuat:", error.message);
+      return res.status(500).json({ error: error.message || "Incarcare esuata." });
+    }
+  }
+);
+
+// Servire poza (auth pe sesiune/Bearer). Supabase -> redirect la URL semnat; local -> fisier.
+app.get("/api/photos", async (req, res) => {
+  try {
+    const resolved = await photoStore.resolvePhoto(String(req.query.path || ""));
+    if (resolved.redirectUrl) {
+      res.setHeader("Cache-Control", "private, max-age=3000");
+      return res.redirect(302, resolved.redirectUrl);
+    }
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    return res.sendFile(resolved.filePath);
+  } catch (error) {
+    return res.status(400).json({ error: error.message || "Cale invalida." });
+  }
+});
 
 // Citire solduri inițiale: rolurile cu finanțe le văd în Achitări/Încasări.
 app.get(
