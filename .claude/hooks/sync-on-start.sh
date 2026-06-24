@@ -22,9 +22,11 @@ fi
 
 # fetch cu timeout daca exista (nu lasa sesiunea sa atarne pe retea proasta)
 TO=""
-command -v timeout  >/dev/null 2>&1 && TO="timeout 20"
-command -v gtimeout >/dev/null 2>&1 && TO="gtimeout 20"
-$TO git fetch origin --quiet 2>/dev/null
+command -v timeout  >/dev/null 2>&1 && TO="timeout 12"
+command -v gtimeout >/dev/null 2>&1 && TO="gtimeout 12"
+# http.lowSpeedTime intrerupe un fetch HTTPS blocat CHIAR DACA lipsesc `timeout`/`gtimeout`
+# (ex. macOS fara coreutils) — fara asta, pornirea sesiunii ar putea atarna pe retea proasta.
+$TO git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=15 fetch origin --quiet 2>/dev/null
 
 NOTE=""
 
