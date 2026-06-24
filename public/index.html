@@ -438,7 +438,13 @@
         </section>
 
         <section class="grid" data-view="receptii">
-          <form class="panel form-panel" id="receipt-form" data-access="receipt-write">
+          <div class="receipt-new-bar" data-access="receipt-write" style="grid-column: 1 / -1;">
+            <button type="button" id="receipt-new-toggle" class="receipt-new-btn" aria-expanded="false" aria-controls="receipt-form">
+              <span class="rnb-icon">＋</span> Recepție nouă
+            </button>
+            <span class="receipt-new-hint">Apasă pentru a deschide formularul de introducere.</span>
+          </div>
+          <form class="panel form-panel collapsed" id="receipt-form" data-access="receipt-write">
             <div class="panel-head">
               <h2>Receptie noua</h2>
               <p>Operatorul introduce rapid doar datele primare, restul ramane optional.</p>
