@@ -1398,6 +1398,7 @@ function renderReceipts(receipts) {
           <td class="col-fin">${formatDateShort(item.lastPaymentDate)}</td>
           <td class="col-fin">${payBadge}</td>
           <td>${statusCell}</td>
+          <td><button type="button" class="cell-btn cell-btn-details" data-action="receipt-details" data-id="${item.id}">Detalii</button></td>
           <td class="col-fin">${actionCell}</td>
         </tr>
       `;
