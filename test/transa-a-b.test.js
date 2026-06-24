@@ -20,6 +20,9 @@ async function seedReceipt(storage, overrides = {}) {
     provisionalNetQuantity: 100,
     finalNetQuantity: 100,
     preliminaryPayableAmount: 300000,
+    // Locatia sursa e obligatorie la livrare (regula stoc pe locatii/cilindri).
+    // O recepție reală are mereu „Locație inițială"; fixture-ul vechi o omitea.
+    location: "Siloz 1",
     createdBy: "test",
     ...overrides
   });
