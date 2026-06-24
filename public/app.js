@@ -5717,6 +5717,134 @@ bodyEl?.addEventListener("click", (event) => {
   prefillReceiptPayment(btn.dataset.achita);
 });
 
+// ----- Detalii recepție: vedere completă (date operator + observații + poze) -----
+const receiptDetailsDialog = document.getElementById("receipt-details-dialog");
+
+function rdRow(label, value) {
+  if (value === undefined || value === null || value === "" || value === "—" || value === "-") return "";
+  return `<div class="rd-row"><span class="rd-label">${label}</span><span class="rd-value">${value}</span></div>`;
+}
+
+function rdPhotoGroup(title, photos) {
+  if (!photos.length) return "";
+  const thumbs = photos
+    .map((p) => `<a href="${photoUrl(p)}" target="_blank" rel="noopener" class="rd-photo"><img src="${photoUrl(p)}" alt="${escapeComboHtml(title)}" loading="lazy" /></a>`)
+    .join("");
+  return `<div class="rd-photo-group"><span class="rd-photo-title">${title}</span><div class="rd-photo-row">${thumbs}</div></div>`;
+}
+
+function openReceiptDetails(id) {
+  if (!receiptDetailsDialog) return;
+  const item = receiptsCache.find((r) => String(r.id) === String(id));
+  if (!item) {
+    window.alert("Recepția nu a fost găsită.");
+    return;
+  }
+  const fin = canAccess("finance");
+  const titleEl = document.getElementById("receipt-details-title");
+  if (titleEl) titleEl.textContent = `Recepție #${item.id} — ${item.product || ""}`.trim();
+
+  // Poze grupate pe categorie (brut / neto / mașină / altul)
+  const groups = { brut: [], neto: [], masina: [], altul: [] };
+  (Array.isArray(item.photos) ? item.photos : []).forEach((p) => {
+    const kind = p && typeof p === "object" && p.kind ? p.kind : "altul";
+    (groups[kind] || groups.altul).push(p);
+  });
+  const hasPhotos = Object.values(groups).some((g) => g.length);
+  const photosHtml = hasPhotos
+    ? rdPhotoGroup("Masă brută", groups.brut) +
+      rdPhotoGroup("Masă netă", groups.neto) +
+      rdPhotoGroup("Nr. mașină", groups.masina) +
+      rdPhotoGroup("Alte poze", groups.altul)
+    : `<p class="rd-empty">Fără poze atașate.</p>`;
+
+  const valoare = Number(item.amountToPay ?? item.preliminaryPayableAmount ?? 0);
+  const achitat = Number(item.paidAmount || 0);
+  const rest = Number(item.soldRestant ?? Math.max(valoare - achitat, 0));
+  const net = item.provisionalNetQuantity || item.quantity;
+  const kg = (v) => (Number(v) > 0 ? formatNumber(Number(v)) + " kg" : "—");
+
+  const finBlock = fin
+    ? `<div class="rd-section"><h4>Financiar</h4>
+        ${rdRow("Preț / tonă", Number(item.price) > 0 ? currency.format(Number(item.price)) : "—")}
+        ${rdRow("Valoare preliminară", currency.format(valoare))}
+        ${rdRow("Achitat", currency.format(achitat))}
+        ${rdRow("Rest", currency.format(rest))}
+        ${rdRow("Stare plată", escapeComboHtml(item.paymentStatus || "—"))}
+        ${rdRow("Ultima plată", formatDateShort(item.lastPaymentDate))}
+      </div>`
+    : "";
+
+  const body = document.getElementById("receipt-details-body");
+  body.innerHTML = `
+    <div class="rd-section">
+      <h4>General</h4>
+      ${rdRow("Status", escapeComboHtml(item.status || "—"))}
+      ${rdRow("Data recepției", formatDateShort(item.createdAt || item.receivedAt))}
+      ${rdRow("Furnizor", escapeComboHtml(item.supplier || "—"))}
+      ${rdRow("Produs", escapeComboHtml(item.product || "—"))}
+      ${rdRow("Locație", escapeComboHtml(item.location || "—"))}
+      ${rdRow("Vehicul", escapeComboHtml(item.vehicle || "—"))}
+      ${rdRow("Recepționat de", escapeComboHtml(item.receivedBy || "—"))}
+    </div>
+    <div class="rd-section">
+      <h4>Cântar & cantitate</h4>
+      ${rdRow("Masă brută", kg(item.grossWeight))}
+      ${rdRow("Tara", kg(item.tareWeight))}
+      ${rdRow("Masă netă", kg(item.netWeight))}
+      ${rdRow("Cantitate", Number(net) > 0 ? formatNumber(Number(net)) + " t" : "—")}
+    </div>
+    <div class="rd-section">
+      <h4>Calitate</h4>
+      ${rdRow("Umiditate", item.humidity != null && item.humidity !== "" ? item.humidity + " %" : "—")}
+      ${rdRow("Impurități", item.impurity != null && item.impurity !== "" ? item.impurity + " %" : "—")}
+      ${rdRow("Normă umiditate", item.humidityNorm ? item.humidityNorm + " %" : "")}
+      ${rdRow("Normă impurități", item.impurityNorm ? item.impurityNorm + " %" : "")}
+    </div>
+    ${finBlock}
+    <div class="rd-section">
+      <h4>Observații operator</h4>
+      ${item.note ? `<p class="rd-note">${escapeComboHtml(item.note)}</p>` : `<p class="rd-empty">Fără observații.</p>`}
+    </div>
+    <div class="rd-section">
+      <h4>Poze</h4>
+      ${photosHtml}
+    </div>
+  `;
+  receiptDetailsDialog.showModal();
+}
+
+// Buton „Detalii" pe rânduri (recepții recente + în descărcare)
+function onReceiptDetailsClick(event) {
+  const trigger = event.target.closest('[data-action="receipt-details"]');
+  if (!trigger) return;
+  openReceiptDetails(trigger.dataset.id);
+}
+bodyEl?.addEventListener("click", onReceiptDetailsClick);
+pendingWeighingBody?.addEventListener("click", onReceiptDetailsClick);
+document.getElementById("receipt-details-close")?.addEventListener("click", () => receiptDetailsDialog?.close());
+document.getElementById("receipt-details-close-2")?.addEventListener("click", () => receiptDetailsDialog?.close());
+
+// Toggle formular „Recepție nouă" — ascuns implicit, se deschide la apăsare
+(function setupReceiptNewToggle() {
+  const toggle = document.getElementById("receipt-new-toggle");
+  if (!toggle || !formEl) return;
+  toggle.addEventListener("click", () => {
+    const willOpen = formEl.classList.contains("collapsed");
+    formEl.classList.toggle("collapsed", !willOpen);
+    toggle.setAttribute("aria-expanded", String(willOpen));
+    toggle.classList.toggle("is-open", willOpen);
+    toggle.innerHTML = willOpen
+      ? '<span class="rnb-icon">✕</span> Închide formularul'
+      : '<span class="rnb-icon">＋</span> Recepție nouă';
+    if (willOpen) {
+      formEl.scrollIntoView({ behavior: "smooth", block: "start" });
+      const firstField = document.getElementById("supplier-search");
+      if (firstField) setTimeout(() => firstField.focus(), 200);
+    }
+  });
+})();
+
 // Stock period filter (Modul F)
 document.getElementById("stock-period-from")?.addEventListener("change", renderStockPeriod);
 document.getElementById("stock-period-to")?.addEventListener("change", renderStockPeriod);
