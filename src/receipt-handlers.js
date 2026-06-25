@@ -145,9 +145,11 @@ async function listReceiptsHandler(req, res) {
   try {
     const [receipts, stats] = await Promise.all([listReceipts(), getStats()]);
     const canSeeFinance = requestCanSeeFinance(req);
+    // Documentele anulate sunt filtrate dupa rol (server-side, nu doar in UI).
+    const visible = filterCanceledForRole(receipts, req.currentUser && req.currentUser.roleCode);
 
     return sendJson(res, 200, {
-      receipts: canSeeFinance ? receipts : receipts.map(stripReceiptFinancials),
+      receipts: canSeeFinance ? visible : visible.map(stripReceiptFinancials),
       stats: canSeeFinance ? stats : stripFinancialStats(stats)
     });
   } catch (error) {
