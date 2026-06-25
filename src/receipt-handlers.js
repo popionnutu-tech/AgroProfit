@@ -370,7 +370,7 @@ async function completeWeighingHandler(req, res, id) {
       photos: body.photos,
       changedBy: getActorLabel(req)
     });
-    return sendJson(res, 200, updated);
+    return sendJson(res, 200, receiptForRequest(req, updated));
   } catch (error) {
     console.error("Failed to complete receipt weighing:", error.message);
     return sendJson(res, 400, { error: error.message || "Nu am putut finaliza cantarirea." });
