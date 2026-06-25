@@ -87,13 +87,58 @@ async function healthHandler(_req, res) {
   return sendJson(res, 200, { ok: true, storage: storageDriver });
 }
 
-async function listReceiptsHandler(_req, res) {
+// Campuri financiare pe receptie — vizibile DOAR rolurilor cu capabilitatea "finance".
+// Operatorul / control nu trebuie sa primeasca aceste date nici prin API (nu doar ascunse in UI).
+const FINANCIAL_RECEIPT_FIELDS = [
+  "price",
+  "preliminaryMerchandiseValue",
+  "preliminaryServicesTotal",
+  "cleaningServiceTotal",
+  "dryingServiceTotal",
+  "withholdingPercent",
+  "withholdingAmount",
+  "preliminaryPayableAmount",
+  "amountToPay",
+  "paidAmount",
+  "soldRestant",
+  "paymentStatus",
+  "lastPaymentDate"
+];
+
+function stripReceiptFinancials(receipt) {
+  const clone = { ...receipt };
+  for (const field of FINANCIAL_RECEIPT_FIELDS) {
+    delete clone[field];
+  }
+  return clone;
+}
+
+// Agregatele financiare din `stats` nu trebuie livrate rolurilor fara "finance".
+function stripFinancialStats(stats) {
+  if (!stats || typeof stats !== "object") {
+    return stats;
+  }
+  const clone = { ...stats };
+  delete clone.finance;
+  delete clone.advances;
+  delete clone.opening;
+  delete clone.totalValue;
+  return clone;
+}
+
+async function listReceiptsHandler(req, res) {
   try {
     const [receipts, stats] = await Promise.all([listReceipts(), getStats()]);
+    // Fail-closed: daca nu putem confirma capabilitatea, tratam ca fara "finance".
+    const permissions =
+      req && req.currentUser && Array.isArray(req.currentUser.permissions)
+        ? req.currentUser.permissions
+        : [];
+    const canSeeFinance = permissions.includes("finance");
 
     return sendJson(res, 200, {
-      receipts,
-      stats
+      receipts: canSeeFinance ? receipts : receipts.map(stripReceiptFinancials),
+      stats: canSeeFinance ? stats : stripFinancialStats(stats)
     });
   } catch (error) {
     console.error("Failed to load receipts:", error.message);
