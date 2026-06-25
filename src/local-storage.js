@@ -4022,12 +4022,14 @@ async function getDashboardSnapshot(dateValue = new Date().toISOString().slice(0
     ]);
 
   const outstandingPayments = receipts.reduce((sum, item) => {
+    if (item.status === "Anulat") return sum; // recepția anulată nu mai e de plătit
     const target = Number(item.preliminaryPayableAmount || 0);
     const paid = Number(item.paidAmount || 0);
     return sum + Math.max(target - paid, 0);
   }, 0);
 
   const outstandingCollections = deliveries.reduce((sum, item) => {
+    if (item.status === "Anulat") return sum; // livrarea anulată nu mai e de încasat
     const qty = Number(item.deliveredQuantity || item.netWeight || 0);
     const target = Number(item.contractPrice || 0) * qty;
     const collected = Number(item.collectedAmount || 0);
