@@ -515,7 +515,21 @@ app.post("/api/deliveries/:id/close", requireRoles(["manager", "admin"]), async 
 });
 
 app.post("/api/deliveries/:id/cancel", requireRoles(["manager", "admin"]), async (req, res) => {
-  return transitionDeliveryHandler(req, res, req.params.id, "Anulat");
+  // Override admin/manager: anuleaza din orice status (inclusiv „Livrat"), cu motiv obligatoriu.
+  try {
+    const delivery = await storage.cancelDelivery(req.params.id, {
+      reason: req.body && req.body.reason,
+      currentUser: req.currentUser || {},
+      changedBy: getActorLabel(req)
+    });
+    if (!delivery) {
+      return res.status(404).json({ error: "Livrarea nu a fost gasita." });
+    }
+    return res.status(200).json(delivery);
+  } catch (error) {
+    console.error("Failed to cancel delivery:", error.message);
+    return res.status(400).json({ error: error.message || "Nu am putut anula livrarea." });
+  }
 });
 
 app.post("/api/deliveries/:id/reopen", requireRoles(["manager", "admin"]), async (req, res) => {
