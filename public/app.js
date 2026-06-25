@@ -3746,7 +3746,8 @@ function renderTransfers(transfers) {
     (t) =>
       (!fProd || t.product === fProd) &&
       (!fLoc || t.fromLocation === fLoc || t.toLocation === fLoc) &&
-      withinDateRange(t, ["createdAt"], dFrom, dTo)
+      withinDateRange(t, ["createdAt"], dFrom, dTo) &&
+      canViewCanceled(t)
   );
   transfersBodyEl.innerHTML = filtered
     .map(
