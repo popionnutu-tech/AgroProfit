@@ -5852,6 +5852,78 @@ pendingWeighingBody?.addEventListener("click", onReceiptDetailsClick);
 document.getElementById("receipt-details-close")?.addEventListener("click", () => receiptDetailsDialog?.close());
 document.getElementById("receipt-details-close-2")?.addEventListener("click", () => receiptDetailsDialog?.close());
 
+// ----- Anulare document (admin/manager) + editare comentariu (admin) -----
+async function cancelDocumentRequest(kind, id, reason) {
+  const url =
+    kind === "transfer" ? `/api/transfers/${id}/cancel`
+    : kind === "receipt" ? `/api/receipts/${id}/cancel`
+    : `/api/deliveries/${id}/cancel`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reason })
+  });
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({}));
+    throw new Error(e.error || "Nu am putut anula documentul.");
+  }
+  return res.json();
+}
+
+async function editDocumentNoteRequest(entity, id, note) {
+  const res = await fetch(`/api/documents/${entity}/${id}/note`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ note })
+  });
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({}));
+    throw new Error(e.error || "Nu am putut salva comentariul.");
+  }
+  return res.json();
+}
+
+async function reloadAfterDocChange() {
+  await Promise.all([loadReceipts(), loadDeliveries(), loadTransfers(), loadStocks(), loadAuditLogs()]);
+}
+
+// Handler global: butoanele „Anulează" și „Comentariu" de pe rânduri (data-action + data-kind + data-id).
+document.addEventListener("click", async (event) => {
+  const cancelBtn = event.target.closest('[data-action="doc-cancel"]');
+  if (cancelBtn) {
+    const kind = cancelBtn.dataset.kind;
+    const id = cancelBtn.dataset.id;
+    const reason = window.prompt("Motivul anulării (obligatoriu) — apare în lista adminului:");
+    if (reason === null) return;
+    if (!reason.trim()) {
+      window.alert("Motivul este obligatoriu.");
+      return;
+    }
+    try {
+      await cancelDocumentRequest(kind, id, reason.trim());
+      await reloadAfterDocChange();
+    } catch (e) {
+      window.alert(e.message);
+    }
+    return;
+  }
+  const noteBtn = event.target.closest('[data-action="doc-note"]');
+  if (noteBtn) {
+    const entity = noteBtn.dataset.kind;
+    const id = noteBtn.dataset.id;
+    const current = noteBtn.dataset.note || "";
+    const note = window.prompt("Comentariu / observații (ex.: data reală a operației):", current);
+    if (note === null) return;
+    try {
+      await editDocumentNoteRequest(entity, id, note);
+      await reloadAfterDocChange();
+    } catch (e) {
+      window.alert(e.message);
+    }
+    return;
+  }
+});
+
 // Toggle formular „Recepție nouă" — ascuns implicit, se deschide la apăsare
 (function setupReceiptNewToggle() {
   const toggle = document.getElementById("receipt-new-toggle");
