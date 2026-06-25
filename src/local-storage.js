@@ -675,9 +675,10 @@ function createTransactionSummary(transactions) {
 }
 
 function createDeliverySummary(deliveries) {
+  const active = (deliveries || []).filter((item) => item.status !== "Anulat");
   return {
-    totalDeliveries: deliveries.length,
-    totalDeliveredQuantity: deliveries.reduce(
+    totalDeliveries: active.length,
+    totalDeliveredQuantity: active.reduce(
       (sum, item) => sum + Number(item.deliveredQuantity || 0),
       0
     )
