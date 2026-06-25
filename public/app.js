@@ -290,6 +290,24 @@ function canCancelDocuments() {
   return role === "admin" || role === "manager";
 }
 
+// Butoane pe rand: „Anulează" (admin/manager) + „Comentariu" (admin). Pentru documentele
+// deja anulate arata eticheta „Anulat" + motivul (tooltip). kind ∈ receipt/delivery/transfer.
+function docActionsCell(kind, item) {
+  if (item.status === "Anulat") {
+    const tip = item.cancelReason ? ` title="Motiv: ${escapeComboHtml(item.cancelReason)}"` : "";
+    const who = item.canceledByRole ? ` (${escapeComboHtml(item.canceledByRole)})` : "";
+    return `<span class="status-badge badge-anulat"${tip}>Anulat${who}</span>`;
+  }
+  let html = "";
+  if (canCancelDocuments()) {
+    html += `<button type="button" class="cell-btn cell-btn-danger" data-action="doc-cancel" data-kind="${kind}" data-id="${item.id}" title="Anulează (rămâne în listă, fără mișcări)">Anulează</button>`;
+  }
+  if (currentSessionUser?.roleCode === "admin") {
+    html += ` <button type="button" class="cell-btn" data-action="doc-note" data-kind="${kind}" data-id="${item.id}" data-note="${escapeComboHtml(item.note || "")}" title="Comentariu / data reală">💬</button>`;
+  }
+  return html || "—";
+}
+
 function getDefaultView() {
   const candidates = [
     "acasa",
