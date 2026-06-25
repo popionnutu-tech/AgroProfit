@@ -4089,7 +4089,11 @@ async function exportResourceAsCsv(resource, roleCode) {
     throw new Error(`Resursa necunoscuta: ${resource}.`);
   }
 
-  const rows = await config.list();
+  let rows = await config.list();
+  // Documentele anulate sunt filtrate dupa rol si in export (nu doar in UI).
+  if (resource === "receipts" || resource === "deliveries") {
+    rows = filterCanceledForRole(rows, roleCode);
+  }
   const header = config.fields.join(",");
   const body = rows
     .map((row) => config.fields.map((field) => toCsvField(row[field])).join(","))
