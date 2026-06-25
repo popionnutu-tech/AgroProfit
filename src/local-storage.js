@@ -798,6 +798,8 @@ function createStockSummary(receipts, deliveries = [], openingDocuments = [], tr
 
   // Transferuri intre cilindri: scad din locatia sursa, adaug in destinatie.
   for (const item of transfers) {
+    // Transferul anulat nu mai produce mișcare de stoc între cilindri.
+    if (item.status === "Anulat") continue;
     const product = item.product;
     const unit = item.unit || "tone";
     const qty = Number(item.quantity || 0);
