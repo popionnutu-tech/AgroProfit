@@ -3718,7 +3718,7 @@ async function getPeriodReport(from, to) {
       collectionsTotal: periodTransactions
         .filter((item) => item.direction === "collection")
         .reduce((sum, item) => sum + Number(item.amount || 0), 0),
-      deliveredQuantity: periodDeliveries.reduce((sum, item) => sum + Number(item.deliveredQuantity || 0), 0),
+      deliveredQuantity: periodDeliveries.reduce((sum, item) => sum + (item.status === "Anulat" ? 0 : Number(item.deliveredQuantity || 0)), 0),
       openComplaints: periodComplaints.filter((item) => item.status === "Deschisa").length,
       stockTotal: stockSummary.totals.totalQuantity
     },
