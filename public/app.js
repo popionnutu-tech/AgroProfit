@@ -2190,7 +2190,7 @@ function renderDeliveries(deliveries) {
           <td class="col-fin pay-cell ${item.invoicePaid ? "is-paid" : "is-unpaid"}">${paidSelect}</td>
           <td>
             <div class="col-fin">${item.invoiceNumber || "-"}</div>
-            ${item.note ? `<div class="row-note">${item.note}</div>` : ""}
+            ${item.note ? `<div class="row-note">${escapeComboHtml(item.note)}</div>` : ""}
             <div>${deliveryStatusBadge(status)}</div>
             <div class="action-row">${buttons}</div>
             <div class="action-row">${docActionsCell("delivery", item)}</div>
