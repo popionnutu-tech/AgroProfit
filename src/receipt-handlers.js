@@ -319,7 +319,7 @@ async function reopenReceiptHandler(req, res, id) {
       return sendJson(res, 404, { error: "Receptia nu a fost gasita." });
     }
     triggerCriticalManagementAlert({ trigger: "receipt-reopened", actor: getActorLabel(req) });
-    return sendJson(res, 200, receipt);
+    return sendJson(res, 200, receiptForRequest(req, receipt));
   } catch (error) {
     console.error("Failed to reopen receipt:", error.message);
     return sendJson(res, 400, { error: error.message || "Nu am putut redeschide receptia." });
