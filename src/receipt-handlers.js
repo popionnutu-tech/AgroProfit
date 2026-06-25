@@ -375,5 +375,8 @@ module.exports = {
   healthHandler,
   listReceiptsHandler,
   reopenReceiptHandler,
-  updateReceiptStatusHandler
+  updateReceiptStatusHandler,
+  // expuse pentru teste (filtrare financiara dupa capabilitate)
+  stripReceiptFinancials,
+  stripFinancialStats
 };
