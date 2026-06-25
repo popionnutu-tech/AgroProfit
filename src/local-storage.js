@@ -4074,7 +4074,7 @@ function toCsvField(value) {
   return str;
 }
 
-async function exportResourceAsCsv(resource) {
+async function exportResourceAsCsv(resource, roleCode) {
   const mapping = {
     receipts: { list: listReceipts, fields: ["id", "supplier", "product", "quantity", "status", "paymentStatus", "createdAt"] },
     deliveries: { list: listDeliveries, fields: ["id", "receiptId", "customer", "product", "plannedQuantity", "deliveredQuantity", "status", "createdAt"] },
