@@ -265,6 +265,31 @@ function canAccess(capability) {
   return Array.isArray(currentSessionUser.permissions) && currentSessionUser.permissions.includes(capability);
 }
 
+// Vizibilitatea documentelor ANULATE:
+//  - admin   → vede toate anulatele
+//  - manager → vede doar anulatele facute de un manager
+//  - restul  → nu vad documentele anulate
+// Documentele ne-anulate raman vizibile normal (dupa drepturile de view).
+function canViewCanceled(item) {
+  if (!item || item.status !== "Anulat") {
+    return true;
+  }
+  const role = currentSessionUser?.roleCode;
+  if (role === "admin") {
+    return true;
+  }
+  if (role === "manager") {
+    return item.canceledByRole === "manager";
+  }
+  return false;
+}
+
+// Cine poate anula documente: admin + manager.
+function canCancelDocuments() {
+  const role = currentSessionUser?.roleCode;
+  return role === "admin" || role === "manager";
+}
+
 function getDefaultView() {
   const candidates = [
     "acasa",
