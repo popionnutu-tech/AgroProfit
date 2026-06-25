@@ -47,6 +47,7 @@ function getOutstandingFinancials(receipts, deliveries, openingDebtItems) {
     .filter((item) => item.outstandingAmount > 0);
 
   const deliveryCollections = deliveries
+    .filter((item) => item.status !== "Anulat") // livrarea anulata nu mai e de incasat
     .map((item) => {
       const targetAmount = Number(item.contractPrice || 0) * Number(item.deliveredQuantity || 0);
       const collectedAmount = Number(item.collectedAmount || 0);
