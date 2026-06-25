@@ -182,17 +182,7 @@ test("Q2 closeReceipt blochează cu reclamație deschisă, permite după accepta
       plannedQuantity: 5,
       createdBy: "op"
     });
-    await storage.transitionDelivery(delivery.id, "Confirmat", {
-      changeReason: "c",
-      currentUser: {}
-    });
-    await storage.transitionDelivery(delivery.id, "Livrat", {
-      grossWeight: 5000,
-      tareWeight: 0,
-      changeReason: "l",
-      currentUser: {}
-    });
-
+    // Model nou: livrarea e deja „Livrat" la creare — nu mai trec prin Confirmat/Livrat.
     const complaint = await storage.createComplaint({
       deliveryId: delivery.id,
       complaintType: "Calitate",
