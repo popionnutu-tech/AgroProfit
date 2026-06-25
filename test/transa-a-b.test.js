@@ -96,11 +96,13 @@ test("A#2 createConfigEntry fara changeReason intoarce eroare", async () => {
   });
 });
 
-test("Q1 delivery state machine: create -> confirm -> deliver with weights", async () => {
+test("Q1 livrare imediată: creare → Livrat, scade stocul recepției", async () => {
   await withIsolatedWorkspace(async ({ load }) => {
     const storage = load("src/local-storage.js");
     const receipt = await seedReceipt(storage);
 
+    // Model nou: livrarea se creează direct în „Livrat" (scade stocul pe loc),
+    // nu mai trece prin Proiect → Confirmat → Livrat.
     const delivery = await storage.createDelivery({
       receiptId: receipt.id,
       customerId: 2,
@@ -108,38 +110,41 @@ test("Q1 delivery state machine: create -> confirm -> deliver with weights", asy
       plannedQuantity: 30,
       createdBy: "operator"
     });
-    assert.equal(delivery.status, "Proiect");
-    assert.equal(delivery.deliveredQuantity, 0);
+    assert.equal(delivery.status, "Livrat");
+    assert.equal(delivery.deliveredQuantity, 30);
 
-    const confirmed = await storage.transitionDelivery(delivery.id, "Confirmat", {
-      changeReason: "confirmare test",
-      currentUser: { name: "Operator Test", roleCode: "operator" }
-    });
-    assert.equal(confirmed.status, "Confirmat");
-
+    // Recepția reflectă livrarea: din 100 t, 30 livrate → 70 disponibile, „Livrat partial".
     const receipts1 = await storage.listReceipts();
     const receipt1 = receipts1.find((r) => r.id === receipt.id);
-    assert.equal(receipt1.reservedQuantity, 30);
+    assert.equal(receipt1.deliveredQuantity, 30);
     assert.equal(receipt1.availableQuantity, 70);
-    assert.equal(receipt1.deliveryStatus, "Rezervat partial");
+    assert.equal(receipt1.deliveryStatus, "Livrat partial");
 
+    // Nu se poate livra peste stocul disponibil al recepției (mai rămân 70 t).
     await assert.rejects(
-      storage.transitionDelivery(delivery.id, "Livrat", {
-        changeReason: "fara cantar",
-        currentUser: { name: "Op" }
+      storage.createDelivery({
+        receiptId: receipt.id,
+        customerId: 2,
+        customer: "Export Grain",
+        plannedQuantity: 80,
+        createdBy: "operator"
       }),
-      /grossWeight/
+      /depaseste stocul disponibil/i
     );
 
-    const delivered = await storage.transitionDelivery(delivery.id, "Livrat", {
+    // Greutatea netă se calculează din brut − tara la creare (recepție nouă, unități curate).
+    const receiptB = await seedReceipt(storage);
+    const deliveryB = await storage.createDelivery({
+      receiptId: receiptB.id,
+      customerId: 2,
+      customer: "Export Grain",
+      plannedQuantity: 27,
       grossWeight: 30000,
       tareWeight: 3000,
-      changeReason: "cantarit",
-      currentUser: { name: "Op" }
+      createdBy: "operator"
     });
-    assert.equal(delivered.status, "Livrat");
-    assert.equal(delivered.netWeight, 27000);
-    assert.equal(delivered.deliveredQuantity, 27000);
+    assert.equal(deliveryB.status, "Livrat");
+    assert.equal(deliveryB.netWeight, 27000);
   });
 });
 
