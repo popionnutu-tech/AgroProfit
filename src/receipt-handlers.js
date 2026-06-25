@@ -301,7 +301,7 @@ async function closeReceiptHandler(req, res, id) {
       return sendJson(res, 404, { error: "Receptia nu a fost gasita." });
     }
     triggerCriticalManagementAlert({ trigger: "receipt-closed", actor: getActorLabel(req) });
-    return sendJson(res, 200, receipt);
+    return sendJson(res, 200, receiptForRequest(req, receipt));
   } catch (error) {
     console.error("Failed to close receipt:", error.message);
     return sendJson(res, 400, { error: error.message || "Nu am putut inchide receptia." });
