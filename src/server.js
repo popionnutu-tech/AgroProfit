@@ -363,10 +363,12 @@ app.get(
 app.get(
   "/api/transfers",
   requireRoles(["operator", "manager", "accountant", "accountant-sef", "admin", "control"]),
-  async (_req, res) => {
+  async (req, res) => {
     try {
       const transfers = await storage.listTransfers();
-      return res.status(200).json({ transfers });
+      // Transferurile anulate sunt filtrate dupa rol (server-side).
+      const visible = filterCanceledForRole(transfers, req.currentUser && req.currentUser.roleCode);
+      return res.status(200).json({ transfers: visible });
     } catch (error) {
       console.error("Failed to list transfers:", error.message);
       return res.status(500).json({ error: "Nu am putut incarca transferurile." });
