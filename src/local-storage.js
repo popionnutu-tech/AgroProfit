@@ -1139,13 +1139,15 @@ function createDailyReport(dateValue, receipts, processings, transactions, stock
     (item) => item.status !== "Anulat" && item.status !== "In lucru"
   );
   const dailyTransactions = filterByDate(transactions, dateValue);
+  // Sumarul cantitativ exclude receptiile anulate (lista le pastreaza pentru afisare).
+  const activeDailyReceipts = dailyReceipts.filter((item) => item.status !== "Anulat");
 
   return {
     date: dateValue,
     summary: {
-      receiptsCount: dailyReceipts.length,
-      grossQuantity: dailyReceipts.reduce((sum, item) => sum + Number(item.grossQuantity || item.quantity || 0), 0),
-      provisionalNetQuantity: dailyReceipts.reduce(
+      receiptsCount: activeDailyReceipts.length,
+      grossQuantity: activeDailyReceipts.reduce((sum, item) => sum + Number(item.grossQuantity || item.quantity || 0), 0),
+      provisionalNetQuantity: activeDailyReceipts.reduce(
         (sum, item) => sum + Number(item.provisionalNetQuantity || item.quantity || 0),
         0
       ),
