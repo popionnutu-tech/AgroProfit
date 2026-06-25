@@ -1377,7 +1377,7 @@ function renderReceipts(receipts) {
     else if (payFilter) payMatch = item.paymentStatus === payFilter;
     // Anulat receipts don't owe money — hide them from payment filters
     if (payFilter && item.status === "Anulat") payMatch = false;
-    return statusMatch && productMatch && supplierMatch && dateMatch && payMatch;
+    return statusMatch && productMatch && supplierMatch && dateMatch && payMatch && canViewCanceled(item);
   });
 
   bodyEl.innerHTML = filteredReceipts
