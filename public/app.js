@@ -2130,6 +2130,7 @@ function renderDeliveries(deliveries) {
     if (prodFilter && item.product !== prodFilter) return false;
     if (paidFilter === "paid" && !item.invoicePaid) return false;
     if (paidFilter === "unpaid" && item.invoicePaid) return false;
+    if (!canViewCanceled(item)) return false;
     return true;
   });
   deliveriesBodyEl.innerHTML = filtered
