@@ -391,6 +391,73 @@ app.post(
   }
 );
 
+// Anulare transfer (admin/manager) — ramane in lista ca „Anulat", fara miscare de stoc.
+app.post(
+  "/api/transfers/:id/cancel",
+  requireRoles(["manager", "admin"]),
+  async (req, res) => {
+    try {
+      const transfer = await storage.cancelTransfer(req.params.id, {
+        reason: req.body && req.body.reason,
+        currentUser: req.currentUser || {},
+        changedBy: getActorLabel(req)
+      });
+      if (!transfer) {
+        return res.status(404).json({ error: "Transferul nu a fost gasit." });
+      }
+      return res.status(200).json(transfer);
+    } catch (error) {
+      console.error("Failed to cancel transfer:", error.message);
+      return res.status(400).json({ error: error.message || "Nu am putut anula transferul." });
+    }
+  }
+);
+
+// Anulare receptie (admin/manager) — ramane in lista ca „Anulat", exclusa din stoc.
+app.post(
+  "/api/receipts/:id/cancel",
+  requireRoles(["manager", "admin"]),
+  async (req, res) => {
+    try {
+      const receipt = await storage.cancelReceipt(req.params.id, {
+        reason: req.body && req.body.reason,
+        currentUser: req.currentUser || {},
+        changedBy: getActorLabel(req)
+      });
+      if (!receipt) {
+        return res.status(404).json({ error: "Receptia nu a fost gasita." });
+      }
+      return res.status(200).json(receipt);
+    } catch (error) {
+      console.error("Failed to cancel receipt:", error.message);
+      return res.status(400).json({ error: error.message || "Nu am putut anula receptia." });
+    }
+  }
+);
+
+// Editare comentariu pe un document (doar admin) — ex.: data reala a operatiei.
+app.patch(
+  "/api/documents/:entity/:id/note",
+  requireRoles(["admin"]),
+  async (req, res) => {
+    try {
+      const item = await storage.updateEntityNote(
+        String(req.params.entity || ""),
+        req.params.id,
+        (req.body && req.body.note) || "",
+        { currentUser: req.currentUser || {}, changedBy: getActorLabel(req) }
+      );
+      if (!item) {
+        return res.status(404).json({ error: "Documentul nu a fost gasit." });
+      }
+      return res.status(200).json(item);
+    } catch (error) {
+      console.error("Failed to update note:", error.message);
+      return res.status(400).json({ error: error.message || "Nu am putut salva comentariul." });
+    }
+  }
+);
+
 app.get(
   "/api/transactions",
   requireRoles(["manager", "accountant", "accountant-sef", "admin", "control"]),
