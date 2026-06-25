@@ -3779,6 +3779,7 @@ function renderTransfers(transfers) {
           <td>${item.toLocation}</td>
           <td>${formatNumber(Math.round(Number(item.quantity || 0) * 1000))} kg</td>
           <td>${item.operator || "-"}</td>
+          <td>${docActionsCell("transfer", item) || "—"}</td>
         </tr>
       `
     )
