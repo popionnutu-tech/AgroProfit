@@ -6395,6 +6395,18 @@ transactionFormEl.addEventListener("submit", async (event) => {
   }
 });
 
+// Enter în câmpurile formularului de livrare NU trebuie să trimită formularul.
+// Model „livrare imediată": un submit accidental (Enter) crea o livrare FINALIZATĂ în plus
+// (duplicate). Doar butonul „Salveaza" trimite. Enter pe input → nu face nimic (rămâi în câmp).
+deliveryFormEl.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter") return;
+  const el = event.target;
+  const tag = (el.tagName || "").toLowerCase();
+  // Lasă Enter pentru textarea (linii noi) și pentru butoane (acțiunea lor proprie).
+  if (tag === "textarea" || tag === "button" || el.type === "submit") return;
+  event.preventDefault();
+});
+
 deliveryFormEl.addEventListener("submit", async (event) => {
   event.preventDefault();
   deliveryMessageEl.textContent = "Se salveaza...";
