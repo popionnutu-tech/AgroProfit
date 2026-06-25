@@ -2231,6 +2231,7 @@ function renderDeliveryTotals(rows) {
   let totalLei = 0;
   const totalForeignByCur = {};
   rows.forEach((item) => {
+    if (item.status === "Anulat") return; // livrarea anulată nu intră în totaluri
     const money = deliveryInvoiceTotals(item);
     const qty = money.tonnes;
     totalQty += qty;
