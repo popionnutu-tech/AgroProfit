@@ -429,6 +429,62 @@ test("Q4b livrare pe-produs: plafon pe stocul locatiei sursa", async () => {
   });
 });
 
+test("Anulare livrare: status Anulat + marfa revine in stoc", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const receipt = await seedReceipt(storage);
+    const delivery = await storage.createDelivery({
+      receiptId: receipt.id,
+      customerId: 2,
+      customer: "Export Grain",
+      plannedQuantity: 30,
+      createdBy: "op"
+    });
+    let r = (await storage.listReceipts()).find((x) => x.id === receipt.id);
+    assert.equal(r.availableQuantity, 70); // 100 - 30 livrate
+
+    const canceled = await storage.cancelDelivery(delivery.id, {
+      reason: "duplicat",
+      currentUser: { name: "Admin", roleCode: "admin" }
+    });
+    assert.equal(canceled.status, "Anulat");
+    assert.equal(canceled.cancelReason, "duplicat");
+    assert.equal(canceled.canceledByRole, "admin");
+
+    // Marfa revine: disponibil 100 din nou.
+    r = (await storage.listReceipts()).find((x) => x.id === receipt.id);
+    assert.equal(r.availableQuantity, 100);
+  });
+});
+
+test("Anulare: motivul e obligatoriu", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const receipt = await seedReceipt(storage);
+    const delivery = await storage.createDelivery({
+      receiptId: receipt.id, customerId: 2, customer: "X", plannedQuantity: 5, createdBy: "op"
+    });
+    await assert.rejects(
+      storage.cancelDelivery(delivery.id, { reason: "", currentUser: { roleCode: "admin" } }),
+      /Motivul/i
+    );
+  });
+});
+
+test("Anulare receptie: blocata daca are livrari active", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const receipt = await seedReceipt(storage);
+    await storage.createDelivery({
+      receiptId: receipt.id, customerId: 2, customer: "X", plannedQuantity: 10, createdBy: "op"
+    });
+    await assert.rejects(
+      storage.cancelReceipt(receipt.id, { reason: "gresit", currentUser: { roleCode: "admin" } }),
+      /livrari active/i
+    );
+  });
+});
+
 test("A#1 atomic writes: writeJsonAtomic creeaza .tmp apoi rename", async () => {
   await withIsolatedWorkspace(async ({ tempWorkspace, load }) => {
     const { writeJsonAtomic } = require("../src/atomic-write");
