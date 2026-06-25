@@ -278,7 +278,7 @@ async function updateReceiptStatusHandler(req, res, id) {
       return sendJson(res, 404, { error: "Receptia nu a fost gasita." });
     }
 
-    const response = sendJson(res, 200, receipt);
+    const response = sendJson(res, 200, receiptForRequest(req, receipt));
     triggerCriticalManagementAlert({
       trigger: "receipt-status-updated",
       actor: getActorLabel(req)
