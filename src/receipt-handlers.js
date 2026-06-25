@@ -10,6 +10,7 @@ const {
   updateReceiptStatusWithAudit
 } = require("./storage");
 const { getActorLabel } = require("./auth");
+const { filterCanceledForRole } = require("./permissions");
 const { triggerCriticalManagementAlert } = require("./critical-alerts");
 
 function sendJson(res, statusCode, payload) {
