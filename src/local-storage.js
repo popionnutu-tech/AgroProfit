@@ -10,6 +10,7 @@ const {
 const { backupRuntimeData } = require("./runtime-backup");
 const { writeJsonAtomic } = require("./atomic-write");
 const { isSafeStoredPath } = require("./photo-store");
+const { filterCanceledForRole } = require("./permissions");
 
 const dataDir = path.join(process.cwd(), ".runtime-data");
 const legacyDataDir = path.join(process.cwd(), "data");
