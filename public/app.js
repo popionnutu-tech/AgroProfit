@@ -305,7 +305,7 @@ function docActionsCell(kind, item) {
   if (currentSessionUser?.roleCode === "admin") {
     html += ` <button type="button" class="cell-btn" data-action="doc-note" data-kind="${kind}" data-id="${item.id}" data-note="${escapeComboHtml(item.note || "")}" title="Comentariu / data reală">💬</button>`;
   }
-  return html || "—";
+  return html;
 }
 
 function getDefaultView() {
