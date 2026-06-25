@@ -28,14 +28,15 @@ async function getDailyReportHandler(req, res) {
     const from = String(req.query?.from || "").trim();
     const to = String(req.query?.to || "").trim();
     // Daca vine interval (from/to) -> raport pe perioada; altfel raport pe o singura zi.
+    const role = req.currentUser && req.currentUser.roleCode;
     if (from || to) {
       const report = await getPeriodReport(from || to, to || from);
-      return sendJson(res, 200, report);
+      return sendJson(res, 200, filterReportForRole(report, role));
     }
     const dateValue =
       String(req.query?.date || "").trim() || new Date().toISOString().slice(0, 10);
     const report = await getDailyReport(dateValue);
-    return sendJson(res, 200, report);
+    return sendJson(res, 200, filterReportForRole(report, role));
   } catch (error) {
     console.error("Failed to load daily report:", error.message);
     return sendJson(res, 500, { error: "Nu am putut incarca raportul zilnic." });
