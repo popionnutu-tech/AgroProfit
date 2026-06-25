@@ -2534,6 +2534,8 @@ async function transitionDelivery(id, newStatus, payload = {}) {
 
   if (newStatus === "Anulat") {
     delivery.canceledAt = now;
+    delivery.cancelReason = String(payload.changeReason || payload.reason || "").trim();
+    delivery.canceledByRole = (payload.currentUser && payload.currentUser.roleCode) || "";
   }
 
   delivery.status = newStatus;
