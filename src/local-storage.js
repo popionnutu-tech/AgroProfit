@@ -3674,7 +3674,7 @@ async function getDailyReport(dateValue = new Date().toISOString().slice(0, 10))
   report.deliveries = filterByDate(deliveries, dateValue);
   report.complaints = filterByDate(complaints, dateValue);
   report.summary.deliveredQuantity = report.deliveries.reduce(
-    (sum, item) => sum + Number(item.deliveredQuantity || 0),
+    (sum, item) => sum + (item.status === "Anulat" ? 0 : Number(item.deliveredQuantity || 0)),
     0
   );
   report.summary.openComplaints = report.complaints.filter((item) => item.status === "Deschisa").length;
