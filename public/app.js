@@ -2547,10 +2547,10 @@ function renderDailyReport(report) {
         <tr>
           <td>#${item.id}</td>
           <td>${formatDateShort(item.createdAt)}</td>
-          <td>${item.deliveryId ? "#" + item.deliveryId : (item.customer || "—")}</td>
-          <td>${item.complaintType}</td>
+          <td>${item.deliveryId ? "#" + item.deliveryId : escapeComboHtml(item.customer || "—")}</td>
+          <td>${escapeComboHtml(item.complaintType)}</td>
           <td>${formatNumber(item.contestedQuantity)}</td>
-          <td>${item.status}</td>
+          <td>${escapeComboHtml(item.status)}</td>
         </tr>
       `
     )
