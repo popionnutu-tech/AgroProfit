@@ -2517,9 +2517,9 @@ function renderDailyReport(report) {
         <tr>
           <td>#${item.id}</td>
           <td>${formatDateShort(item.createdAt)}</td>
-          <td>${item.partner}</td>
+          <td>${escapeComboHtml(item.partner)}</td>
           <td>${item.direction === "collection" ? "Incasare" : "Plata"}</td>
-          <td>${item.paymentType || "-"}</td>
+          <td>${escapeComboHtml(item.paymentType || "-")}</td>
           <td>${currency.format(Number(item.amount || 0))}</td>
         </tr>
       `
