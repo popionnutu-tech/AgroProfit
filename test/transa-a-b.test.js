@@ -358,6 +358,77 @@ test("Q4 complaint invoiceAdjustment creeaza tranzactie compensatorie", async ()
   });
 });
 
+test("SEC receptiile fara „finance" nu expun campuri financiare", () => {
+  const handlers = require("../src/receipt-handlers");
+
+  const receipt = {
+    id: 1,
+    supplier: "Agro Nord",
+    product: "Grau",
+    quantity: 100,
+    location: "Siloz 1",
+    note: "obs operator",
+    price: 3000,
+    preliminaryPayableAmount: 300000,
+    amountToPay: 300000,
+    paidAmount: 500,
+    soldRestant: 299500,
+    paymentStatus: "Partial",
+    lastPaymentDate: "2026-06-25"
+  };
+  const stripped = handlers.stripReceiptFinancials(receipt);
+  // financiarele dispar
+  ["price", "preliminaryPayableAmount", "amountToPay", "paidAmount", "soldRestant", "paymentStatus", "lastPaymentDate"]
+    .forEach((f) => assert.equal(stripped[f], undefined, `${f} ar trebui ascuns`));
+  // operationalele raman
+  assert.equal(stripped.product, "Grau");
+  assert.equal(stripped.quantity, 100);
+  assert.equal(stripped.location, "Siloz 1");
+  assert.equal(stripped.note, "obs operator");
+
+  const stats = { totalReceipts: 5, totalQuantity: 500, byStatus: {}, totalValue: 999, finance: { totalPayments: 1 }, advances: [{}], opening: {} };
+  const sStats = handlers.stripFinancialStats(stats);
+  ["totalValue", "finance", "advances", "opening"].forEach((k) =>
+    assert.equal(sStats[k], undefined, `stats.${k} ar trebui ascuns`));
+  assert.equal(sStats.totalReceipts, 5);
+  assert.equal(sStats.totalQuantity, 500);
+});
+
+test("Q4b livrare pe-produs: plafon pe stocul locatiei sursa", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    // Stoc: o receptie de 100 t Grau in „Siloz 1".
+    await seedReceipt(storage, { status: "Procesata", location: "Siloz 1" });
+
+    // Peste stocul disponibil → respins.
+    await assert.rejects(
+      storage.createDelivery({
+        product: "Grau",
+        productId: 1,
+        sourceLocation: "Siloz 1",
+        customerId: 2,
+        customer: "Export Grain",
+        plannedQuantity: 150,
+        createdBy: "op"
+      }),
+      /Stoc insuficient/i
+    );
+
+    // In limita stocului → acceptat, direct „Livrat" (model livrare imediata).
+    const ok = await storage.createDelivery({
+      product: "Grau",
+      productId: 1,
+      sourceLocation: "Siloz 1",
+      customerId: 2,
+      customer: "Export Grain",
+      plannedQuantity: 40,
+      createdBy: "op"
+    });
+    assert.equal(ok.status, "Livrat");
+    assert.equal(ok.deliveredQuantity, 40);
+  });
+});
+
 test("A#1 atomic writes: writeJsonAtomic creeaza .tmp apoi rename", async () => {
   await withIsolatedWorkspace(async ({ tempWorkspace, load }) => {
     const { writeJsonAtomic } = require("../src/atomic-write");
