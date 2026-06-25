@@ -1645,6 +1645,7 @@ async function getSupplierStatement(partnerId, fromDate, toDate) {
 
   // Receptii de la acest furnizor
   const receipts = (state.receipts || [])
+    .filter((r) => r.status !== "Anulat") // receptia anulata nu intra in extrasul de cont
     .filter((r) => Number(r.supplierId) === Number(partnerId))
     .filter((r) => inRange(r.createdAt || r.receivedAt))
     .map((r) => {
