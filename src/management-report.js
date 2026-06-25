@@ -23,7 +23,7 @@ function sameDay(value, dateValue) {
 function getOpenDocuments(receipts, deliveries) {
   return {
     receipts: receipts.filter((item) => !["Inchis", "Anulat", "Finalizata"].includes(String(item.status || ""))),
-    deliveries: deliveries.filter((item) => !["Inchisa", "Anulata", "Finalizata"].includes(String(item.status || "")))
+    deliveries: deliveries.filter((item) => !["Inchis", "Anulat", "Finalizata"].includes(String(item.status || "")))
   };
 }
 
