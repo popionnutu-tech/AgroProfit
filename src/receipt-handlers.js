@@ -253,7 +253,7 @@ async function createReceiptHandler(req, res) {
       status: body.status || "Draft"
     });
 
-    const response = sendJson(res, 201, receipt);
+    const response = sendJson(res, 201, receiptForRequest(req, receipt));
     triggerCriticalManagementAlert({
       trigger: "receipt-created",
       actor
