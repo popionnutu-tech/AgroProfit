@@ -3433,6 +3433,7 @@ async function createTransfer(payload) {
     quantity,
     operator: payload.operator || "",
     note: payload.note || "",
+    status: "Activ",
     createdAt: new Date().toISOString()
   };
 
