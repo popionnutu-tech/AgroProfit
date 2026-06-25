@@ -2503,7 +2503,7 @@ function renderDailyReport(report) {
           <td>#${item.id}</td>
           <td>${formatDateShort(item.createdAt)}</td>
           <td>#${item.receiptId}</td>
-          <td>${item.processingType}</td>
+          <td>${escapeComboHtml(item.processingType)}</td>
           <td>${formatNumber(item.processedQuantity)}</td>
           <td>${formatNumber(item.confirmedWaste)}</td>
         </tr>
