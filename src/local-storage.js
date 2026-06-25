@@ -3456,6 +3456,117 @@ async function createTransfer(payload) {
   return transfer;
 }
 
+// Anulare transfer (admin/manager). Transferul ramane in lista ca „Anulat" (cu motiv),
+// dar nu mai misca stocul intre cilindri (vezi skip-ul din createStockSummary).
+async function cancelTransfer(id, options = {}) {
+  const state = readReceiptsState();
+  const transfer = (state.transfers || []).find((item) => item.id === Number(id));
+  if (!transfer) {
+    return null;
+  }
+  if (transfer.status === "Anulat") {
+    return transfer;
+  }
+  const reason = String(options.reason || "").trim();
+  if (!reason) {
+    throw new Error("Motivul anularii este obligatoriu.");
+  }
+  const currentUser = options.currentUser || {};
+  const before = { status: transfer.status || "Activ" };
+  transfer.status = "Anulat";
+  transfer.cancelReason = reason;
+  transfer.canceledBy = currentUser.name || options.changedBy || "";
+  transfer.canceledByRole = currentUser.roleCode || "";
+  transfer.canceledAt = new Date().toISOString();
+  createAuditEntry(state, {
+    entityType: "transfer",
+    entityId: transfer.id,
+    action: "cancel",
+    reason,
+    user: transfer.canceledBy || "admin",
+    oldValue: before,
+    newValue: { status: "Anulat", cancelReason: reason }
+  });
+  writeReceiptsState(state);
+  return transfer;
+}
+
+// Anulare receptie (admin/manager). Receptia anulata e deja exclusa din stoc.
+// Blocata daca are livrari active (altfel ar lasa stocul inconsistent).
+async function cancelReceipt(id, options = {}) {
+  const state = readReceiptsState();
+  const receipt = state.receipts.find((item) => item.id === Number(id));
+  if (!receipt) {
+    return null;
+  }
+  if (receipt.status === "Anulat") {
+    return receipt;
+  }
+  const reason = String(options.reason || "").trim();
+  if (!reason) {
+    throw new Error("Motivul anularii este obligatoriu.");
+  }
+  const activeDeliveries = (state.deliveries || []).filter(
+    (d) => d.receiptId === Number(id) && d.status !== "Anulat"
+  );
+  if (activeDeliveries.length > 0) {
+    throw new Error("Receptia are livrari active. Anuleaza intai livrarile, apoi receptia.");
+  }
+  const currentUser = options.currentUser || {};
+  const now = new Date().toISOString();
+  const before = { status: receipt.status };
+  receipt.status = "Anulat";
+  receipt.cancelReason = reason;
+  receipt.canceledBy = currentUser.name || options.changedBy || "";
+  receipt.canceledByRole = currentUser.roleCode || "";
+  receipt.canceledAt = now;
+  receipt.updatedAt = now;
+  createAuditEntry(state, {
+    entityType: "receipt",
+    entityId: receipt.id,
+    action: "cancel",
+    reason,
+    user: receipt.canceledBy || "admin",
+    oldValue: before,
+    newValue: { status: "Anulat", cancelReason: reason }
+  });
+  writeReceiptsState(state);
+  return receipt;
+}
+
+// Editare comentariu (note) pe un document existent (admin). Ex.: data reala a operatiei.
+async function updateEntityNote(entityType, id, note, options = {}) {
+  const state = readReceiptsState();
+  const collectionByType = {
+    receipt: state.receipts,
+    delivery: state.deliveries,
+    transfer: state.transfers
+  };
+  const collection = collectionByType[entityType];
+  if (!collection) {
+    throw new Error("Tip de document necunoscut.");
+  }
+  const item = collection.find((x) => x.id === Number(id));
+  if (!item) {
+    return null;
+  }
+  const currentUser = options.currentUser || {};
+  const before = item.note || "";
+  item.note = String(note || "").trim();
+  item.updatedAt = new Date().toISOString();
+  createAuditEntry(state, {
+    entityType,
+    entityId: item.id,
+    action: "note-update",
+    reason: "Editare comentariu",
+    user: currentUser.name || options.changedBy || "admin",
+    oldValue: { note: before },
+    newValue: { note: item.note }
+  });
+  writeReceiptsState(state);
+  return item;
+}
+
 async function getConfig() {
   const config = readConfigState();
   const clientConfig = {
