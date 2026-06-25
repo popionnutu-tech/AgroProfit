@@ -2193,6 +2193,7 @@ function renderDeliveries(deliveries) {
             ${item.note ? `<div class="row-note">${item.note}</div>` : ""}
             <div>${deliveryStatusBadge(status)}</div>
             <div class="action-row">${buttons}</div>
+            <div class="action-row">${docActionsCell("delivery", item)}</div>
             ${canAccess("finance") ? `<div class="doc-print-row">
               <button type="button" class="cell-btn cell-btn-primary" data-action="edit-billing" data-id="${item.id}">Date factură</button>
               <details class="print-menu">
