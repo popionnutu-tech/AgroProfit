@@ -622,9 +622,11 @@ function requiredText(value, label) {
 }
 
 function createReceiptSummary(receipts) {
-  const totalReceipts = receipts.length;
-  const totalQuantity = receipts.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
-  const totalValue = receipts.reduce(
+  // KPI-urile cantitative/valorice exclud receptiile anulate (la fel ca livrarile).
+  const active = (receipts || []).filter((item) => item.status !== "Anulat");
+  const totalReceipts = active.length;
+  const totalQuantity = active.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+  const totalValue = active.reduce(
     (sum, item) => {
       const fallbackValue = Number(item.quantity || 0) * Number(item.price || 0);
       return sum + Number(item.preliminaryPayableAmount ?? fallbackValue);
