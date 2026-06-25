@@ -2372,6 +2372,11 @@ async function createDelivery(payload) {
     );
     // Rezervare: livrarile pe produs inca nelivrate (deliveredQuantity 0) nu au scazut
     // inca stocul, dar sunt deja promise — le scadem ca sa nu promitem mai mult decat exista.
+    // NOTA (model "livrare imediata"): orice livrare se creeaza acum direct "Livrat" cu
+    // deliveredQuantity > 0, iar getStockSummary scade deja aceste cantitati din `inStock`.
+    // Deci reservedPending e de regula 0 — ramane ca plasa de siguranta pentru livrari
+    // ramase (legacy/edge) cu deliveredQuantity === 0. inStock proaspat la fiecare cerere
+    // previne supra-vanzarea (serverless: stare reincarcata din KV per request).
     const reservedPending = (state.deliveries || [])
       .filter(
         (d) =>
