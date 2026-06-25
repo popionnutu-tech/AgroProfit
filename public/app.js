@@ -2360,6 +2360,7 @@ function renderOpenJournal() {
     });
 
   const openDeliveries = deliveriesCache.filter((item) => {
+    if (item.status === "Anulat") return false; // livrarea anulata nu mai e de incasat
     const status = item.collectionStatus || "Neincasat";
     const statusMatch = !deliveryStatusFilter || status === deliveryStatusFilter;
     const partnerMatch = !partnerFilter || String(item.customer || "").toLowerCase().includes(partnerFilter);
