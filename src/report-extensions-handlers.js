@@ -49,7 +49,7 @@ async function getDashboardHandler(req, res) {
 
 async function exportResourceHandler(req, res, resource) {
   try {
-    const csv = await exportResourceAsCsv(resource);
+    const csv = await exportResourceAsCsv(resource, req.currentUser && req.currentUser.roleCode);
     const filename = `${resource}-${new Date().toISOString().slice(0, 10)}.csv`;
     if (typeof res.setHeader === "function") {
       res.setHeader("Content-Type", "text/csv; charset=utf-8");
