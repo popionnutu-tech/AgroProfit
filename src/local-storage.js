@@ -3703,14 +3703,16 @@ async function getPeriodReport(from, to) {
   const periodTransactions = filterByDateRange(transactions, from, to);
   const periodDeliveries = filterByDateRange(deliveries, from, to);
   const periodComplaints = filterByDateRange(complaints, from, to);
+  // Sumarul cantitativ exclude receptiile anulate.
+  const activePeriodReceipts = periodReceipts.filter((item) => item.status !== "Anulat");
 
   return {
     from: String(from || "").slice(0, 10),
     to: String(to || "").slice(0, 10),
     summary: {
-      receiptsCount: periodReceipts.length,
-      grossQuantity: periodReceipts.reduce((sum, item) => sum + Number(item.grossQuantity || item.quantity || 0), 0),
-      provisionalNetQuantity: periodReceipts.reduce(
+      receiptsCount: activePeriodReceipts.length,
+      grossQuantity: activePeriodReceipts.reduce((sum, item) => sum + Number(item.grossQuantity || item.quantity || 0), 0),
+      provisionalNetQuantity: activePeriodReceipts.reduce(
         (sum, item) => sum + Number(item.provisionalNetQuantity || item.quantity || 0),
         0
       ),
