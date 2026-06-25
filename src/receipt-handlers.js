@@ -126,15 +126,24 @@ function stripFinancialStats(stats) {
   return clone;
 }
 
+// Capabilitatea "finance" din sesiune. Fail-closed: daca nu o putem confirma → fara finance.
+function requestCanSeeFinance(req) {
+  const permissions =
+    req && req.currentUser && Array.isArray(req.currentUser.permissions)
+      ? req.currentUser.permissions
+      : [];
+  return permissions.includes("finance");
+}
+
+// Aplica filtrarea financiara pe o recepție intoarsa de orice handler, dupa capabilitate.
+function receiptForRequest(req, receipt) {
+  return requestCanSeeFinance(req) ? receipt : stripReceiptFinancials(receipt);
+}
+
 async function listReceiptsHandler(req, res) {
   try {
     const [receipts, stats] = await Promise.all([listReceipts(), getStats()]);
-    // Fail-closed: daca nu putem confirma capabilitatea, tratam ca fara "finance".
-    const permissions =
-      req && req.currentUser && Array.isArray(req.currentUser.permissions)
-        ? req.currentUser.permissions
-        : [];
-    const canSeeFinance = permissions.includes("finance");
+    const canSeeFinance = requestCanSeeFinance(req);
 
     return sendJson(res, 200, {
       receipts: canSeeFinance ? receipts : receipts.map(stripReceiptFinancials),
