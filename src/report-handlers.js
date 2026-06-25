@@ -1,4 +1,17 @@
 const { getDailyReport, getPeriodReport } = require("./storage");
+const { filterCanceledForRole } = require("./permissions");
+
+// Filtreaza documentele anulate din raport dupa rol (admin toate / manager pe ale lui / restul niciuna).
+function filterReportForRole(report, roleCode) {
+  if (!report) return report;
+  if (Array.isArray(report.receipts)) {
+    report.receipts = filterCanceledForRole(report.receipts, roleCode);
+  }
+  if (Array.isArray(report.deliveries)) {
+    report.deliveries = filterCanceledForRole(report.deliveries, roleCode);
+  }
+  return report;
+}
 
 function sendJson(res, statusCode, payload) {
   if (typeof res.status === "function" && typeof res.json === "function") {
