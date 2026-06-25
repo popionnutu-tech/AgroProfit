@@ -127,7 +127,35 @@ function getRoleName(roleCode) {
   return SYSTEM_ROLES.find((item) => item.code === normalizeRoleCode(roleCode))?.name || "";
 }
 
+// Vizibilitatea documentelor ANULATE (sursa unica, folosita si pe server, si pe client):
+//  - admin   → vede toate anulatele
+//  - manager → vede doar anulatele facute de un manager (canceledByRole === "manager")
+//  - restul  → nu vad documentele anulate
+// Documentele ne-anulate raman vizibile normal.
+function canRoleViewCanceled(doc, roleCode) {
+  if (!doc || doc.status !== "Anulat") {
+    return true;
+  }
+  const role = normalizeRoleCode(roleCode);
+  if (role === "admin") {
+    return true;
+  }
+  if (role === "manager") {
+    return doc.canceledByRole === "manager";
+  }
+  return false;
+}
+
+function filterCanceledForRole(docs, roleCode) {
+  if (!Array.isArray(docs)) {
+    return docs;
+  }
+  return docs.filter((doc) => canRoleViewCanceled(doc, roleCode));
+}
+
 module.exports = {
+  canRoleViewCanceled,
+  filterCanceledForRole,
   getRoleName,
   getRolePermissions,
   listSystemRoles,
