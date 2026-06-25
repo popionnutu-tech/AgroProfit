@@ -24,10 +24,12 @@ function getBody(req) {
   return req.body || {};
 }
 
-async function listDeliveriesHandler(_req, res) {
+async function listDeliveriesHandler(req, res) {
   try {
     const deliveries = await listDeliveries();
-    return sendJson(res, 200, { deliveries });
+    // Livrarile anulate sunt filtrate dupa rol (server-side).
+    const visible = filterCanceledForRole(deliveries, req && req.currentUser && req.currentUser.roleCode);
+    return sendJson(res, 200, { deliveries: visible });
   } catch (error) {
     console.error("Failed to load deliveries:", error.message);
     return sendJson(res, 500, { error: "Nu am putut incarca livrarile." });
