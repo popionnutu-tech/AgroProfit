@@ -3534,6 +3534,48 @@ async function cancelReceipt(id, options = {}) {
   return receipt;
 }
 
+// Anulare livrare (admin/manager) — override: functioneaza din ORICE status (inclusiv „Livrat",
+// care prin tranzitia normala nu permite Anulat). Livrarea ramane in lista ca „Anulat" (cu motiv),
+// iar marfa se intoarce in stoc (createStockSummary sare peste „Anulat").
+async function cancelDelivery(id, options = {}) {
+  const state = readReceiptsState();
+  const delivery = (state.deliveries || []).find((item) => item.id === Number(id));
+  if (!delivery) {
+    return null;
+  }
+  if (delivery.status === "Anulat") {
+    return delivery;
+  }
+  const reason = String(options.reason || "").trim();
+  if (!reason) {
+    throw new Error("Motivul anularii este obligatoriu.");
+  }
+  const currentUser = options.currentUser || {};
+  const now = new Date().toISOString();
+  const before = { status: delivery.status, deliveredQuantity: delivery.deliveredQuantity };
+  delivery.status = "Anulat";
+  delivery.canceledAt = now;
+  delivery.cancelReason = reason;
+  delivery.canceledBy = currentUser.name || options.changedBy || "";
+  delivery.canceledByRole = currentUser.roleCode || "";
+  delivery.changedBy = currentUser.name || options.changedBy || delivery.changedBy;
+  delivery.updatedAt = now;
+  createAuditEntry(state, {
+    entityType: "delivery",
+    entityId: delivery.id,
+    action: "cancel",
+    reason,
+    user: delivery.canceledBy || "admin",
+    oldValue: before,
+    newValue: { status: "Anulat", cancelReason: reason }
+  });
+  if (delivery.receiptId) {
+    recalcReceiptDeliveryState(state, delivery.receiptId);
+  }
+  writeReceiptsState(state);
+  return delivery;
+}
+
 // Editare comentariu (note) pe un document existent (admin). Ex.: data reala a operatiei.
 async function updateEntityNote(entityType, id, note, options = {}) {
   const state = readReceiptsState();
