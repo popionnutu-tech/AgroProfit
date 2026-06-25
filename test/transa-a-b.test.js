@@ -358,7 +358,7 @@ test("Q4 complaint invoiceAdjustment creeaza tranzactie compensatorie", async ()
   });
 });
 
-test("SEC receptiile fara „finance" nu expun campuri financiare", () => {
+test("SEC receptiile fara finance nu expun campuri financiare", () => {
   const handlers = require("../src/receipt-handlers");
 
   const receipt = {
