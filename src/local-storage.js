@@ -898,6 +898,8 @@ function createStockSummary(receipts, deliveries = [], openingDocuments = [], tr
   // astfel poarta (pe locatie) si scaderea coincid, dar ramane robust daca produsul
   // a fost mutat intre timp prin procesare/transfer.
   for (const d of deliveries) {
+    // Livrarea anulată nu mai produce mișcare de stoc (anularea întoarce marfa).
+    if (d.status === "Anulat") continue;
     let remaining = Number(d.deliveredQuantity || 0);
     if (remaining <= 0) continue;
     const product = d.product;
