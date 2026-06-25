@@ -2487,8 +2487,8 @@ function renderDailyReport(report) {
         <tr>
           <td>#${item.id}</td>
           <td>${formatDateShort(item.createdAt)}</td>
-          <td>${item.supplier}</td>
-          <td>${item.product}</td>
+          <td>${escapeComboHtml(item.supplier)}</td>
+          <td>${escapeComboHtml(item.product)}</td>
           <td>${formatNumber(item.grossQuantity || item.quantity)}</td>
           <td>${formatNumber(item.provisionalNetQuantity || item.quantity)}</td>
         </tr>
