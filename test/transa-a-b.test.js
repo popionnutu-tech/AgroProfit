@@ -485,6 +485,37 @@ test("Anulare receptie: blocata daca are livrari active", async () => {
   });
 });
 
+test("Anulare livrare: exclusa din KPI livrat (getStats)", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const receipt = await seedReceipt(storage);
+    const d = await storage.createDelivery({
+      receiptId: receipt.id, customerId: 2, customer: "X", plannedQuantity: 20, createdBy: "op"
+    });
+    let stats = await storage.getStats();
+    assert.equal(stats.deliveries.totalDeliveredQuantity, 20);
+
+    await storage.cancelDelivery(d.id, { reason: "test", currentUser: { roleCode: "admin" } });
+    stats = await storage.getStats();
+    assert.equal(stats.deliveries.totalDeliveredQuantity, 0); // anulata nu mai conteaza
+  });
+});
+
+test("filterCanceledForRole: admin vede toate, operator nu vede anulatele, manager doar ale lui", () => {
+  const { filterCanceledForRole } = require("../src/permissions");
+  const docs = [
+    { id: 1, status: "Livrat" },
+    { id: 2, status: "Anulat", canceledByRole: "manager" },
+    { id: 3, status: "Anulat", canceledByRole: "admin" }
+  ];
+  assert.equal(filterCanceledForRole(docs, "admin").length, 3);
+  assert.equal(filterCanceledForRole(docs, "operator").length, 1); // doar Livrat
+  const mgr = filterCanceledForRole(docs, "manager");
+  assert.equal(mgr.length, 2); // Livrat + anulata de manager
+  assert.ok(mgr.find((d) => d.id === 2));
+  assert.ok(!mgr.find((d) => d.id === 3));
+});
+
 test("A#1 atomic writes: writeJsonAtomic creeaza .tmp apoi rename", async () => {
   await withIsolatedWorkspace(async ({ tempWorkspace, load }) => {
     const { writeJsonAtomic } = require("../src/atomic-write");
