@@ -2532,10 +2532,10 @@ function renderDailyReport(report) {
         <tr>
           <td>#${item.id}</td>
           <td>${formatDateShort(item.createdAt)}</td>
-          <td>${item.customer}</td>
-          <td>${item.product}</td>
+          <td>${escapeComboHtml(item.customer)}</td>
+          <td>${escapeComboHtml(item.product)}</td>
           <td>${formatNumber(item.deliveredQuantity)}</td>
-          <td>${item.invoiceNumber || "-"}</td>
+          <td>${escapeComboHtml(item.invoiceNumber || "-")}</td>
         </tr>
       `
     )
