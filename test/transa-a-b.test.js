@@ -334,13 +334,7 @@ test("Q4 complaint invoiceAdjustment creeaza tranzactie compensatorie", async ()
       plannedQuantity: 5,
       createdBy: "op"
     });
-    await storage.transitionDelivery(delivery.id, "Confirmat", { changeReason: "c", currentUser: {} });
-    await storage.transitionDelivery(delivery.id, "Livrat", {
-      grossWeight: 5000,
-      tareWeight: 0,
-      changeReason: "l",
-      currentUser: {}
-    });
+    // Model nou: livrarea e deja „Livrat" la creare.
     const complaint = await storage.createComplaint({
       deliveryId: delivery.id,
       complaintType: "Pret",
