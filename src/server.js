@@ -80,6 +80,7 @@ const {
   getReceiptDefaultsHandler
 } = require("./report-extensions-handlers");
 const storage = require("./storage");
+const { filterCanceledForRole } = require("./permissions");
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
