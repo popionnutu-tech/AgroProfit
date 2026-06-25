@@ -283,6 +283,7 @@ test("Q4 complaint stockCorrection blocat pentru accountant, permis pentru accou
   await withIsolatedWorkspace(async ({ load }) => {
     const storage = load("src/local-storage.js");
     const receipt = await seedReceipt(storage);
+    // Model nou: livrarea e deja „Livrat" la creare, cu deliveredQuantity = plannedQuantity (10 t).
     const delivery = await storage.createDelivery({
       receiptId: receipt.id,
       customerId: 2,
@@ -290,24 +291,17 @@ test("Q4 complaint stockCorrection blocat pentru accountant, permis pentru accou
       plannedQuantity: 10,
       createdBy: "op"
     });
-    await storage.transitionDelivery(delivery.id, "Confirmat", { changeReason: "c", currentUser: {} });
-    await storage.transitionDelivery(delivery.id, "Livrat", {
-      grossWeight: 10000,
-      tareWeight: 0,
-      changeReason: "l",
-      currentUser: {}
-    });
     const complaint = await storage.createComplaint({
       deliveryId: delivery.id,
       complaintType: "Lipsa cantitate",
-      contestedQuantity: 500,
+      contestedQuantity: 2,
       createdBy: "op"
     });
 
     await assert.rejects(
       storage.updateComplaint(complaint.id, {
         status: "Acceptata",
-        stockCorrection: { deliveryId: delivery.id, deltaQuantity: -500, note: "lipsa" },
+        stockCorrection: { deliveryId: delivery.id, deltaQuantity: -2, note: "lipsa" },
         changeReason: "ajustare",
         currentUser: { name: "Contabil", roleCode: "accountant" }
       }),
@@ -316,16 +310,16 @@ test("Q4 complaint stockCorrection blocat pentru accountant, permis pentru accou
 
     const updated = await storage.updateComplaint(complaint.id, {
       status: "Acceptata",
-      stockCorrection: { deliveryId: delivery.id, deltaQuantity: -500, note: "lipsa" },
+      stockCorrection: { deliveryId: delivery.id, deltaQuantity: -2, note: "lipsa" },
       changeReason: "ajustare stoc",
       currentUser: { name: "Șef Contabil", roleCode: "accountant-sef" }
     });
     assert.equal(updated.status, "Acceptata");
-    assert.equal(updated.stockCorrection.deltaQuantity, -500);
+    assert.equal(updated.stockCorrection.deltaQuantity, -2);
 
     const deliveries = await storage.listDeliveries();
     const current = deliveries.find((d) => d.id === delivery.id);
-    assert.equal(current.deliveredQuantity, 9500);
+    assert.equal(current.deliveredQuantity, 8);
   });
 });
 
