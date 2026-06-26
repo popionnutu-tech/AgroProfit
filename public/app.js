@@ -1205,14 +1205,15 @@ function renderStockPeriod() {
   const dayOf = (iso) => String(iso || "").slice(0, 10);
   const products = new Set();
 
-  // Opening stock (counts as stoc inițial, always before any period)
+  // Opening stock (counts as stoc inițial, always before any period).
+  // Sursa: summary-ul de stoc (openingByProduct), independent de rol — astfel „stoc inițial"
+  // apare la TOȚI cei cu drept de stoc (inclusiv operatorul). Nu folosim openingDocumentsCache,
+  // care e gol pentru cine nu are opening-read (financiar).
   const opening = {};
-  (openingDocumentsCache || []).forEach((doc) => {
-    (doc.stockItems || []).forEach((s) => {
-      const p = s.product || "—";
-      products.add(p);
-      opening[p] = (opening[p] || 0) + Number(s.quantity || 0);
-    });
+  const openingByProduct = (lastStockSummary && lastStockSummary.openingByProduct) || {};
+  Object.keys(openingByProduct).forEach((p) => {
+    products.add(p);
+    opening[p] = (opening[p] || 0) + Number(openingByProduct[p] || 0);
   });
 
   const inPeriod = (day) => (!from || day >= from) && (!to || day <= to);
