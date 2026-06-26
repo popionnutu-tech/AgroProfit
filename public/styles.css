@@ -593,11 +593,14 @@ h2 {
   margin-top: 20px;
 }
 
-/* Reclamații și Financiar: formularul de introdus e coloana LATĂ (nu mai e înghesuit).
-   Înainte coloana formularului avea doar ~42% (0,92fr din 0,92+1,28); acum ~57%. */
-.complaint-grid,
-.finance-grid {
+/* Reclamații: formularul de introdus e coloana LATĂ (nu mai e înghesuit). */
+.complaint-grid {
   grid-template-columns: 1.35fr 1fr;
+}
+
+/* Financiar pe verticală: formularul „Plata / incasare" sus, „Tranzactii recente" jos. */
+.finance-grid {
+  grid-template-columns: 1fr;
 }
 
 .reports-panel {
