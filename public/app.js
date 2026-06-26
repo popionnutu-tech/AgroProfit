@@ -2409,7 +2409,7 @@ function renderComplaints(complaints) {
       const perProduct = Object.entries(byProduct).map(([p, q]) => `${p}: ${formatNumber(q)}`).join(" · ");
       complaintsFootEl.innerHTML = `
         <tr class="totals-row">
-          <td colspan="9">TOTAL reclamat: <b>${formatNumber(totalQty)}</b> &nbsp;·&nbsp; Sumă diminuată: <b>${currency.format(totalDeducted)}</b> &nbsp;·&nbsp; ${perProduct}</td>
+          <td colspan="10">TOTAL reclamat: <b>${formatNumber(totalQty)}</b> &nbsp;·&nbsp; Sumă diminuată: <b>${currency.format(totalDeducted)}</b> &nbsp;·&nbsp; ${perProduct}</td>
         </tr>`;
     }
   }
