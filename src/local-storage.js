@@ -3198,9 +3198,16 @@ async function updateReceiptAmount(id, amount, changedBy) {
   if (receipt.status === "Anulat") {
     throw new Error("Receptia este anulata. Nu se poate ajusta valoarea.");
   }
+  if (typeof amount !== "number" && typeof amount !== "string") {
+    throw new Error("Valoarea trebuie sa fie un numar.");
+  }
   const value = sanitizeNumber(amount);
   if (!(value >= 0)) {
     throw new Error("Valoarea trebuie sa fie un numar pozitiv.");
+  }
+  // Plafon de siguranta (bani reali): o receptie de cereale nu depaseste realist acest prag.
+  if (value > 1000000000) {
+    throw new Error("Valoarea introdusa este nerealist de mare.");
   }
 
   const oldValue = { preliminaryPayableAmount: receipt.preliminaryPayableAmount, price: receipt.price };
