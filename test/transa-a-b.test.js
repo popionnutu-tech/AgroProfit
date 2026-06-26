@@ -734,3 +734,29 @@ test("FIN KPI: tranzactia anulata e exclusa din totalul financiar (getStats)", a
     assert.equal(stats.finance.totalPayments, 0); // anulata nu mai conteaza
   });
 });
+
+test("STORNO: anularea platii redeschide datoria receptiei; redeschiderea o reaplica", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const receipt = await seedReceipt(storage, { preliminaryPayableAmount: 1000 });
+    const tx = await storage.createTransaction({
+      referenceType: "receipt", receiptId: receipt.id, partnerId: 1, partner: "Agro Nord",
+      direction: "payment", amount: 400, createdBy: "contabil"
+    });
+    let r = (await storage.listReceipts()).find((x) => x.id === receipt.id);
+    assert.equal(r.paidAmount, 400);
+    assert.equal(r.soldRestant, 600);
+    assert.equal(r.paymentStatus, "Partial");
+    // anulare plata (admin) -> storno: datoria revine la 1000
+    await storage.updateTransaction(tx.id, { status: "Anulat", changeReason: "gresit", actorRole: "admin" });
+    r = (await storage.listReceipts()).find((x) => x.id === receipt.id);
+    assert.equal(r.paidAmount, 0);
+    assert.equal(r.soldRestant, 1000);
+    assert.equal(r.paymentStatus, "Neachitat");
+    // redeschidere -> plata se reaplica
+    await storage.updateTransaction(tx.id, { status: "Confirmat", changeReason: "revin", actorRole: "admin" });
+    r = (await storage.listReceipts()).find((x) => x.id === receipt.id);
+    assert.equal(r.paidAmount, 400);
+    assert.equal(r.paymentStatus, "Partial");
+  });
+});
