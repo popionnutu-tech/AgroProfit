@@ -6065,7 +6065,8 @@ addOpeningStockButton.addEventListener("click", () => {
     productId: product.id,
     location: location.name,
     locationId: location.id,
-    quantity,
+    // Formularul primește KG (ca recepție/livrare); stocul intern e în TONE → ÷1000.
+    quantity: quantity / 1000,
     unit: product.unit
   });
   openingStockQuantityEl.value = "";
