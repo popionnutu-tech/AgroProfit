@@ -419,7 +419,7 @@ app.post(
 // Anulare receptie (admin/manager) — ramane in lista ca „Anulat", exclusa din stoc.
 app.post(
   "/api/receipts/:id/cancel",
-  requireRoles(["manager", "admin"]),
+  requireRoles(["admin"]),
   async (req, res) => {
     try {
       const receipt = await storage.cancelReceipt(req.params.id, {
