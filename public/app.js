@@ -1386,11 +1386,15 @@ function renderCriticalAlertsStatus(status) {
     .join("");
 }
 
-function statusOptions(current) {
-  return ["Draft", "Confirmat", "Procesata", "Inchis", "Anulat", "Redeschis", "Noua", "Verificata", "Finalizata"].map((status) => {
-    const selected = current === status ? "selected" : "";
-    return `<option value="${status}" ${selected}>${status}</option>`;
-  });
+function statusOptions(current, allowCancel = canCancelDocuments()) {
+  // „Anulat" apare doar pentru cine poate anula (admin). Pastram „Anulat" daca documentul
+  // e deja anulat, ca sa nu se piarda valoarea curenta din select.
+  return ["Draft", "Confirmat", "Procesata", "Inchis", "Anulat", "Redeschis", "Noua", "Verificata", "Finalizata"]
+    .filter((status) => status !== "Anulat" || allowCancel || current === "Anulat")
+    .map((status) => {
+      const selected = current === status ? "selected" : "";
+      return `<option value="${status}" ${selected}>${status}</option>`;
+    });
 }
 
 // ---- Date-range filtering + totals helpers (Etapa 2) ----
