@@ -1343,6 +1343,7 @@ async function listReceipts() {
   for (const t of state.transactions || []) {
     if (t.referenceType !== "receipt" || t.direction !== "payment") continue;
     if (t.stornata === true) continue; // storned payments don't count
+    if (t.status === "Anulat") continue; // anularea plății = storno: datoria se redeschide
     const rid = Number(t.receiptId);
     if (!rid) continue;
     const applied = Number(t.appliedAmount ?? t.amount ?? 0);
