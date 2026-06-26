@@ -718,3 +718,19 @@ test("FIN VIZ: tranzactiile anulate vizibile doar contabil-sef + admin", () => {
   assert.equal(filterCanceledTransactionsForRole(docs, "manager").length, 1);
   assert.equal(filterCanceledTransactionsForRole(docs, "control").length, 1);
 });
+
+test("FIN KPI: tranzactia anulata e exclusa din totalul financiar (getStats)", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const receipt = await seedReceipt(storage, { preliminaryPayableAmount: 1000 });
+    const tx = await storage.createTransaction({
+      referenceType: "receipt", receiptId: receipt.id, partnerId: 1, partner: "Agro Nord",
+      direction: "payment", amount: 400, createdBy: "contabil"
+    });
+    let stats = await storage.getStats();
+    assert.equal(stats.finance.totalPayments, 400);
+    await storage.updateTransaction(tx.id, { status: "Anulat", changeReason: "gresit", actorRole: "admin" });
+    stats = await storage.getStats();
+    assert.equal(stats.finance.totalPayments, 0); // anulata nu mai conteaza
+  });
+});
