@@ -1184,7 +1184,13 @@
         </section>
 
         <section class="grid delivery-grid" data-view="livrari">
-          <form class="panel form-panel" id="delivery-form" data-access="delivery-write">
+          <div class="receipt-new-bar" data-access="delivery-write" style="grid-column: 1 / -1;">
+            <button type="button" id="delivery-new-toggle" class="receipt-new-btn" aria-expanded="false" aria-controls="delivery-form">
+              <span class="rnb-icon">＋</span> Livrare nouă
+            </button>
+            <span class="receipt-new-hint">Apasă pentru a deschide formularul de livrare.</span>
+          </div>
+          <form class="panel form-panel collapsed" id="delivery-form" data-access="delivery-write">
               <div class="panel-head">
                 <h2>Livrare / iesire din stoc</h2>
                 <p>Formular scurt pentru iesirea reala din stoc, cu detalii comerciale optionale.</p>
