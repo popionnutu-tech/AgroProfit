@@ -4010,6 +4010,7 @@ async function loadOpeningDocuments() {
   const data = await response.json();
   openingDocumentsCache = data.openingDocuments;
   renderOpenJournal();
+  renderOpeningDocsList();
 }
 
 async function loadDailyReport() {
