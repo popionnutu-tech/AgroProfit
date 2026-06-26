@@ -2978,6 +2978,7 @@ const STATUS_CONFIRMED_PLUS = ["Confirmat", "Procesata", "Inchis", "Redeschis", 
 function forbiddenError(message) {
   const err = new Error(message);
   err.forbidden = true;
+  err.statusCode = 403;
   return err;
 }
 
