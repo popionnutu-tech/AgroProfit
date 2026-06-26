@@ -733,7 +733,7 @@ function renderOpeningDrafts() {
         <tr>
           <td>${item.product}</td>
           <td>${item.location}</td>
-          <td>${formatNumber(item.quantity)}</td>
+          <td>${formatNumber(Math.round(Number(item.quantity || 0) * 1000))} kg (${formatNumber(Number(item.quantity || 0))} t)</td>
         </tr>
       `
     )
