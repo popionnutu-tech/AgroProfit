@@ -517,7 +517,7 @@ app.post("/api/deliveries/:id/close", requireRoles(["manager", "admin"]), async 
   return transitionDeliveryHandler(req, res, req.params.id, "Inchis");
 });
 
-app.post("/api/deliveries/:id/cancel", requireRoles(["manager", "admin"]), async (req, res) => {
+app.post("/api/deliveries/:id/cancel", requireRoles(["admin"]), async (req, res) => {
   // Override admin/manager: anuleaza din orice status (inclusiv „Livrat"), cu motiv obligatoriu.
   try {
     const delivery = await storage.cancelDelivery(req.params.id, {
