@@ -170,6 +170,7 @@ async function updateTransactionHandler(req, res, id) {
 
     const transaction = await updateTransaction(id, {
       ...getBody(req),
+      actorRole: req.currentUser && req.currentUser.roleCode,
       changedBy: getActorLabel(req)
     });
 
@@ -184,6 +185,9 @@ async function updateTransactionHandler(req, res, id) {
     });
     return response;
   } catch (error) {
+    if (error.forbidden) {
+      return sendJson(res, 403, { error: error.message });
+    }
     console.error("Failed to update transaction:", error.message);
     return sendJson(res, 400, { error: error.message || "Nu am putut actualiza tranzactia." });
   }
