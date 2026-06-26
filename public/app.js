@@ -2087,8 +2087,8 @@ function renderTransactions(transactions) {
         <tr>
           <td>#${item.id}</td>
           <td>${formatDateShort(item.createdAt || item.transactedAt)}</td>
-          <td>${item.referenceType === "delivery" ? `Livrare #${item.deliveryId}` : `Receptie #${item.receiptId}`}</td>
-          <td>${item.partner}</td>
+          <td>${item.referenceType === "delivery" ? `Livrare #${item.deliveryId}` : item.referenceType === "opening-debt" ? `Datorie inițială` : `Receptie #${item.receiptId}`}</td>
+          <td>${escapeComboHtml(item.partner || "")}</td>
           <td>${item.direction === "collection" ? "Incasare" : "Plata"}</td>
           <td>
             <div>${item.paymentType || "-"}</div>
