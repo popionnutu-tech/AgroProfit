@@ -6013,6 +6013,24 @@ document.addEventListener("click", async (event) => {
   });
 })();
 
+// Toggle formular „Livrare nouă" — ascuns implicit, se deschide la apăsare (ca la Recepții).
+(function setupDeliveryNewToggle() {
+  const toggle = document.getElementById("delivery-new-toggle");
+  if (!toggle || !deliveryFormEl) return;
+  toggle.addEventListener("click", () => {
+    const willOpen = deliveryFormEl.classList.contains("collapsed");
+    deliveryFormEl.classList.toggle("collapsed", !willOpen);
+    toggle.setAttribute("aria-expanded", String(willOpen));
+    toggle.classList.toggle("is-open", willOpen);
+    toggle.innerHTML = willOpen
+      ? '<span class="rnb-icon">✕</span> Închide formularul'
+      : '<span class="rnb-icon">＋</span> Livrare nouă';
+    if (willOpen) {
+      deliveryFormEl.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  });
+})();
+
 // Stock period filter (Modul F)
 document.getElementById("stock-period-from")?.addEventListener("change", renderStockPeriod);
 document.getElementById("stock-period-to")?.addEventListener("change", renderStockPeriod);
