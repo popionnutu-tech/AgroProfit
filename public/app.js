@@ -2383,6 +2383,7 @@ function renderComplaints(complaints) {
               }).join("")}
             </select>
           </td>
+          <td><button type="button" class="cell-btn cell-btn-details" data-action="complaint-details" data-id="${item.id}">Detalii</button></td>
         </tr>
       `;
       }
