@@ -397,7 +397,7 @@ app.post(
 // Anulare transfer (admin/manager) — ramane in lista ca „Anulat", fara miscare de stoc.
 app.post(
   "/api/transfers/:id/cancel",
-  requireRoles(["manager", "admin"]),
+  requireRoles(["admin"]),
   async (req, res) => {
     try {
       const transfer = await storage.cancelTransfer(req.params.id, {
@@ -419,7 +419,7 @@ app.post(
 // Anulare receptie (admin/manager) — ramane in lista ca „Anulat", exclusa din stoc.
 app.post(
   "/api/receipts/:id/cancel",
-  requireRoles(["manager", "admin"]),
+  requireRoles(["admin"]),
   async (req, res) => {
     try {
       const receipt = await storage.cancelReceipt(req.params.id, {
@@ -517,7 +517,7 @@ app.post("/api/deliveries/:id/close", requireRoles(["manager", "admin"]), async 
   return transitionDeliveryHandler(req, res, req.params.id, "Inchis");
 });
 
-app.post("/api/deliveries/:id/cancel", requireRoles(["manager", "admin"]), async (req, res) => {
+app.post("/api/deliveries/:id/cancel", requireRoles(["admin"]), async (req, res) => {
   // Override admin/manager: anuleaza din orice status (inclusiv „Livrat"), cu motiv obligatoriu.
   try {
     const delivery = await storage.cancelDelivery(req.params.id, {

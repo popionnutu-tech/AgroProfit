@@ -2161,6 +2161,9 @@ async function updateProcessing(id, payload = {}) {
   if (payload.status !== undefined) {
     const newStatus = requiredText(payload.status, "Status procesare");
     const oldStatus = processing.status;
+    // „Anulat" doar admin; schimbarea statutului unei procesari confirmate doar manager+admin.
+    // Finalizarea (In lucru → Confirmat) ramane permisa operatorului (oldStatus „In lucru" nu e confirmat).
+    assertStatusChangePermission(oldStatus, newStatus, payload.actorRole);
     const wasInactive = oldStatus === "In lucru" || oldStatus === "Anulat";
     const willAffectStock = newStatus !== "In lucru" && newStatus !== "Anulat";
     // #8 re-verificat: la activarea unei procesari (model miscare) trebuie sa existe stoc.
@@ -2483,6 +2486,9 @@ async function transitionDelivery(id, newStatus, payload = {}) {
   }
 
   const currentStatus = delivery.status || "Proiect";
+  // Aceeasi regula globala ca la receptie/procesare: „Anulat" doar admin, schimbarea
+  // statutului unei livrari confirmate (Livrat/Redeschis/...) doar manager+admin.
+  assertStatusChangePermission(currentStatus, newStatus, (payload.currentUser || {}).roleCode);
   const allowedNext = DELIVERY_TRANSITIONS[currentStatus] || [];
   if (!allowedNext.includes(newStatus)) {
     throw new Error(
@@ -2966,6 +2972,36 @@ async function updateReceiptStatus(id, status) {
   return receipt;
 }
 
+// Reguli globale de control pe schimbarea de status (sursa de adevar duplicata in frontend):
+//  - status „Anulat" → DOAR admin (peste tot);
+//  - schimbarea statutului unui document deja CONFIRMAT → DOAR manager + admin.
+// Documentele neconfirmate (Draft/Noua/In lucru→Confirmat = finalizare) raman ca inainte.
+const STATUS_CONFIRMED_PLUS = ["Confirmat", "Procesata", "Inchis", "Redeschis", "Finalizata", "Livrat", "Verificata"];
+
+function forbiddenError(message) {
+  const err = new Error(message);
+  err.forbidden = true;
+  err.statusCode = 403;
+  return err;
+}
+
+// ATENTIE: orice apelant expus unui utilizator (handler de ruta) TREBUIE sa paseze rolul
+// din req.currentUser.roleCode. Daca `role` lipseste, regula se autodezactiveaza (apel intern).
+function assertStatusChangePermission(currentStatus, newStatus, role) {
+  if (!role) return; // apel intern fara actor (ex. flux automat / teste vechi) — necontrolat
+  if (newStatus === "Anulat" && role !== "admin") {
+    throw forbiddenError("Doar administratorul poate anula documente.");
+  }
+  if (
+    newStatus !== currentStatus &&
+    STATUS_CONFIRMED_PLUS.includes(currentStatus) &&
+    role !== "admin" &&
+    role !== "manager"
+  ) {
+    throw forbiddenError("Doar managerul sau administratorul pot schimba statutul unui document confirmat.");
+  }
+}
+
 async function updateReceiptStatusWithAudit(id, status, payload = {}) {
   const state = readReceiptsState();
   const receipt = state.receipts.find((item) => item.id === Number(id));
@@ -2977,6 +3013,7 @@ async function updateReceiptStatusWithAudit(id, status, payload = {}) {
   const reason = requiredChangeReason(payload.changeReason);
   const oldValue = { status: receipt.status };
 
+  assertStatusChangePermission(receipt.status, status, payload.actorRole);
   assertReceiptStatusTransition(receipt.status, status);
   receipt.status = status;
   receipt.updatedAt = new Date().toISOString();

@@ -284,8 +284,18 @@ function canViewCanceled(item) {
   return false;
 }
 
-// Cine poate anula documente: admin + manager.
+// Statusuri „confirmat-sau-mai-departe": odată ce un document ajunge aici, schimbarea
+// statutului e rezervata manager+admin (sursa de adevar duplicata si in backend —
+// TINE SINCRON cu STATUS_CONFIRMED_PLUS din src/local-storage.js).
+const CONFIRMED_PLUS = ["Confirmat", "Procesata", "Inchis", "Redeschis", "Finalizata", "Livrat", "Verificata"];
+
+// Cine poate ANULA documente (status „Anulat"): DOAR admin.
 function canCancelDocuments() {
+  return currentSessionUser?.roleCode === "admin";
+}
+
+// Cine poate schimba statutul unui document deja confirmat: manager + admin.
+function canEditConfirmedStatus() {
   const role = currentSessionUser?.roleCode;
   return role === "admin" || role === "manager";
 }
@@ -1377,11 +1387,15 @@ function renderCriticalAlertsStatus(status) {
     .join("");
 }
 
-function statusOptions(current) {
-  return ["Draft", "Confirmat", "Procesata", "Inchis", "Anulat", "Redeschis", "Noua", "Verificata", "Finalizata"].map((status) => {
-    const selected = current === status ? "selected" : "";
-    return `<option value="${status}" ${selected}>${status}</option>`;
-  });
+function statusOptions(current, allowCancel = canCancelDocuments()) {
+  // „Anulat" apare doar pentru cine poate anula (admin). Pastram „Anulat" daca documentul
+  // e deja anulat, ca sa nu se piarda valoarea curenta din select.
+  return ["Draft", "Confirmat", "Procesata", "Inchis", "Anulat", "Redeschis", "Noua", "Verificata", "Finalizata"]
+    .filter((status) => status !== "Anulat" || allowCancel || current === "Anulat")
+    .map((status) => {
+      const selected = current === status ? "selected" : "";
+      return `<option value="${status}" ${selected}>${status}</option>`;
+    });
 }
 
 // ---- Date-range filtering + totals helpers (Etapa 2) ----
@@ -1462,7 +1476,7 @@ function renderReceipts(receipts) {
         : formatQtyByEntry(item.provisionalNetQuantity || item.quantity, item);
       const statusCell = isPendingWeighing
         ? `<span class="status-badge badge-warn" title="Așteaptă a doua cântărire (tara)">În descărcare</span>`
-        : `<select class="status" data-id="${item.id}" ${canEditStatuses ? "" : "disabled"}>${statusOptions(item.status).join("")}</select>`;
+        : `<select class="status" data-id="${item.id}" ${(CONFIRMED_PLUS.includes(item.status) ? canEditConfirmedStatus() : canEditStatuses) ? "" : "disabled"}>${statusOptions(item.status).join("")}</select>`;
       const actionCell = isPendingWeighing
         ? "—"
         : canPay
@@ -1868,7 +1882,9 @@ function renderUnprocessedStock() {
 }
 
 function renderProcessings(processings) {
-  const canEditStatuses = canAccess("processing-write");
+  // Procesarea afisata aici (non-„In lucru") e deja confirmata → schimbarea statutului e
+  // rezervata manager+admin; optiunea „Anulat" doar admin.
+  const canEditStatuses = canEditConfirmedStatus();
   const filteredProcessings = processings.filter((item) => {
     const typeMatch =
       !processingTypeFilterEl.value || item.processingType === processingTypeFilterEl.value;
@@ -1895,7 +1911,9 @@ function renderProcessings(processings) {
             ${item.status === "In lucru"
               ? `<span class="badge-inlucru" title="Se finalizează din panoul „Procesări în lucru» de mai sus">În lucru</span>`
               : `<select class="processing-status" data-id="${item.id}" ${canEditStatuses ? "" : "disabled"}>
-                  ${["Confirmat", "Inchis", "Anulat", "Redeschis"].map((status) => {
+                  ${["Confirmat", "Inchis", "Anulat", "Redeschis"]
+                    .filter((status) => status !== "Anulat" || canCancelDocuments() || item.status === "Anulat")
+                    .map((status) => {
                     const selected = item.status === status ? "selected" : "";
                     return `<option value="${status}" ${selected}>${status}</option>`;
                   }).join("")}
@@ -1940,7 +1958,9 @@ function renderProcessingInlucru(processings) {
             ${canEdit
               ? `<div class="proc-inlucru-actions">
                    <button type="button" class="cell-btn cell-btn-primary processing-finalize-btn" data-id="${item.id}">Finalizează</button>
-                   <button type="button" class="cell-btn cell-btn-danger processing-cancel-btn" data-id="${item.id}">Anulează</button>
+                   ${canCancelDocuments()
+                     ? `<button type="button" class="cell-btn cell-btn-danger processing-cancel-btn" data-id="${item.id}">Anulează</button>`
+                     : ""}
                  </div>`
               : `<span class="badge-inlucru">În lucru</span>`}
           </td>
@@ -2165,7 +2185,9 @@ function deliveryInvoiceTotals(item) {
 }
 
 function renderDeliveries(deliveries) {
-  const canEditStatuses = canAccess("delivery-write");
+  // Livrarea e „Livrat" (confirmata) din momentul crearii → schimbarea statutului
+  // (Inchis/Redeschis) e rezervata manager+admin. Anularea (admin) e separat, in docActionsCell.
+  const canEditStatuses = canEditConfirmedStatus();
   // Financial columns (vanzator, masina, pret) hidden for operators (no finance access)
   const deliveriesTable = document.getElementById("deliveries-table");
   if (deliveriesTable) {

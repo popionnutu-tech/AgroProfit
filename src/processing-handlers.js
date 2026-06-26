@@ -68,6 +68,7 @@ async function updateProcessingHandler(req, res, id) {
   try {
     const processing = await updateProcessing(id, {
       ...getBody(req),
+      actorRole: req.currentUser && req.currentUser.roleCode,
       changedBy: getActorLabel(req)
     });
 
@@ -77,6 +78,9 @@ async function updateProcessingHandler(req, res, id) {
 
     return sendJson(res, 200, processing);
   } catch (error) {
+    if (error.forbidden) {
+      return sendJson(res, 403, { error: error.message });
+    }
     console.error("Failed to update processing:", error.message);
     return sendJson(res, 400, { error: error.message || "Nu am putut actualiza procesarea." });
   }

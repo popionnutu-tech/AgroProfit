@@ -549,3 +549,94 @@ test("runMigrationIfNeeded ruleaza o singura data (idempotent)", async () => {
     assert.equal(second.version, first.version);
   });
 });
+
+// ── Anulare/status: doar admin / manager+admin (regula globala) ───────────────
+test("PERM receptie confirmata: operatorul nu poate schimba statutul, managerul da", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const receipt = await seedReceipt(storage, { status: "Confirmat" });
+    // operatorul nu poate schimba statutul unui document confirmat
+    await assert.rejects(
+      storage.updateReceiptStatusWithAudit(receipt.id, "Inchis", { changeReason: "x", actorRole: "operator" }),
+      /confirmat/i
+    );
+    // operatorul nu poate anula (Anulat = doar admin)
+    await assert.rejects(
+      storage.updateReceiptStatusWithAudit(receipt.id, "Anulat", { changeReason: "x", actorRole: "operator" }),
+      /administratorul/i
+    );
+    // managerul poate schimba statutul confirmat
+    const r1 = await storage.updateReceiptStatusWithAudit(receipt.id, "Inchis", { changeReason: "ok", actorRole: "manager" });
+    assert.equal(r1.status, "Inchis");
+    // dar managerul NU poate anula
+    await assert.rejects(
+      storage.updateReceiptStatusWithAudit(receipt.id, "Anulat", { changeReason: "x", actorRole: "manager" }),
+      /administratorul/i
+    );
+    // adminul poate anula
+    const r2 = await storage.updateReceiptStatusWithAudit(receipt.id, "Anulat", { changeReason: "gresit", actorRole: "admin" });
+    assert.equal(r2.status, "Anulat");
+  });
+});
+
+test("PERM receptie neconfirmata: operatorul poate confirma (flux normal)", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const receipt = await seedReceipt(storage, { status: "Draft" });
+    const r = await storage.updateReceiptStatusWithAudit(receipt.id, "Confirmat", { changeReason: "ok", actorRole: "operator" });
+    assert.equal(r.status, "Confirmat");
+  });
+});
+
+test("PERM procesare: operatorul finalizeaza dar nu anuleaza; manager/admin schimba statutul", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    await seedReceipt(storage, { status: "Confirmat", location: "Siloz 1" });
+    // procesare „in lucru" — operatorul o poate FINALIZA (In lucru -> Confirmat)
+    const wip = await storage.createProcessing({
+      product: "Grau", sourceLocation: "Siloz 1", processingType: "Pastrare",
+      processedQuantity: 10, status: "In lucru", createdBy: "op"
+    });
+    const fin = await storage.updateProcessing(wip.id, {
+      status: "Confirmat", destLocation: "Siloz 1", changeReason: "Finalizare", actorRole: "operator"
+    });
+    assert.equal(fin.status, "Confirmat");
+    // dupa confirmare, operatorul NU mai poate schimba statutul, nici anula
+    await assert.rejects(
+      storage.updateProcessing(wip.id, { status: "Inchis", changeReason: "x", actorRole: "operator" }),
+      /confirmat/i
+    );
+    await assert.rejects(
+      storage.updateProcessing(wip.id, { status: "Anulat", changeReason: "x", actorRole: "operator" }),
+      /administratorul/i
+    );
+    // managerul schimba statutul confirmat, dar nu anuleaza
+    const mgr = await storage.updateProcessing(wip.id, { status: "Inchis", changeReason: "ok", actorRole: "manager" });
+    assert.equal(mgr.status, "Inchis");
+    await assert.rejects(
+      storage.updateProcessing(wip.id, { status: "Anulat", changeReason: "x", actorRole: "manager" }),
+      /administratorul/i
+    );
+    // adminul anuleaza
+    const adm = await storage.updateProcessing(wip.id, { status: "Anulat", changeReason: "gresit", actorRole: "admin" });
+    assert.equal(adm.status, "Anulat");
+  });
+});
+
+test("PERM livrare confirmata: operatorul nu poate schimba statutul, managerul da", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const receipt = await seedReceipt(storage);
+    const delivery = await storage.createDelivery({
+      receiptId: receipt.id, customerId: 2, customer: "X", plannedQuantity: 10, createdBy: "op"
+    });
+    // livrarea se creeaza „Livrat" (confirmata) → operatorul nu o poate inchide
+    await assert.rejects(
+      storage.transitionDelivery(delivery.id, "Inchis", { changeReason: "x", currentUser: { roleCode: "operator" } }),
+      /confirmat/i
+    );
+    // managerul poate
+    const d = await storage.transitionDelivery(delivery.id, "Inchis", { changeReason: "ok", currentUser: { roleCode: "manager" } });
+    assert.equal(d.status, "Inchis");
+  });
+});
