@@ -945,9 +945,24 @@ function createStockSummary(receipts, deliveries = [], openingDocuments = [], tr
     totalProducts: new Set(byLocation.map((item) => item.product)).size
   };
 
+  // Sold initial expus in summary-ul de stoc (in TONE), independent de rol — ca „stoc inițial"
+  // sa fie vizibil tuturor celor cu drept de stoc (inclusiv operatorul, care NU are opening-read
+  // financiar). Sunt DOAR cantitati fizice, fara datorii/bani.
+  const openingByProduct = {};
+  const openingByLocation = {};
+  for (const item of openingStockItems) {
+    const product = item.product || "—";
+    const qty = Number(item.quantity || 0);
+    openingByProduct[product] = (openingByProduct[product] || 0) + qty;
+    const locKey = `${item.location || "Fara locatie"}::${product}`;
+    openingByLocation[locKey] = (openingByLocation[locKey] || 0) + qty;
+  }
+
   return {
     byLocation,
-    totals
+    totals,
+    openingByProduct,
+    openingByLocation
   };
 }
 
