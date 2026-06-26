@@ -284,8 +284,17 @@ function canViewCanceled(item) {
   return false;
 }
 
-// Cine poate anula documente: admin + manager.
+// Statusuri „confirmat-sau-mai-departe": odată ce un document ajunge aici, schimbarea
+// statutului e rezervata manager+admin (sursa de adevar duplicata si in backend).
+const CONFIRMED_PLUS = ["Confirmat", "Procesata", "Inchis", "Redeschis", "Finalizata", "Livrat", "Verificata"];
+
+// Cine poate ANULA documente (status „Anulat"): DOAR admin.
 function canCancelDocuments() {
+  return currentSessionUser?.roleCode === "admin";
+}
+
+// Cine poate schimba statutul unui document deja confirmat: manager + admin.
+function canEditConfirmedStatus() {
   const role = currentSessionUser?.roleCode;
   return role === "admin" || role === "manager";
 }
