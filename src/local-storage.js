@@ -2321,7 +2321,20 @@ async function updateTransaction(id, payload = {}) {
   };
 
   if (payload.status !== undefined) {
-    transaction.status = requiredText(payload.status, "Status tranzactie");
+    const newStatus = requiredText(payload.status, "Status tranzactie");
+    // Statutul plății îl pot schimba DOAR administratorul sau contabilul-șef.
+    if (newStatus !== transaction.status) {
+      const role = payload.actorRole;
+      if (role && role !== "admin" && role !== "accountant-sef") {
+        throw forbiddenError("Doar administratorul sau contabilul-șef pot schimba statutul plății.");
+      }
+      // Marcăm anularea ca să o putem face vizibilă doar contabilului-șef + admin.
+      if (newStatus === "Anulat") {
+        transaction.canceledByRole = role || transaction.canceledByRole || null;
+        transaction.canceledAt = new Date().toISOString();
+      }
+    }
+    transaction.status = newStatus;
   }
 
   if (payload.note !== undefined) {
