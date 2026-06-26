@@ -2161,6 +2161,9 @@ async function updateProcessing(id, payload = {}) {
   if (payload.status !== undefined) {
     const newStatus = requiredText(payload.status, "Status procesare");
     const oldStatus = processing.status;
+    // „Anulat" doar admin; schimbarea statutului unei procesari confirmate doar manager+admin.
+    // Finalizarea (In lucru → Confirmat) ramane permisa operatorului (oldStatus „In lucru" nu e confirmat).
+    assertStatusChangePermission(oldStatus, newStatus, payload.actorRole);
     const wasInactive = oldStatus === "In lucru" || oldStatus === "Anulat";
     const willAffectStock = newStatus !== "In lucru" && newStatus !== "Anulat";
     // #8 re-verificat: la activarea unei procesari (model miscare) trebuie sa existe stoc.
