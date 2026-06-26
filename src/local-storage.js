@@ -677,13 +677,16 @@ function createProcessingSummary(processings) {
 }
 
 function createTransactionSummary(transactions) {
-  const supplierPayments = transactions.filter((item) => item.direction === "payment");
-  const customerCollections = transactions.filter((item) => item.direction === "collection");
+  // Tranzacțiile anulate NU intră în KPI (consecvent cu recepții/livrări) — altfel o plată
+  // anulată ar umfla totalul, deși a dispărut din listă.
+  const active = (transactions || []).filter((item) => item.status !== "Anulat");
+  const supplierPayments = active.filter((item) => item.direction === "payment");
+  const customerCollections = active.filter((item) => item.direction === "collection");
 
   return {
     totalPayments: supplierPayments.reduce((sum, item) => sum + Number(item.amount || 0), 0),
     totalCollections: customerCollections.reduce((sum, item) => sum + Number(item.amount || 0), 0),
-    totalTransactions: transactions.length
+    totalTransactions: active.length
   };
 }
 

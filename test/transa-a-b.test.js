@@ -663,3 +663,58 @@ test("STOC: summary expune openingByProduct (sold initial vizibil indiferent de 
     assert.equal(s1.quantity, 50);
   });
 });
+
+test("NUM: sanitizeNumber accepta virgula zecimala (pret livrare 4,09 -> 4.09)", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const receipt = await seedReceipt(storage);
+    const delivery = await storage.createDelivery({
+      receiptId: receipt.id, customerId: 2, customer: "X", plannedQuantity: 10, createdBy: "op"
+    });
+    const updated = await storage.updateDelivery(delivery.id, {
+      priceForeign: "4,09", changeReason: "Completare date factura"
+    });
+    assert.equal(updated.priceForeign, 4.09);
+  });
+});
+
+test("FIN PERM: statutul platii doar admin + contabil-sef; anulat marcheaza rolul", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const receipt = await seedReceipt(storage, { preliminaryPayableAmount: 1000 });
+    const tx = await storage.createTransaction({
+      referenceType: "receipt", receiptId: receipt.id, partnerId: 1, partner: "Agro Nord",
+      direction: "payment", amount: 500, createdBy: "contabil"
+    });
+    // contabilul simplu NU poate schimba statutul
+    await assert.rejects(
+      storage.updateTransaction(tx.id, { status: "Inchis", changeReason: "x", actorRole: "accountant" }),
+      /contabil/i
+    );
+    // managerul NU poate (are finance dar nu e admin/contabil-sef)
+    await assert.rejects(
+      storage.updateTransaction(tx.id, { status: "Inchis", changeReason: "x", actorRole: "manager" }),
+      /contabil/i
+    );
+    // contabilul-sef poate
+    const t1 = await storage.updateTransaction(tx.id, { status: "Inchis", changeReason: "ok", actorRole: "accountant-sef" });
+    assert.equal(t1.status, "Inchis");
+    // adminul anuleaza -> se marcheaza canceledByRole
+    const t2 = await storage.updateTransaction(tx.id, { status: "Anulat", changeReason: "gresit", actorRole: "admin" });
+    assert.equal(t2.status, "Anulat");
+    assert.equal(t2.canceledByRole, "admin");
+  });
+});
+
+test("FIN VIZ: tranzactiile anulate vizibile doar contabil-sef + admin", () => {
+  const { filterCanceledTransactionsForRole } = require("../src/permissions");
+  const docs = [
+    { id: 1, status: "Confirmat" },
+    { id: 2, status: "Anulat", canceledByRole: "admin" }
+  ];
+  assert.equal(filterCanceledTransactionsForRole(docs, "admin").length, 2);
+  assert.equal(filterCanceledTransactionsForRole(docs, "accountant-sef").length, 2);
+  assert.equal(filterCanceledTransactionsForRole(docs, "accountant").length, 1);
+  assert.equal(filterCanceledTransactionsForRole(docs, "manager").length, 1);
+  assert.equal(filterCanceledTransactionsForRole(docs, "control").length, 1);
+});
