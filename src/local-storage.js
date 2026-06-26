@@ -4436,6 +4436,7 @@ module.exports = {
   updateReceiptStatusWithAudit,
   completeReceiptWeighing,
   updateReceiptSupplier,
+  updateReceiptAmount,
   updateSystemSettings,
   updateTransaction,
   updateUserById,
