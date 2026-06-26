@@ -752,6 +752,52 @@ function renderOpeningDrafts() {
     .join("");
 }
 
+// Lista documentelor de sold inițial salvate (admin) — cu ștergere, pentru a corecta intrări greșite.
+function renderOpeningDocsList() {
+  const body = document.getElementById("opening-docs-list-body");
+  if (!body) return;
+  const docs = openingDocumentsCache || [];
+  if (!docs.length) {
+    body.innerHTML = `<tr><td colspan="4" class="rd-empty">Niciun document.</td></tr>`;
+    return;
+  }
+  body.innerHTML = docs
+    .map((doc) => {
+      const stocuri = (doc.stockItems || [])
+        .map((s) => `${escapeComboHtml(s.product)} @ ${escapeComboHtml(s.location)}: ${formatNumber(Math.round(Number(s.quantity || 0) * 1000))} kg`)
+        .join("<br>");
+      const datorii = (doc.debtItems || [])
+        .map((d) => `${escapeComboHtml(d.partner || "")}: ${currency.format(Number(d.amount || 0))} (${d.direction === "collection" ? "încasare" : "plată"})`)
+        .join("<br>");
+      const continut = [stocuri, datorii].filter(Boolean).join("<br>") || "—";
+      return `
+        <tr>
+          <td>#${doc.id}</td>
+          <td>${formatDateShort(doc.documentDate || doc.createdAt)}</td>
+          <td>${continut}</td>
+          <td><button type="button" class="cell-btn cell-btn-danger" data-action="delete-opening" data-id="${doc.id}">Șterge</button></td>
+        </tr>
+      `;
+    })
+    .join("");
+}
+
+document.getElementById("opening-docs-list-body")?.addEventListener("click", async (event) => {
+  const btn = event.target.closest('[data-action="delete-opening"]');
+  if (!btn) return;
+  if (!window.confirm("Sigur ștergi acest document de sold inițial? Stocul se recalculează.")) return;
+  try {
+    const res = await fetch(`/api/opening-documents/${btn.dataset.id}`, { method: "DELETE" });
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}));
+      throw new Error(e.error || "Nu am putut șterge documentul.");
+    }
+    await Promise.all([loadOpeningDocuments(), loadReceipts(), loadStocks()]);
+  } catch (e) {
+    window.alert(e.message);
+  }
+});
+
 function renderProcessingStats(stats) {
   if (!stats.processing) return;
   setDashText("dash-value-processing", formatNumber(stats.processing.totalProcessings || 0));
