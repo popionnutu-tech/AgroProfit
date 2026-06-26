@@ -2106,6 +2106,7 @@ function renderTransactions(transactions) {
             const badge = st ? `<span class="status-badge ${st.css}">${st.label}</span>` : "-";
             return `<td>${rest}</td><td>${badge}</td>`;
           })()}
+          <td><button type="button" class="cell-btn cell-btn-details" data-action="transaction-details" data-id="${item.id}">Detalii</button></td>
         </tr>
       `
     )
