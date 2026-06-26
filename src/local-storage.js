@@ -2985,6 +2985,8 @@ function forbiddenError(message) {
   return err;
 }
 
+// ATENTIE: orice apelant expus unui utilizator (handler de ruta) TREBUIE sa paseze rolul
+// din req.currentUser.roleCode. Daca `role` lipseste, regula se autodezactiveaza (apel intern).
 function assertStatusChangePermission(currentStatus, newStatus, role) {
   if (!role) return; // apel intern fara actor (ex. flux automat / teste vechi) — necontrolat
   if (newStatus === "Anulat" && role !== "admin") {
