@@ -570,6 +570,17 @@ function sanitizeNumber(value) {
     return 0;
   }
 
+  // Acceptam separatorul zecimal romanesc (virgula): "4,09" -> 4.09. Eliminam spatiile
+  // (separator de mii), iar daca exista DOAR virgula (fara punct) o tratam ca zecimala.
+  if (typeof value === "string") {
+    let s = value.trim().replace(/\s/g, "");
+    if (s.includes(",") && !s.includes(".")) {
+      s = s.replace(",", ".");
+    }
+    const parsed = Number(s);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
 }
