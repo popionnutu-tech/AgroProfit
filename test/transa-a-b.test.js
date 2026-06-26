@@ -760,3 +760,28 @@ test("STORNO: anularea platii redeschide datoria receptiei; redeschiderea o reap
     assert.equal(r.paymentStatus, "Partial");
   });
 });
+
+test("Act de verificare furnizor: receptii + plati + sold, storno exclus", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const receipt = await seedReceipt(storage, { preliminaryPayableAmount: 1000 });
+    const pay = await storage.createTransaction({
+      referenceType: "receipt", receiptId: receipt.id, partnerId: 1, partner: "Agro Nord",
+      direction: "payment", amount: 600, createdBy: "contabil"
+    });
+
+    let st = await storage.getSupplierStatement(1);
+    assert.equal(st.receipts.length, 1);
+    assert.equal(st.totals.totalReceipts, 1000);
+    assert.equal(st.payments.length, 1);
+    assert.equal(st.totals.totalPaid, 600);
+    assert.equal(st.totals.balance, 400); // datorie ramasa catre furnizor
+
+    // storno: plata anulata nu mai intra in extras -> soldul = datoria intreaga
+    await storage.updateTransaction(pay.id, { status: "Anulat", changeReason: "storno", actorRole: "admin" });
+    st = await storage.getSupplierStatement(1);
+    assert.equal(st.payments.length, 0);
+    assert.equal(st.totals.totalPaid, 0);
+    assert.equal(st.totals.balance, 1000);
+  });
+});
