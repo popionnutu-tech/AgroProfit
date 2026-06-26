@@ -272,8 +272,9 @@ app.post(
 
 app.patch("/api/system-settings", requireRoles(["admin"]), updateSystemSettingsHandler);
 
-// Act de verificare pe furnizor (doar admin) — Etapa 7
-app.get("/api/reports/supplier-statement", requireRoles(["admin"]), async (req, res) => {
+// Act de verificare pe furnizor — date financiare (preturi/sume/sold), deci gated pe `finance`
+// (manager, contabil, contabil-sef, admin). NU `reports`: ar expune banii rolului `control` (fara finance).
+app.get("/api/reports/supplier-statement", requireRoles(["manager", "accountant", "accountant-sef", "admin"]), async (req, res) => {
   try {
     const { partnerId, from, to } = req.query;
     if (!partnerId) {

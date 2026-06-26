@@ -1697,6 +1697,7 @@ async function getSupplierStatement(partnerId, fromDate, toDate) {
   // Plati catre acest furnizor (dupa nume sau dupa supplierId pe tranzactie)
   const payments = (state.transactions || [])
     .filter((t) => t.direction === "payment")
+    .filter((t) => isActiveTransaction(t)) // plata anulata (storno) nu intra in extras
     .filter((t) => {
       const byId = t.supplierId && Number(t.supplierId) === Number(partnerId);
       const byName = t.partner && partner.name && String(t.partner).trim().toLowerCase() === String(partner.name).trim().toLowerCase();
