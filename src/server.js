@@ -397,7 +397,7 @@ app.post(
 // Anulare transfer (admin/manager) — ramane in lista ca „Anulat", fara miscare de stoc.
 app.post(
   "/api/transfers/:id/cancel",
-  requireRoles(["manager", "admin"]),
+  requireRoles(["admin"]),
   async (req, res) => {
     try {
       const transfer = await storage.cancelTransfer(req.params.id, {
