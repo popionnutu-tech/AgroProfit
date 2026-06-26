@@ -2178,7 +2178,9 @@ function deliveryInvoiceTotals(item) {
 }
 
 function renderDeliveries(deliveries) {
-  const canEditStatuses = canAccess("delivery-write");
+  // Livrarea e „Livrat" (confirmata) din momentul crearii → schimbarea statutului
+  // (Inchis/Redeschis) e rezervata manager+admin. Anularea (admin) e separat, in docActionsCell.
+  const canEditStatuses = canEditConfirmedStatus();
   // Financial columns (vanzator, masina, pret) hidden for operators (no finance access)
   const deliveriesTable = document.getElementById("deliveries-table");
   if (deliveriesTable) {
