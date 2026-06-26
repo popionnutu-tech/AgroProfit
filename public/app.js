@@ -1881,7 +1881,9 @@ function renderUnprocessedStock() {
 }
 
 function renderProcessings(processings) {
-  const canEditStatuses = canAccess("processing-write");
+  // Procesarea afisata aici (non-„In lucru") e deja confirmata → schimbarea statutului e
+  // rezervata manager+admin; optiunea „Anulat" doar admin.
+  const canEditStatuses = canEditConfirmedStatus();
   const filteredProcessings = processings.filter((item) => {
     const typeMatch =
       !processingTypeFilterEl.value || item.processingType === processingTypeFilterEl.value;
