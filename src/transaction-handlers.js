@@ -11,6 +11,7 @@ const {
 } = require("./storage");
 const { getActorLabel } = require("./auth");
 const { triggerCriticalManagementAlert } = require("./critical-alerts");
+const { filterCanceledTransactionsForRole } = require("./permissions");
 
 function sendJson(res, statusCode, payload) {
   if (typeof res.status === "function" && typeof res.json === "function") {
@@ -26,10 +27,15 @@ function getBody(req) {
   return req.body || {};
 }
 
-async function listTransactionsHandler(_req, res) {
+async function listTransactionsHandler(req, res) {
   try {
     const transactions = await listTransactions();
-    return sendJson(res, 200, { transactions });
+    // Tranzacțiile anulate sunt vizibile doar contabilului-șef + admin (filtru server-side).
+    const visible = filterCanceledTransactionsForRole(
+      transactions,
+      req.currentUser && req.currentUser.roleCode
+    );
+    return sendJson(res, 200, { transactions: visible });
   } catch (error) {
     console.error("Failed to load transactions:", error.message);
     return sendJson(res, 500, { error: "Nu am putut incarca tranzactiile." });
@@ -164,6 +170,7 @@ async function updateTransactionHandler(req, res, id) {
 
     const transaction = await updateTransaction(id, {
       ...getBody(req),
+      actorRole: req.currentUser && req.currentUser.roleCode,
       changedBy: getActorLabel(req)
     });
 
@@ -178,6 +185,9 @@ async function updateTransactionHandler(req, res, id) {
     });
     return response;
   } catch (error) {
+    if (error.forbidden) {
+      return sendJson(res, 403, { error: error.message });
+    }
     console.error("Failed to update transaction:", error.message);
     return sendJson(res, 400, { error: error.message || "Nu am putut actualiza tranzactia." });
   }

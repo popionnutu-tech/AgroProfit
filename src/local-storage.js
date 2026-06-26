@@ -570,6 +570,17 @@ function sanitizeNumber(value) {
     return 0;
   }
 
+  // Acceptam separatorul zecimal romanesc (virgula): "4,09" -> 4.09. Eliminam spatiile
+  // (separator de mii), iar daca exista DOAR virgula (fara punct) o tratam ca zecimala.
+  if (typeof value === "string") {
+    let s = value.trim().replace(/\s/g, "");
+    if (s.includes(",") && !s.includes(".")) {
+      s = s.replace(",", ".");
+    }
+    const parsed = Number(s);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
 }
@@ -666,13 +677,16 @@ function createProcessingSummary(processings) {
 }
 
 function createTransactionSummary(transactions) {
-  const supplierPayments = transactions.filter((item) => item.direction === "payment");
-  const customerCollections = transactions.filter((item) => item.direction === "collection");
+  // Tranzacțiile anulate NU intră în KPI (consecvent cu recepții/livrări) — altfel o plată
+  // anulată ar umfla totalul, deși a dispărut din listă.
+  const active = (transactions || []).filter((item) => item.status !== "Anulat");
+  const supplierPayments = active.filter((item) => item.direction === "payment");
+  const customerCollections = active.filter((item) => item.direction === "collection");
 
   return {
     totalPayments: supplierPayments.reduce((sum, item) => sum + Number(item.amount || 0), 0),
     totalCollections: customerCollections.reduce((sum, item) => sum + Number(item.amount || 0), 0),
-    totalTransactions: transactions.length
+    totalTransactions: active.length
   };
 }
 
@@ -2310,7 +2324,20 @@ async function updateTransaction(id, payload = {}) {
   };
 
   if (payload.status !== undefined) {
-    transaction.status = requiredText(payload.status, "Status tranzactie");
+    const newStatus = requiredText(payload.status, "Status tranzactie");
+    // Statutul plății îl pot schimba DOAR administratorul sau contabilul-șef.
+    if (newStatus !== transaction.status) {
+      const role = payload.actorRole;
+      if (role && role !== "admin" && role !== "accountant-sef") {
+        throw forbiddenError("Doar administratorul sau contabilul-șef pot schimba statutul plății.");
+      }
+      // Marcăm anularea ca să o putem face vizibilă doar contabilului-șef + admin.
+      if (newStatus === "Anulat") {
+        transaction.canceledByRole = role || transaction.canceledByRole || null;
+        transaction.canceledAt = new Date().toISOString();
+      }
+    }
+    transaction.status = newStatus;
   }
 
   if (payload.note !== undefined) {

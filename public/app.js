@@ -2072,9 +2072,14 @@ function transactionReferenceStanding(item) {
 }
 
 function renderTransactions(transactions) {
-  const canEditStatuses = canAccess("finance-write");
+  // Statutul plății îl pot schimba DOAR admin + contabil-șef.
+  const role = currentSessionUser?.roleCode;
+  const canEditStatuses = role === "admin" || role === "accountant-sef";
+  // Tranzacțiile anulate sunt vizibile doar contabilului-șef + admin (restul nu le văd).
+  const canSeeCanceledTx = role === "admin" || role === "accountant-sef";
   const filtered = transactions.filter((item) =>
-    withinDateRange(item, ["createdAt", "transactedAt"], transactionDateFromEl, transactionDateToEl)
+    withinDateRange(item, ["createdAt", "transactedAt"], transactionDateFromEl, transactionDateToEl) &&
+    (item.status !== "Anulat" || canSeeCanceledTx)
   );
   transactionsBodyEl.innerHTML = filtered
     .map(
@@ -6867,9 +6872,19 @@ if (deliveryBillingDialog && deliveryBillingForm) {
 
 let billingDelivery = null;
 
+// Parsează un număr cu separator zecimal românesc (virgulă): "4,09" -> 4.09.
+// Backend-ul (sanitizeNumber) face la fel; aici e pentru calculul live din dialog.
+function parseDecimal(value) {
+  if (value === null || value === undefined || value === "") return 0;
+  let s = String(value).trim().replace(/\s/g, "");
+  if (s.includes(",") && !s.includes(".")) s = s.replace(",", ".");
+  const n = Number(s);
+  return Number.isFinite(n) ? n : 0;
+}
+
 function updateBillingPriceLei() {
-  const pf = Number(document.getElementById("billing-price-foreign")?.value || 0);
-  const rate = Number(document.getElementById("billing-exchange-rate")?.value || 0);
+  const pf = parseDecimal(document.getElementById("billing-price-foreign")?.value);
+  const rate = parseDecimal(document.getElementById("billing-exchange-rate")?.value);
   const cur = document.getElementById("billing-currency-select")?.value || "MDL";
   const isForeign = cur !== "MDL";
   // Preț pe unitate în lei: MDL → lei/kg (= pf);  valută → lei/tonă (= pf × curs)
