@@ -11,6 +11,7 @@ const {
 } = require("./storage");
 const { getActorLabel } = require("./auth");
 const { triggerCriticalManagementAlert } = require("./critical-alerts");
+const { filterCanceledTransactionsForRole } = require("./permissions");
 
 function sendJson(res, statusCode, payload) {
   if (typeof res.status === "function" && typeof res.json === "function") {
