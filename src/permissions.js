@@ -173,7 +173,9 @@ function filterCanceledTransactionsForRole(docs, roleCode) {
 
 module.exports = {
   canRoleViewCanceled,
+  canRoleViewCanceledTransaction,
   filterCanceledForRole,
+  filterCanceledTransactionsForRole,
   getRoleName,
   getRolePermissions,
   listSystemRoles,
