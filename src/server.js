@@ -325,6 +325,25 @@ app.patch(
   }
 );
 
+// Contabilul ajusteaza valoarea (suma) unei receptii — pretul nu a fost completat de operator.
+app.patch(
+  "/api/receipts/:id/amount",
+  requireRoles(["accountant", "accountant-sef", "manager", "admin"]),
+  async (req, res) => {
+    try {
+      const receipt = await storage.updateReceiptAmount(
+        req.params.id,
+        req.body && req.body.amount,
+        getActorLabel(req)
+      );
+      return res.status(200).json(receipt);
+    } catch (error) {
+      console.error("Failed to adjust receipt amount:", error.message);
+      return res.status(400).json({ error: error.message || "Nu am putut ajusta valoarea." });
+    }
+  }
+);
+
 // Cantar in 2 pasi: a doua cantarire (tara) finalizeaza receptia "In descarcare".
 app.patch(
   "/api/receipts/:id/complete-weighing",

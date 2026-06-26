@@ -1428,6 +1428,7 @@ function withinDateRange(item, dateFields, fromEl, toEl) {
 function renderReceipts(receipts) {
   const canEditStatuses = canAccess("receipt-write");
   const canChangeSupplier = canAccess("finance");
+  const canEditAmount = canAccess("finance-write");
   // Operatorul nu vede coloanele de plata (plata preliminara, data platii).
   const receiptsTable = document.getElementById("receipts-table");
   if (receiptsTable) {
@@ -1496,7 +1497,7 @@ function renderReceipts(receipts) {
           <td>${item.grossWeight > 0 ? formatNumber(Number(item.grossWeight)) + " kg" : "—"}</td>
           <td>${item.tareWeight > 0 ? formatNumber(Number(item.tareWeight)) + " kg" : "—"}</td>
           <td>${item.location || "-"}</td>
-          <td class="col-fin">${currency.format(valoare)}</td>
+          <td class="col-fin">${currency.format(valoare)}${canEditAmount && !isCanceled ? ` <button type="button" class="cell-btn change-amount-btn" data-action="adjust-amount" data-id="${item.id}" title="Ajustează valoarea recepției">✎</button>` : ""}</td>
           <td class="col-fin">${achitat > 0 ? currency.format(achitat) : "-"}</td>
           <td class="col-fin"><b>${rest > 0 ? currency.format(rest) : "0"}</b></td>
           <td class="col-fin">${formatDateShort(item.lastPaymentDate)}</td>
@@ -7168,6 +7169,36 @@ bodyEl.addEventListener("change", async (event) => {
   } catch (error) {
     window.alert(error.message);
     await loadReceipts();
+  }
+});
+
+// Contabilul ajusteaza valoarea (suma) unei receptii — ex. pretul nu a fost completat de operator.
+bodyEl.addEventListener("click", async (event) => {
+  const trigger = event.target.closest('[data-action="adjust-amount"]');
+  if (!trigger) return;
+  const id = trigger.dataset.id;
+  const receipt = receiptsCache.find((r) => String(r.id) === String(id));
+  const current = Number(receipt?.amountToPay ?? receipt?.preliminaryPayableAmount ?? 0);
+  const input = window.prompt("Valoarea totală a recepției (MDL):", current ? String(current) : "");
+  if (input === null) return; // anulat
+  const value = parseDecimal(input);
+  if (!(value >= 0)) {
+    window.alert("Introdu o valoare numerică validă (ex. 14340 sau 14340,50).");
+    return;
+  }
+  try {
+    const res = await fetch(`/api/receipts/${id}/amount`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ amount: value })
+    });
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}));
+      throw new Error(e.error || "Nu am putut ajusta valoarea.");
+    }
+    await loadReceipts();
+  } catch (err) {
+    window.alert(err.message);
   }
 });
 

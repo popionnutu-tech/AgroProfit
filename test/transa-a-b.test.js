@@ -785,3 +785,27 @@ test("Act de verificare furnizor: receptii + plati + sold, storno exclus", async
     assert.equal(st.totals.balance, 1000);
   });
 });
+
+test("Contabil ajusteaza valoarea receptiei (suma) + se reflecta in actul de verificare", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const receipt = await seedReceipt(storage, { preliminaryPayableAmount: 0, provisionalNetQuantity: 2, price: 0 });
+
+    // initial: valoare 0 -> actul de verificare arata 0
+    let st = await storage.getSupplierStatement(1);
+    assert.equal(st.totals.totalReceipts, 0);
+
+    // contabilul ajusteaza valoarea la 14340
+    const updated = await storage.updateReceiptAmount(receipt.id, 14340, "contabil");
+    assert.equal(updated.preliminaryPayableAmount, 14340);
+    assert.equal(updated.price, 7170); // 14340 / 2 tone
+
+    // actul de verificare reflecta noua valoare
+    st = await storage.getSupplierStatement(1);
+    assert.equal(st.totals.totalReceipts, 14340);
+    assert.equal(st.totals.balance, 14340); // nicio plata inca
+
+    // refuza valoare negativa
+    await assert.rejects(storage.updateReceiptAmount(receipt.id, -5, "contabil"), /pozitiv/i);
+  });
+});
