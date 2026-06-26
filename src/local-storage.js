@@ -2309,6 +2309,57 @@ async function updateProcessing(id, payload = {}) {
   return processing;
 }
 
+// O tranzacție „activă" (intră în decontări): nu e anulată și nu e stornată.
+function isActiveTransaction(t) {
+  return t && t.status !== "Anulat" && t.stornata !== true;
+}
+
+// Recalculează soldul entității de referință (recepție / livrare / datorie inițială) DOAR din
+// tranzacțiile active. Folosit la anulare (storno real): o plată anulată redeschide datoria,
+// iar redeschiderea ei o reaplică. Sursa de adevăr unică pentru reversarea decontării.
+function recomputeReferenceSettlement(state, transaction) {
+  const txns = state.transactions || [];
+  if (transaction.referenceType === "receipt") {
+    const receipt = (state.receipts || []).find((r) => r.id === Number(transaction.receiptId));
+    if (!receipt) return;
+    const target = Number(receipt.preliminaryPayableAmount || 0);
+    const paid = txns
+      .filter((t) => t.referenceType === "receipt" && t.direction === "payment"
+        && Number(t.receiptId) === Number(transaction.receiptId) && isActiveTransaction(t))
+      .reduce((sum, t) => sum + Number(t.appliedAmount ?? t.amount ?? 0), 0);
+    receipt.paidAmount = paid;
+    receipt.paymentStatus = paid <= 0 ? "Neachitat" : paid < target ? "Partial" : "Achitat";
+    receipt.updatedAt = new Date().toISOString();
+  } else if (transaction.referenceType === "delivery") {
+    const delivery = (state.deliveries || []).find((d) => d.id === Number(transaction.deliveryId));
+    if (!delivery) return;
+    const qty = Number(delivery.deliveredQuantity || delivery.netWeight || 0);
+    const target = Number(delivery.contractPrice || 0) * qty;
+    const collected = txns
+      .filter((t) => t.referenceType === "delivery"
+        && Number(t.deliveryId) === Number(transaction.deliveryId) && isActiveTransaction(t))
+      .reduce((sum, t) => sum + Number(t.amount || 0), 0);
+    delivery.collectedAmount = collected;
+    delivery.collectionStatus = collected <= 0 ? "Neincasat" : collected < target ? "Partial incasat" : "Incasat";
+    delivery.updatedAt = new Date().toISOString();
+  } else if (transaction.referenceType === "opening-debt") {
+    const doc = (state.openingDocuments || []).find((d) =>
+      (d.debtItems || []).some((i) => i.openingDebtId === transaction.openingDebtId)
+    );
+    const debtItem = doc && doc.debtItems.find((i) => i.openingDebtId === transaction.openingDebtId);
+    if (!debtItem) return;
+    const settled = txns
+      .filter((t) => t.referenceType === "opening-debt"
+        && t.openingDebtId === transaction.openingDebtId && isActiveTransaction(t))
+      .reduce((sum, t) => sum + Number(t.amount || 0), 0);
+    debtItem.settledAmount = settled;
+    const target = Number(debtItem.amount || 0);
+    debtItem.status = debtItem.direction === "collection"
+      ? (settled <= 0 ? "Neincasat" : settled < target ? "Partial incasat" : "Incasat")
+      : (settled <= 0 ? "Neachitat" : settled < target ? "Partial" : "Achitat");
+  }
+}
+
 async function updateTransaction(id, payload = {}) {
   const state = readReceiptsState();
   const transaction = (state.transactions || []).find((item) => item.id === Number(id));
