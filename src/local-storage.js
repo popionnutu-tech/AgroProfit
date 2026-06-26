@@ -2966,6 +2966,33 @@ async function updateReceiptStatus(id, status) {
   return receipt;
 }
 
+// Reguli globale de control pe schimbarea de status (sursa de adevar duplicata in frontend):
+//  - status „Anulat" → DOAR admin (peste tot);
+//  - schimbarea statutului unui document deja CONFIRMAT → DOAR manager + admin.
+// Documentele neconfirmate (Draft/Noua/In lucru→Confirmat = finalizare) raman ca inainte.
+const STATUS_CONFIRMED_PLUS = ["Confirmat", "Procesata", "Inchis", "Redeschis", "Finalizata", "Livrat", "Verificata"];
+
+function forbiddenError(message) {
+  const err = new Error(message);
+  err.forbidden = true;
+  return err;
+}
+
+function assertStatusChangePermission(currentStatus, newStatus, role) {
+  if (!role) return; // apel intern fara actor (ex. flux automat / teste vechi) — necontrolat
+  if (newStatus === "Anulat" && role !== "admin") {
+    throw forbiddenError("Doar administratorul poate anula documente.");
+  }
+  if (
+    newStatus !== currentStatus &&
+    STATUS_CONFIRMED_PLUS.includes(currentStatus) &&
+    role !== "admin" &&
+    role !== "manager"
+  ) {
+    throw forbiddenError("Doar managerul sau administratorul pot schimba statutul unui document confirmat.");
+  }
+}
+
 async function updateReceiptStatusWithAudit(id, status, payload = {}) {
   const state = readReceiptsState();
   const receipt = state.receipts.find((item) => item.id === Number(id));
@@ -2977,6 +3004,7 @@ async function updateReceiptStatusWithAudit(id, status, payload = {}) {
   const reason = requiredChangeReason(payload.changeReason);
   const oldValue = { status: receipt.status };
 
+  assertStatusChangePermission(receipt.status, status, payload.actorRole);
   assertReceiptStatusTransition(receipt.status, status);
   receipt.status = status;
   receipt.updatedAt = new Date().toISOString();
