@@ -2567,6 +2567,7 @@ function renderDailyReport(report) {
           <td>${escapeComboHtml(item.product)}</td>
           <td>${formatNumber(item.grossQuantity || item.quantity)}</td>
           <td>${formatNumber(item.provisionalNetQuantity || item.quantity)}</td>
+          <td>${paymentBadge(item.paymentStatus)}</td>
         </tr>
       `
     )
