@@ -1497,7 +1497,7 @@ function renderReceipts(receipts) {
           <td>${item.grossWeight > 0 ? formatNumber(Number(item.grossWeight)) + " kg" : "—"}</td>
           <td>${item.tareWeight > 0 ? formatNumber(Number(item.tareWeight)) + " kg" : "—"}</td>
           <td>${item.location || "-"}</td>
-          <td class="col-fin">${currency.format(valoare)}</td>
+          <td class="col-fin">${currency.format(valoare)}${canEditAmount && !isCanceled ? ` <button type="button" class="cell-btn change-amount-btn" data-action="adjust-amount" data-id="${item.id}" title="Ajustează valoarea recepției">✎</button>` : ""}</td>
           <td class="col-fin">${achitat > 0 ? currency.format(achitat) : "-"}</td>
           <td class="col-fin"><b>${rest > 0 ? currency.format(rest) : "0"}</b></td>
           <td class="col-fin">${formatDateShort(item.lastPaymentDate)}</td>
