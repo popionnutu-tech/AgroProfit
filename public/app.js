@@ -2072,9 +2072,14 @@ function transactionReferenceStanding(item) {
 }
 
 function renderTransactions(transactions) {
-  const canEditStatuses = canAccess("finance-write");
+  // Statutul plății îl pot schimba DOAR admin + contabil-șef.
+  const role = currentSessionUser?.roleCode;
+  const canEditStatuses = role === "admin" || role === "accountant-sef";
+  // Tranzacțiile anulate sunt vizibile doar contabilului-șef + admin (restul nu le văd).
+  const canSeeCanceledTx = role === "admin" || role === "accountant-sef";
   const filtered = transactions.filter((item) =>
-    withinDateRange(item, ["createdAt", "transactedAt"], transactionDateFromEl, transactionDateToEl)
+    withinDateRange(item, ["createdAt", "transactedAt"], transactionDateFromEl, transactionDateToEl) &&
+    (item.status !== "Anulat" || canSeeCanceledTx)
   );
   transactionsBodyEl.innerHTML = filtered
     .map(
