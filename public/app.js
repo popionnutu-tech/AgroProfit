@@ -1957,7 +1957,9 @@ function renderProcessingInlucru(processings) {
             ${canEdit
               ? `<div class="proc-inlucru-actions">
                    <button type="button" class="cell-btn cell-btn-primary processing-finalize-btn" data-id="${item.id}">Finalizează</button>
-                   <button type="button" class="cell-btn cell-btn-danger processing-cancel-btn" data-id="${item.id}">Anulează</button>
+                   ${canCancelDocuments()
+                     ? `<button type="button" class="cell-btn cell-btn-danger processing-cancel-btn" data-id="${item.id}">Anulează</button>`
+                     : ""}
                  </div>`
               : `<span class="badge-inlucru">În lucru</span>`}
           </td>
