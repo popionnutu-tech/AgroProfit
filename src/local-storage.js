@@ -2486,6 +2486,9 @@ async function transitionDelivery(id, newStatus, payload = {}) {
   }
 
   const currentStatus = delivery.status || "Proiect";
+  // Aceeasi regula globala ca la receptie/procesare: „Anulat" doar admin, schimbarea
+  // statutului unei livrari confirmate (Livrat/Redeschis/...) doar manager+admin.
+  assertStatusChangePermission(currentStatus, newStatus, (payload.currentUser || {}).roleCode);
   const allowedNext = DELIVERY_TRANSITIONS[currentStatus] || [];
   if (!allowedNext.includes(newStatus)) {
     throw new Error(
