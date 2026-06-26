@@ -153,6 +153,24 @@ function filterCanceledForRole(docs, roleCode) {
   return docs.filter((doc) => canRoleViewCanceled(doc, roleCode));
 }
 
+// Vizibilitatea TRANZACȚIILOR financiare anulate:
+//  - admin + contabil-șef → văd anulatele
+//  - restul (manager, contabil, control) → NU le văd
+function canRoleViewCanceledTransaction(doc, roleCode) {
+  if (!doc || doc.status !== "Anulat") {
+    return true;
+  }
+  const role = normalizeRoleCode(roleCode);
+  return role === "admin" || role === "accountant-sef";
+}
+
+function filterCanceledTransactionsForRole(docs, roleCode) {
+  if (!Array.isArray(docs)) {
+    return docs;
+  }
+  return docs.filter((doc) => canRoleViewCanceledTransaction(doc, roleCode));
+}
+
 module.exports = {
   canRoleViewCanceled,
   filterCanceledForRole,
