@@ -7172,6 +7172,36 @@ bodyEl.addEventListener("change", async (event) => {
   }
 });
 
+// Contabilul ajusteaza valoarea (suma) unei receptii — ex. pretul nu a fost completat de operator.
+bodyEl.addEventListener("click", async (event) => {
+  const trigger = event.target.closest('[data-action="adjust-amount"]');
+  if (!trigger) return;
+  const id = trigger.dataset.id;
+  const receipt = receiptsCache.find((r) => String(r.id) === String(id));
+  const current = Number(receipt?.amountToPay ?? receipt?.preliminaryPayableAmount ?? 0);
+  const input = window.prompt("Valoarea totală a recepției (MDL):", current ? String(current) : "");
+  if (input === null) return; // anulat
+  const value = parseDecimal(input);
+  if (!(value >= 0)) {
+    window.alert("Introdu o valoare numerică validă (ex. 14340 sau 14340,50).");
+    return;
+  }
+  try {
+    const res = await fetch(`/api/receipts/${id}/amount`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ amount: value })
+    });
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}));
+      throw new Error(e.error || "Nu am putut ajusta valoarea.");
+    }
+    await loadReceipts();
+  } catch (err) {
+    window.alert(err.message);
+  }
+});
+
 // Contabilul schimba DOAR furnizorul unei receptii (inline, in lista Receptii recente)
 bodyEl.addEventListener("click", (event) => {
   const trigger = event.target.closest('[data-action="change-supplier"]');
