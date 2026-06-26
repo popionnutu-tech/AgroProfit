@@ -640,3 +640,26 @@ test("PERM livrare confirmata: operatorul nu poate schimba statutul, managerul d
     assert.equal(d.status, "Inchis");
   });
 });
+
+test("STOC: summary expune openingByProduct (sold initial vizibil indiferent de rol)", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    await storage.createOpeningDocument({
+      documentDate: "2026-06-01",
+      stockItems: [
+        { product: "Grau", location: "Siloz 1", quantity: 50, unit: "tone" },
+        { product: "Grau", location: "Siloz 2", quantity: 20, unit: "tone" }
+      ],
+      createdBy: "admin"
+    });
+    const summary = await storage.getStockSummary();
+    // openingByProduct agregat pe produs (50 + 20 = 70 t Grau)
+    assert.equal(summary.openingByProduct.Grau, 70);
+    // openingByLocation pe locatie::produs
+    assert.equal(summary.openingByLocation["Siloz 1::Grau"], 50);
+    assert.equal(summary.openingByLocation["Siloz 2::Grau"], 20);
+    // soldul initial e inclus si in stocul pe locatie (byLocation)
+    const s1 = summary.byLocation.find((i) => i.location === "Siloz 1" && i.product === "Grau");
+    assert.equal(s1.quantity, 50);
+  });
+});
