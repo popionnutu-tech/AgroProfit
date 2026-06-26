@@ -1428,6 +1428,7 @@ function withinDateRange(item, dateFields, fromEl, toEl) {
 function renderReceipts(receipts) {
   const canEditStatuses = canAccess("receipt-write");
   const canChangeSupplier = canAccess("finance");
+  const canEditAmount = canAccess("finance-write");
   // Operatorul nu vede coloanele de plata (plata preliminara, data platii).
   const receiptsTable = document.getElementById("receipts-table");
   if (receiptsTable) {
