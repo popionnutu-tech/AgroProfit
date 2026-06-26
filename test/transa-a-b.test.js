@@ -622,3 +622,21 @@ test("PERM procesare: operatorul finalizeaza dar nu anuleaza; manager/admin schi
     assert.equal(adm.status, "Anulat");
   });
 });
+
+test("PERM livrare confirmata: operatorul nu poate schimba statutul, managerul da", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const receipt = await seedReceipt(storage);
+    const delivery = await storage.createDelivery({
+      receiptId: receipt.id, customerId: 2, customer: "X", plannedQuantity: 10, createdBy: "op"
+    });
+    // livrarea se creeaza „Livrat" (confirmata) → operatorul nu o poate inchide
+    await assert.rejects(
+      storage.transitionDelivery(delivery.id, "Inchis", { changeReason: "x", currentUser: { roleCode: "operator" } }),
+      /confirmat/i
+    );
+    // managerul poate
+    const d = await storage.transitionDelivery(delivery.id, "Inchis", { changeReason: "ok", currentUser: { roleCode: "manager" } });
+    assert.equal(d.status, "Inchis");
+  });
+});
