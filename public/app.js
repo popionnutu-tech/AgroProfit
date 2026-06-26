@@ -285,7 +285,8 @@ function canViewCanceled(item) {
 }
 
 // Statusuri „confirmat-sau-mai-departe": odată ce un document ajunge aici, schimbarea
-// statutului e rezervata manager+admin (sursa de adevar duplicata si in backend).
+// statutului e rezervata manager+admin (sursa de adevar duplicata si in backend —
+// TINE SINCRON cu STATUS_CONFIRMED_PLUS din src/local-storage.js).
 const CONFIRMED_PLUS = ["Confirmat", "Procesata", "Inchis", "Redeschis", "Finalizata", "Livrat", "Verificata"];
 
 // Cine poate ANULA documente (status „Anulat"): DOAR admin.
