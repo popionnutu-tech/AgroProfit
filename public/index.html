@@ -1674,9 +1674,9 @@
 
           <div class="stock-summary" id="daily-report-summary"></div>
 
-          <div class="report-grid">
-            <section>
-              <h3>Receptii pe zi</h3>
+          <div class="report-accordion-list">
+            <details class="report-accordion">
+              <summary>Receptii pe zi</summary>
               <div class="table-wrap">
                 <table>
                   <thead>
@@ -1687,15 +1687,16 @@
                       <th>Produs</th>
                       <th>Brut</th>
                       <th>Net prov.</th>
+                      <th>Plata</th>
                     </tr>
                   </thead>
                   <tbody id="daily-report-receipts"></tbody>
                 </table>
               </div>
-            </section>
+            </details>
 
-            <section>
-              <h3>Procesari pe zi</h3>
+            <details class="report-accordion">
+              <summary>Procesari pe zi</summary>
               <div class="table-wrap">
                 <table>
                   <thead>
@@ -1711,10 +1712,10 @@
                   <tbody id="daily-report-processings"></tbody>
                 </table>
               </div>
-            </section>
+            </details>
 
-            <section>
-              <h3>Livrari pe zi</h3>
+            <details class="report-accordion">
+              <summary>Livrari pe zi</summary>
               <div class="table-wrap">
                 <table>
                   <thead>
@@ -1730,10 +1731,10 @@
                   <tbody id="daily-report-deliveries"></tbody>
                 </table>
               </div>
-            </section>
+            </details>
 
-            <section>
-              <h3>Plati si incasari pe zi</h3>
+            <details class="report-accordion">
+              <summary>Plati si incasari pe zi</summary>
               <div class="table-wrap">
                 <table>
                   <thead>
@@ -1749,10 +1750,10 @@
                   <tbody id="daily-report-transactions"></tbody>
                 </table>
               </div>
-            </section>
+            </details>
 
-            <section>
-              <h3>Reclamatii pe zi</h3>
+            <details class="report-accordion">
+              <summary>Reclamatii pe zi</summary>
               <div class="table-wrap">
                 <table>
                   <thead>
@@ -1768,7 +1769,7 @@
                   <tbody id="daily-report-complaints"></tbody>
                 </table>
               </div>
-            </section>
+            </details>
           </div>
         </section>
 
