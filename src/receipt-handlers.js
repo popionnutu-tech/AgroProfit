@@ -274,6 +274,7 @@ async function updateReceiptStatusHandler(req, res, id) {
   try {
     const receipt = await updateReceiptStatusWithAudit(id, body.status, {
       ...body,
+      actorRole: req.currentUser && req.currentUser.roleCode,
       changedBy: getActorLabel(req)
     });
 
@@ -288,6 +289,9 @@ async function updateReceiptStatusHandler(req, res, id) {
     });
     return response;
   } catch (error) {
+    if (error.forbidden) {
+      return sendJson(res, 403, { error: error.message });
+    }
     console.error("Failed to update receipt status:", error.message);
     return sendJson(res, 500, { error: "Nu am putut actualiza statusul." });
   }
