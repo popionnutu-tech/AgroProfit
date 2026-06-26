@@ -1174,6 +1174,7 @@
                       <th>Suma achitată</th>
                       <th>Rest de plată</th>
                       <th>Status</th>
+                      <th>Detalii</th>
                   </tr>
                 </thead>
                 <tbody id="transactions-body"></tbody>
@@ -1397,6 +1398,28 @@
           </div>
         </dialog>
 
+        <dialog id="complaint-details-dialog" class="billing-dialog details-dialog">
+          <div class="details-head">
+            <h3 id="complaint-details-title">Reclamație</h3>
+            <button type="button" class="ghost-button details-close" id="complaint-details-close" title="Închide">✕</button>
+          </div>
+          <div id="complaint-details-body" class="details-body"></div>
+          <div class="form-actions">
+            <button type="button" class="ghost-button" id="complaint-details-close-2">Închide</button>
+          </div>
+        </dialog>
+
+        <dialog id="transaction-details-dialog" class="billing-dialog details-dialog">
+          <div class="details-head">
+            <h3 id="transaction-details-title">Tranzacție</h3>
+            <button type="button" class="ghost-button details-close" id="transaction-details-close" title="Închide">✕</button>
+          </div>
+          <div id="transaction-details-body" class="details-body"></div>
+          <div class="form-actions">
+            <button type="button" class="ghost-button" id="transaction-details-close-2">Închide</button>
+          </div>
+        </dialog>
+
         <section class="grid complaint-grid" data-view="reclamatii">
           <form class="panel form-panel" id="complaint-form" data-access="complaint-write">
             <div class="panel-head">
@@ -1494,6 +1517,7 @@
                     <th>Cant. reclamată</th>
                     <th>Sumă diminuată</th>
                     <th>Status</th>
+                    <th>Detalii</th>
                   </tr>
                 </thead>
                 <tbody id="complaints-body"></tbody>

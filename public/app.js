@@ -2087,8 +2087,8 @@ function renderTransactions(transactions) {
         <tr>
           <td>#${item.id}</td>
           <td>${formatDateShort(item.createdAt || item.transactedAt)}</td>
-          <td>${item.referenceType === "delivery" ? `Livrare #${item.deliveryId}` : `Receptie #${item.receiptId}`}</td>
-          <td>${item.partner}</td>
+          <td>${item.referenceType === "delivery" ? `Livrare #${item.deliveryId}` : item.referenceType === "opening-debt" ? `Datorie inițială` : `Receptie #${item.receiptId}`}</td>
+          <td>${escapeComboHtml(item.partner || "")}</td>
           <td>${item.direction === "collection" ? "Incasare" : "Plata"}</td>
           <td>
             <div>${item.paymentType || "-"}</div>
@@ -2106,6 +2106,7 @@ function renderTransactions(transactions) {
             const badge = st ? `<span class="status-badge ${st.css}">${st.label}</span>` : "-";
             return `<td>${rest}</td><td>${badge}</td>`;
           })()}
+          <td><button type="button" class="cell-btn cell-btn-details" data-action="transaction-details" data-id="${item.id}">Detalii</button></td>
         </tr>
       `
     )
@@ -2135,7 +2136,7 @@ function renderTransactionTotals(rows) {
   });
   transactionsFootEl.innerHTML = `
     <tr class="totals-row">
-      <td colspan="9">TOTAL (${rows.length}) &nbsp;·&nbsp; Numerar: <b>${currency.format(cashTotal)}</b> · Transfer: <b>${currency.format(transferTotal)}</b> &nbsp;·&nbsp; Încasări: <b>${currency.format(totalCollections)}</b> · Plăți: <b>${currency.format(totalPayments)}</b></td>
+      <td colspan="10">TOTAL (${rows.length}) &nbsp;·&nbsp; Numerar: <b>${currency.format(cashTotal)}</b> · Transfer: <b>${currency.format(transferTotal)}</b> &nbsp;·&nbsp; Încasări: <b>${currency.format(totalCollections)}</b> · Plăți: <b>${currency.format(totalPayments)}</b></td>
     </tr>
   `;
 }
@@ -2383,6 +2384,7 @@ function renderComplaints(complaints) {
               }).join("")}
             </select>
           </td>
+          <td><button type="button" class="cell-btn cell-btn-details" data-action="complaint-details" data-id="${item.id}">Detalii</button></td>
         </tr>
       `;
       }
@@ -2407,7 +2409,7 @@ function renderComplaints(complaints) {
       const perProduct = Object.entries(byProduct).map(([p, q]) => `${p}: ${formatNumber(q)}`).join(" · ");
       complaintsFootEl.innerHTML = `
         <tr class="totals-row">
-          <td colspan="9">TOTAL reclamat: <b>${formatNumber(totalQty)}</b> &nbsp;·&nbsp; Sumă diminuată: <b>${currency.format(totalDeducted)}</b> &nbsp;·&nbsp; ${perProduct}</td>
+          <td colspan="10">TOTAL reclamat: <b>${formatNumber(totalQty)}</b> &nbsp;·&nbsp; Sumă diminuată: <b>${currency.format(totalDeducted)}</b> &nbsp;·&nbsp; ${perProduct}</td>
         </tr>`;
     }
   }
@@ -5948,6 +5950,94 @@ bodyEl?.addEventListener("click", onReceiptDetailsClick);
 pendingWeighingBody?.addEventListener("click", onReceiptDetailsClick);
 document.getElementById("receipt-details-close")?.addEventListener("click", () => receiptDetailsDialog?.close());
 document.getElementById("receipt-details-close-2")?.addEventListener("click", () => receiptDetailsDialog?.close());
+
+// ----- Detalii reclamație (oglinda „Detalii" de la recepții) -----
+const complaintDetailsDialog = document.getElementById("complaint-details-dialog");
+function openComplaintDetails(id) {
+  if (!complaintDetailsDialog) return;
+  const item = (complaintsCache || []).find((c) => String(c.id) === String(id));
+  if (!item) { window.alert("Reclamația nu a fost găsită."); return; }
+  const titleEl = document.getElementById("complaint-details-title");
+  if (titleEl) titleEl.textContent = `Reclamație #${item.id} — ${item.customer || ""}`.trim();
+  const t = (v, suf = "") => (Number(v) > 0 ? formatNumber(Number(v)) + suf : "—");
+  const lei = (v) => (Number(v) > 0 ? currency.format(Number(v)) : "—");
+  document.getElementById("complaint-details-body").innerHTML = `
+    <div class="rd-section"><h4>General</h4>
+      ${rdRow("Status", escapeComboHtml(item.status || "—"))}
+      ${rdRow("Data", formatDateShort(item.createdAt))}
+      ${rdRow("Client", escapeComboHtml(item.customer || "—"))}
+      ${rdRow("Produs", escapeComboHtml(item.product || "—"))}
+      ${rdRow("Tip reclamație", escapeComboHtml(item.complaintType || "—"))}
+      ${rdRow("Livrare asociată", item.deliveryId ? "#" + item.deliveryId : "—")}
+    </div>
+    <div class="rd-section"><h4>Cantități & sume</h4>
+      ${rdRow("Cantitate livrată inițial", t(item.deliveryQuantity, " t"))}
+      ${rdRow("Cantitate reclamată", t(item.contestedQuantity, " t"))}
+      ${rdRow("Valoare livrare", lei(item.deliveryTotal))}
+      ${rdRow("Sumă diminuată", lei(item.deductedAmount))}
+      ${rdRow("Mod rezolvare", escapeComboHtml(item.resolutionType || "—"))}
+    </div>
+    <div class="rd-section"><h4>Procesare</h4>
+      ${rdRow("Acceptată de", escapeComboHtml(item.acceptedBy || "—"))}
+      ${rdRow("Data acceptării", formatDateShort(item.acceptedAt))}
+      ${rdRow("Închisă de", escapeComboHtml(item.closedBy || "—"))}
+      ${rdRow("Data închiderii", formatDateShort(item.closedAt))}
+    </div>
+    <div class="rd-section"><h4>Observații</h4>
+      ${item.note ? `<p class="rd-note">${escapeComboHtml(item.note)}</p>` : `<p class="rd-empty">Fără observații.</p>`}
+    </div>`;
+  complaintDetailsDialog.showModal();
+}
+complaintsBodyEl?.addEventListener("click", (e) => {
+  const trigger = e.target.closest('[data-action="complaint-details"]');
+  if (trigger) openComplaintDetails(trigger.dataset.id);
+});
+document.getElementById("complaint-details-close")?.addEventListener("click", () => complaintDetailsDialog?.close());
+document.getElementById("complaint-details-close-2")?.addEventListener("click", () => complaintDetailsDialog?.close());
+
+// ----- Detalii tranzacție financiară -----
+const transactionDetailsDialog = document.getElementById("transaction-details-dialog");
+function openTransactionDetails(id) {
+  if (!transactionDetailsDialog) return;
+  const item = (transactionsCache || []).find((x) => String(x.id) === String(id));
+  if (!item) { window.alert("Tranzacția nu a fost găsită."); return; }
+  const titleEl = document.getElementById("transaction-details-title");
+  if (titleEl) titleEl.textContent = `Tranzacție #${item.id}`;
+  const ref = item.referenceType === "delivery" ? `Livrare #${item.deliveryId}`
+    : item.referenceType === "opening-debt" ? `Datorie inițială ${item.openingDebtId || ""}`.trim()
+    : `Recepție #${item.receiptId}`;
+  const st = typeof transactionReferenceStanding === "function" ? transactionReferenceStanding(item) : null;
+  const lei = (v) => (Number(v) > 0 ? currency.format(Number(v)) : "—");
+  document.getElementById("transaction-details-body").innerHTML = `
+    <div class="rd-section"><h4>General</h4>
+      ${rdRow("Status", escapeComboHtml(item.status || "—"))}
+      ${rdRow("Data", formatDateShort(item.createdAt || item.transactedAt))}
+      ${rdRow("Referință", escapeComboHtml(ref))}
+      ${rdRow("Partener", escapeComboHtml(item.partner || "—"))}
+      ${rdRow("Direcție", item.direction === "collection" ? "Încasare" : "Plată")}
+      ${rdRow("Tip plată", escapeComboHtml(item.paymentType || "—"))}
+    </div>
+    <div class="rd-section"><h4>Sume</h4>
+      ${rdRow("Sumă", currency.format(Number(item.amount || 0)))}
+      ${rdRow("Aplicat la datorie", lei(item.appliedAmount))}
+      ${rdRow("Avans creat", lei(item.advanceAmount))}
+      ${st ? rdRow("Rest de plată (referință)", currency.format(st.remaining)) : ""}
+    </div>
+    ${item.canceledByRole ? `<div class="rd-section"><h4>Anulare</h4>
+      ${rdRow("Anulat de (rol)", escapeComboHtml(item.canceledByRole))}
+      ${rdRow("Data anulării", formatDateShort(item.canceledAt))}
+    </div>` : ""}
+    <div class="rd-section"><h4>Observații</h4>
+      ${item.note ? `<p class="rd-note">${escapeComboHtml(item.note)}</p>` : `<p class="rd-empty">Fără observații.</p>`}
+    </div>`;
+  transactionDetailsDialog.showModal();
+}
+transactionsBodyEl?.addEventListener("click", (e) => {
+  const trigger = e.target.closest('[data-action="transaction-details"]');
+  if (trigger) openTransactionDetails(trigger.dataset.id);
+});
+document.getElementById("transaction-details-close")?.addEventListener("click", () => transactionDetailsDialog?.close());
+document.getElementById("transaction-details-close-2")?.addEventListener("click", () => transactionDetailsDialog?.close());
 
 // ----- Anulare document (admin/manager) + editare comentariu (admin) -----
 async function cancelDocumentRequest(kind, id, reason) {
