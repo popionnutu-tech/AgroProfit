@@ -27,10 +27,15 @@ function getBody(req) {
   return req.body || {};
 }
 
-async function listTransactionsHandler(_req, res) {
+async function listTransactionsHandler(req, res) {
   try {
     const transactions = await listTransactions();
-    return sendJson(res, 200, { transactions });
+    // Tranzacțiile anulate sunt vizibile doar contabilului-șef + admin (filtru server-side).
+    const visible = filterCanceledTransactionsForRole(
+      transactions,
+      req.currentUser && req.currentUser.roleCode
+    );
+    return sendJson(res, 200, { transactions: visible });
   } catch (error) {
     console.error("Failed to load transactions:", error.message);
     return sendJson(res, 500, { error: "Nu am putut incarca tranzactiile." });
