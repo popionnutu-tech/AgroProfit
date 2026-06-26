@@ -1475,7 +1475,7 @@ function renderReceipts(receipts) {
         : formatQtyByEntry(item.provisionalNetQuantity || item.quantity, item);
       const statusCell = isPendingWeighing
         ? `<span class="status-badge badge-warn" title="Așteaptă a doua cântărire (tara)">În descărcare</span>`
-        : `<select class="status" data-id="${item.id}" ${canEditStatuses ? "" : "disabled"}>${statusOptions(item.status).join("")}</select>`;
+        : `<select class="status" data-id="${item.id}" ${(CONFIRMED_PLUS.includes(item.status) ? canEditConfirmedStatus() : canEditStatuses) ? "" : "disabled"}>${statusOptions(item.status).join("")}</select>`;
       const actionCell = isPendingWeighing
         ? "—"
         : canPay
