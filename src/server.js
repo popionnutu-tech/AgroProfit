@@ -273,7 +273,7 @@ app.post(
 app.patch("/api/system-settings", requireRoles(["admin"]), updateSystemSettingsHandler);
 
 // Act de verificare pe furnizor (doar admin) — Etapa 7
-app.get("/api/reports/supplier-statement", requireRoles(["admin"]), async (req, res) => {
+app.get("/api/reports/supplier-statement", requireRoles(["manager", "accountant", "accountant-sef", "control", "admin"]), async (req, res) => {
   try {
     const { partnerId, from, to } = req.query;
     if (!partnerId) {
