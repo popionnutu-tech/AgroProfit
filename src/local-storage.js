@@ -3186,6 +3186,45 @@ async function updateReceiptSupplier(id, partnerId, changedBy) {
   return receipt;
 }
 
+// Contabilul ajusteaza valoarea (suma) unei receptii — ex. pretul nu a fost completat de
+// operator (care nu are acces financiar), deci valoarea a ramas 0. Setam preliminaryPayableAmount
+// si derivam pretul/tona pentru afisare. Soldul/statusul platii se recalculeaza on-read in listReceipts.
+async function updateReceiptAmount(id, amount, changedBy) {
+  const state = readReceiptsState();
+  const receipt = state.receipts.find((item) => item.id === Number(id));
+  if (!receipt) {
+    throw new Error("Receptia nu a fost gasita.");
+  }
+  if (receipt.status === "Anulat") {
+    throw new Error("Receptia este anulata. Nu se poate ajusta valoarea.");
+  }
+  const value = sanitizeNumber(amount);
+  if (!(value >= 0)) {
+    throw new Error("Valoarea trebuie sa fie un numar pozitiv.");
+  }
+
+  const oldValue = { preliminaryPayableAmount: receipt.preliminaryPayableAmount, price: receipt.price };
+  receipt.preliminaryPayableAmount = value;
+  const net = Number(receipt.provisionalNetQuantity ?? receipt.quantity ?? 0);
+  if (net > 0) {
+    receipt.price = Number((value / net).toFixed(2)); // lei / tona, pentru afisare in actul de verificare
+  }
+  receipt.updatedAt = new Date().toISOString();
+
+  createAuditEntry(state, {
+    entityType: "receipt",
+    entityId: receipt.id,
+    action: "receipt-adjust-amount",
+    reason: "Ajustare valoare receptie de catre contabil",
+    user: changedBy || "dashboard",
+    oldValue,
+    newValue: { preliminaryPayableAmount: receipt.preliminaryPayableAmount, price: receipt.price }
+  });
+
+  writeReceiptsState(state);
+  return receipt;
+}
+
 // --- Stergere partener cu reatribuire referinte (merge duplicat) ---
 function countPartnerReferences(partnerId) {
   const pid = Number(partnerId);
