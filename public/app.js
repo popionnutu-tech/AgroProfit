@@ -4857,10 +4857,7 @@ function renderTransactionPreview() {
     return;
   }
 
-  const targetAmount =
-    direction === "collection"
-      ? Number(receipt.preliminaryMerchandiseValue || receipt.preliminaryPayableAmount || 0)
-      : Number(receipt.preliminaryPayableAmount || 0);
+  const targetAmount = Number(receipt.amountToPay ?? receipt.preliminaryPayableAmount ?? 0);
 
   transactionPartnerEl.textContent = receipt.supplier || "-";
   transactionTargetEl.textContent = currency.format(targetAmount);
