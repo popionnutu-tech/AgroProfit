@@ -1329,14 +1329,13 @@ function assertEntity(entity) {
   }
 }
 
-// Valoarea de plata a receptiei. Sursa unica.
-//  - Daca valoarea a fost setata MANUAL de contabil (✎, amountAdjusted) -> are prioritate.
-//  - Altfel se DERIVA: cantitate (KG) × pret (LEI/KG). Cantitatea interna e in TONE -> ×1000.
-// Pretul se introduce in lei/kg (ex. 6 lei/kg), iar cantitatea neta e 0,8 t = 800 kg -> 800×6 = 4800.
+// Valoarea de plata a receptiei. Sursa unica:
+//  - preliminaryPayableAmount daca e setat (>0) — ex. valoare setata manual de contabil (✎);
+//  - altfel se DERIVA: cantitate (KG) × pret (LEI/KG). Cantitatea interna e in TONE -> ×1000.
+// Pretul se introduce in lei/kg (ex. 6 lei/kg), cantitatea neta 0,8 t = 800 kg -> 800×6 = 4800.
 function receiptPayableValue(r) {
-  if (r && r.amountAdjusted === true && Number(r.preliminaryPayableAmount) > 0) {
-    return Number(r.preliminaryPayableAmount);
-  }
+  const stored = Number((r && r.preliminaryPayableAmount) || 0);
+  if (stored > 0) return stored;
   const netTonnes = Number((r && (r.provisionalNetQuantity || r.quantity)) || 0);
   const priceKg = Number((r && r.price) || 0);
   return netTonnes > 0 && priceKg > 0 ? Number((netTonnes * 1000 * priceKg).toFixed(2)) : 0;
