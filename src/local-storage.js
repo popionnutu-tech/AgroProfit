@@ -1364,7 +1364,7 @@ async function listReceipts() {
     if (!prev || String(when) > String(prev)) lastPaymentByReceipt.set(rid, when);
   }
   const enriched = state.receipts.map((r) => {
-    const target = Number(r.preliminaryPayableAmount || 0);
+    const target = receiptPayableValue(r);
     const paid = Number(paidByReceipt.get(Number(r.id)) || 0);
     const soldRestant = Math.max(target - paid, 0);
     const paymentStatus = paid <= 0 ? "Neachitat" : paid < target ? "Partial" : "Achitat";
