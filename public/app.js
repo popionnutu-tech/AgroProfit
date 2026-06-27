@@ -5351,9 +5351,13 @@ function buildPurchaseActPrintHtml(delivery) {
   // Act de achizitie is based on the source receipt's supplier
   const receipt = (receiptsCache || []).find((r) => Number(r.id) === Number(delivery.receiptId));
   const supplier = receipt ? findPartnerByName(receipt.supplier) : null;
-  const qty = Number(delivery.netWeight > 0 ? delivery.netWeight : delivery.deliveredQuantity || 0);
-  const price = Number(receipt?.price || 0);
-  const total = Number(receipt?.preliminaryPayableAmount || qty * price);
+  // Actul de achizitie reflecta RECEPTIA (cumpararea de la furnizor): cantitate neta + pret lei/kg.
+  const qty = Number(
+    receipt?.provisionalNetQuantity || receipt?.quantity ||
+    (delivery.netWeight > 0 ? delivery.netWeight : delivery.deliveredQuantity) || 0
+  ); // tone
+  const price = Number(receipt?.price || 0); // lei/kg
+  const total = Number(receipt?.amountToPay ?? (qty * 1000 * price));
   return `${docHeader()}
     <div class="doc-title">Act de achiziție</div>
     <div class="doc-subtitle">${formatDateShort(delivery.createdAt)} · Recepție #${delivery.receiptId}</div>
