@@ -1692,7 +1692,7 @@ async function getSupplierStatement(partnerId, fromDate, toDate) {
     .map((r) => {
       const net = Number(r.provisionalNetQuantity ?? r.quantity ?? 0);
       const price = Number(r.price ?? r.unitPrice ?? 0);
-      const amount = Number(r.preliminaryPayableAmount ?? net * price);
+      const amount = receiptPayableValue(r); // preliminaryPayableAmount sau cantitate × pret
       return {
         id: r.id,
         date: r.createdAt || r.receivedAt || "",
