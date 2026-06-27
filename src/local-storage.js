@@ -1335,6 +1335,17 @@ function assertEntity(entity) {
   }
 }
 
+// Valoarea de plata a receptiei. Sursa unica: preliminaryPayableAmount daca e setat (>0);
+// altfel se DERIVA din cantitate × pret/tona — cazul in care pretul a fost completat dar
+// valoarea nu a fost salvata (formularul nu o trimitea). Repara si receptiile existente cu valoare 0.
+function receiptPayableValue(r) {
+  const stored = Number((r && r.preliminaryPayableAmount) || 0);
+  if (stored > 0) return stored;
+  const net = Number((r && (r.provisionalNetQuantity || r.quantity)) || 0);
+  const price = Number((r && r.price) || 0);
+  return net > 0 && price > 0 ? Number((net * price).toFixed(2)) : 0;
+}
+
 async function listReceipts() {
   const state = readReceiptsState();
   // Recompute payment state from transactions on the fly so cifrele coincid mereu
