@@ -5580,8 +5580,8 @@ function renderSupplierStatement(data) {
           <td>#${r.id}</td>
           <td>${formatDateShort(r.date)}</td>
           <td>${r.product}</td>
-          <td>${formatNumber(r.quantity)} ${r.unit}</td>
-          <td>${currency.format(r.price)}</td>
+          <td>${formatNumber(r.quantity * 1000)} kg</td>
+          <td>${currency.format(r.price)}/kg</td>
           <td>${currency.format(r.amount)}</td>
         </tr>`).join("")
     : '<tr><td colspan="6" class="empty-state">Nicio recepție în perioadă.</td></tr>';
