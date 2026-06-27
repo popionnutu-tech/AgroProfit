@@ -3219,9 +3219,10 @@ async function updateReceiptAmount(id, amount, changedBy) {
 
   const oldValue = { preliminaryPayableAmount: receipt.preliminaryPayableAmount, price: receipt.price };
   receipt.preliminaryPayableAmount = value;
-  const net = Number(receipt.provisionalNetQuantity ?? receipt.quantity ?? 0);
-  if (net > 0) {
-    receipt.price = Number((value / net).toFixed(2)); // lei / tona, pentru afisare in actul de verificare
+  receipt.amountAdjusted = true; // valoare setata manual -> are prioritate in receiptPayableValue
+  const netTonnes = Number(receipt.provisionalNetQuantity ?? receipt.quantity ?? 0);
+  if (netTonnes > 0) {
+    receipt.price = Number((value / (netTonnes * 1000)).toFixed(4)); // lei / kg, pentru afisare in act
   }
   receipt.updatedAt = new Date().toISOString();
 
