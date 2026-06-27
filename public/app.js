@@ -5619,7 +5619,7 @@ function renderSupplierStatement(data) {
       <table>
         <thead><tr><th>ID</th><th>Data</th><th>Produs</th><th>Cantitate</th><th>Preț</th><th>Sumă</th></tr></thead>
         <tbody>${receiptRows}</tbody>
-        <tfoot><tr class="totals-row"><td colspan="3">TOTAL recepții (${data.receipts.length})</td><td>${formatNumber(t.totalQuantity)}</td><td></td><td>${currency.format(t.totalReceipts)}</td></tr></tfoot>
+        <tfoot><tr class="totals-row"><td colspan="3">TOTAL recepții (${data.receipts.length})</td><td>${formatNumber(t.totalQuantity * 1000)} kg</td><td></td><td>${currency.format(t.totalReceipts)}</td></tr></tfoot>
       </table>
     </div>
 
