@@ -4209,10 +4209,9 @@ async function createReceipt(formData) {
   const isPending = !(tareKg > 0); // fara tara -> receptie "in descarcare" (asteapta a 2-a cantarire)
   const netKg = Math.max(grossKg - tareKg, 0);
 
-  // Valoarea (preliminaryPayableAmount) e calculata in estimare (net × pret − servicii − retinere),
-  // dar nu era trimisa la server → toate receptiile aveau valoare 0. O trimitem acum pentru receptiile
-  // finalizate (la „In descarcare" se calculeaza la a doua cantarire).
-  const est = getReceiptEstimate();
+  // Valoarea NU se trimite stocata: se deriva mereu din cantitate(kg) × pret(lei/kg) la afisare
+  // (receiptPayableValue), ca sa fie consecventa si pentru receptiile vechi. Contabilul o poate
+  // suprascrie manual cu ✎.
   const payload = {
     supplierId: supplierId,
     supplier: partner?.name || "",
@@ -4224,9 +4223,6 @@ async function createReceipt(formData) {
     enteredUnit: "kg",
     unit: product?.unit || formData.get("unit"),
     price: formData.get("price") || "0",
-    provisionalNetQuantity: String(isPending ? 0 : est.provisionalNetQuantity),
-    preliminaryServicesTotal: String(isPending ? 0 : est.preliminaryServicesTotal),
-    preliminaryPayableAmount: String(isPending ? 0 : est.preliminaryPayableAmount),
     humidity: formData.get("humidity") || String(selectedProduct?.humidityNorm ?? 0),
     impurity: formData.get("impurity") || String(selectedProduct?.impurityNorm ?? 0),
     vehicle: formData.get("vehicle"),
