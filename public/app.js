@@ -5370,7 +5370,7 @@ function buildPurchaseActPrintHtml(delivery) {
     </div>
     <table class="doc-table">
       <thead><tr><th>Produs</th><th>Cantitate</th><th>Preț</th><th>Sumă</th></tr></thead>
-      <tbody><tr><td>${delivery.product}</td><td>${formatNumber(qty)} t</td><td>${moneyRo(price)}</td><td>${moneyRo(total)}</td></tr></tbody>
+      <tbody><tr><td>${delivery.product}</td><td>${formatNumber(qty * 1000)} kg</td><td>${moneyRo(price)}/kg</td><td>${moneyRo(total)}</td></tr></tbody>
       <tfoot><tr><td colspan="3">TOTAL</td><td>${moneyRo(total)} MDL</td></tr></tfoot>
     </table>
     <div class="doc-sign"><div>Furnizor</div><div>Achizitor AgroProfit+</div></div>`;
