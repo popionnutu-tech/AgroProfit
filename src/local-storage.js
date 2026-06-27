@@ -637,13 +637,7 @@ function createReceiptSummary(receipts) {
   const active = (receipts || []).filter((item) => item.status !== "Anulat");
   const totalReceipts = active.length;
   const totalQuantity = active.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
-  const totalValue = active.reduce(
-    (sum, item) => {
-      const fallbackValue = Number(item.quantity || 0) * Number(item.price || 0);
-      return sum + Number(item.preliminaryPayableAmount ?? fallbackValue);
-    },
-    0
-  );
+  const totalValue = active.reduce((sum, item) => sum + receiptPayableValue(item), 0);
 
   const byStatus = receipts.reduce((acc, item) => {
     acc[item.status] = (acc[item.status] || 0) + 1;
@@ -1335,6 +1329,17 @@ function assertEntity(entity) {
   }
 }
 
+// Valoarea de plata a receptiei. Sursa unica: preliminaryPayableAmount daca e setat (>0);
+// altfel se DERIVA din cantitate × pret/tona — cazul in care pretul a fost completat dar
+// valoarea nu a fost salvata (formularul nu o trimitea). Repara si receptiile existente cu valoare 0.
+function receiptPayableValue(r) {
+  const stored = Number((r && r.preliminaryPayableAmount) || 0);
+  if (stored > 0) return stored;
+  const net = Number((r && (r.provisionalNetQuantity || r.quantity)) || 0);
+  const price = Number((r && r.price) || 0);
+  return net > 0 && price > 0 ? Number((net * price).toFixed(2)) : 0;
+}
+
 async function listReceipts() {
   const state = readReceiptsState();
   // Recompute payment state from transactions on the fly so cifrele coincid mereu
@@ -1353,7 +1358,7 @@ async function listReceipts() {
     if (!prev || String(when) > String(prev)) lastPaymentByReceipt.set(rid, when);
   }
   const enriched = state.receipts.map((r) => {
-    const target = Number(r.preliminaryPayableAmount || 0);
+    const target = receiptPayableValue(r);
     const paid = Number(paidByReceipt.get(Number(r.id)) || 0);
     const soldRestant = Math.max(target - paid, 0);
     const paymentStatus = paid <= 0 ? "Neachitat" : paid < target ? "Partial" : "Achitat";
@@ -1681,7 +1686,7 @@ async function getSupplierStatement(partnerId, fromDate, toDate) {
     .map((r) => {
       const net = Number(r.provisionalNetQuantity ?? r.quantity ?? 0);
       const price = Number(r.price ?? r.unitPrice ?? 0);
-      const amount = Number(r.preliminaryPayableAmount ?? net * price);
+      const amount = receiptPayableValue(r); // preliminaryPayableAmount sau cantitate × pret
       return {
         id: r.id,
         date: r.createdAt || r.receivedAt || "",
