@@ -3714,7 +3714,7 @@ function getReceiptEstimate() {
   const cleaningServiceTotal = quantity * excessImpurity * cleaningTariff;
   const dryingServiceTotal = quantity * excessHumidity * dryingTariff;
   const preliminaryServicesTotal = cleaningServiceTotal + dryingServiceTotal;
-  const preliminaryMerchandiseValue = provisionalNetQuantity * price;
+  const preliminaryMerchandiseValue = provisionalNetQuantity * 1000 * price; // kg × lei/kg
   const withholdingPercent = Number(fiscalProfile?.withholdingPercent || 0);
   const withholdingAmount =
     Math.max(preliminaryMerchandiseValue - preliminaryServicesTotal, 0) *
