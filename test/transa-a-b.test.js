@@ -813,10 +813,10 @@ test("Contabil ajusteaza valoarea receptiei (suma) + se reflecta in actul de ver
 test("Valoare receptie derivata din pret × cantitate cand suma nu a fost salvata", async () => {
   await withIsolatedWorkspace(async ({ load }) => {
     const storage = load("src/local-storage.js");
-    // receptie cu pret completat dar preliminaryPayableAmount 0 (cazul vechi: valoarea nu se trimitea)
-    await seedReceipt(storage, { preliminaryPayableAmount: 0, price: 3000, provisionalNetQuantity: 100 });
+    // receptie cu pret completat (lei/kg) dar preliminaryPayableAmount 0 (cazul vechi: valoarea nu se trimitea)
+    await seedReceipt(storage, { preliminaryPayableAmount: 0, price: 3, provisionalNetQuantity: 100 });
     const r = (await storage.listReceipts())[0];
-    assert.equal(r.amountToPay, 300000); // 100 t × 3000 lei/t -> derivat
+    assert.equal(r.amountToPay, 300000); // 100 t = 100000 kg × 3 lei/kg -> derivat
     assert.equal(r.paymentStatus, "Neachitat");
     // actul de verificare reflecta valoarea derivata
     const st = await storage.getSupplierStatement(1);
