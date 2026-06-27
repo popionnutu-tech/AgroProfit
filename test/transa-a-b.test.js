@@ -798,7 +798,7 @@ test("Contabil ajusteaza valoarea receptiei (suma) + se reflecta in actul de ver
     // contabilul ajusteaza valoarea la 14340
     const updated = await storage.updateReceiptAmount(receipt.id, 14340, "contabil");
     assert.equal(updated.preliminaryPayableAmount, 14340);
-    assert.equal(updated.price, 7170); // 14340 / 2 tone
+    assert.equal(updated.price, 7.17); // 14340 / (2 t × 1000) = lei/kg
 
     // actul de verificare reflecta noua valoare
     st = await storage.getSupplierStatement(1);
