@@ -5898,7 +5898,7 @@ function openReceiptDetails(id) {
 
   const finBlock = fin
     ? `<div class="rd-section"><h4>Financiar</h4>
-        ${rdRow("Preț / tonă", Number(item.price) > 0 ? currency.format(Number(item.price)) : "—")}
+        ${rdRow("Preț / kg", Number(item.price) > 0 ? currency.format(Number(item.price)) : "—")}
         ${rdRow("Valoare preliminară", currency.format(valoare))}
         ${rdRow("Achitat", currency.format(achitat))}
         ${rdRow("Rest", currency.format(rest))}

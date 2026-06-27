@@ -823,3 +823,15 @@ test("Valoare receptie derivata din pret × cantitate cand suma nu a fost salvat
     assert.equal(st.totals.totalReceipts, 300000);
   });
 });
+
+test("Valoare = kg × lei/kg (cazul Lupu Diana: 800 kg × 6 = 4800)", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    // 800 kg = 0,8 t net, pret 6 lei/kg, fara valoare salvata
+    await seedReceipt(storage, { quantity: 0.8, provisionalNetQuantity: 0, price: 6, preliminaryPayableAmount: 0 });
+    const r = (await storage.listReceipts())[0];
+    assert.equal(r.amountToPay, 4800); // 800 kg × 6 lei/kg, NU 4,8
+    const st = await storage.getSupplierStatement(1);
+    assert.equal(st.totals.totalReceipts, 4800);
+  });
+});
