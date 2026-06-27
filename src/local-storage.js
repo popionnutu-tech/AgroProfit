@@ -637,13 +637,7 @@ function createReceiptSummary(receipts) {
   const active = (receipts || []).filter((item) => item.status !== "Anulat");
   const totalReceipts = active.length;
   const totalQuantity = active.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
-  const totalValue = active.reduce(
-    (sum, item) => {
-      const fallbackValue = Number(item.quantity || 0) * Number(item.price || 0);
-      return sum + Number(item.preliminaryPayableAmount ?? fallbackValue);
-    },
-    0
-  );
+  const totalValue = active.reduce((sum, item) => sum + receiptPayableValue(item), 0);
 
   const byStatus = receipts.reduce((acc, item) => {
     acc[item.status] = (acc[item.status] || 0) + 1;
