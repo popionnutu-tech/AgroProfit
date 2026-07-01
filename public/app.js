@@ -2554,6 +2554,14 @@ function renderLockouts(lockouts) {
     .join("");
 }
 
+// Rând de total sub un tabel de raport. cells: [{colspan?, value}] în ordinea coloanelor.
+function setReportFoot(el, cells) {
+  if (!el) return;
+  el.innerHTML = `<tr class="totals-row">${cells
+    .map((c) => `<td${c.colspan ? ` colspan="${c.colspan}"` : ""}>${c.value ?? ""}</td>`)
+    .join("")}</tr>`;
+}
+
 function renderDailyReport(report) {
   const cards = [
     ["Receptii", report.summary.receiptsCount],
