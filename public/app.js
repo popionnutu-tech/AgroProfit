@@ -5303,7 +5303,7 @@ function buildStatementPrintHtml(data) {
     <table class="doc-table">
       <thead><tr><th>Data</th><th>Tip plată</th><th>Comentariu</th><th>Referință</th><th>Sumă</th></tr></thead>
       <tbody>${paymentRows || '<tr><td colspan="5">Nicio achitare</td></tr>'}</tbody>
-      <tfoot><tr><td colspan="3">TOTAL ACHITAT</td><td>${moneyRo(t.totalPaid)} MDL</td></tr></tfoot>
+      <tfoot><tr><td colspan="4">TOTAL ACHITAT</td><td>${moneyRo(t.totalPaid)} MDL</td></tr></tfoot>
     </table>
     <div class="doc-total">SOLD FINAL: ${balanceText}</div>
     <div class="doc-sign"><div>Furnizor</div><div>Reprezentant AgroProfit+</div></div>`;
