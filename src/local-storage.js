@@ -1805,11 +1805,18 @@ async function getSupplierStatement(partnerId, fromDate, toDate) {
     period: { from, to },
     receipts,
     payments,
+    deliveries,
+    collections,
     byProduct,
     totals: {
       totalReceipts,
       totalQuantity,
       totalPaid,
+      totalDeliveries,
+      totalDeliveredQuantity,
+      totalCollected,
+      supplierBalance,
+      customerBalance,
       balance,
       balanceLabel: balance > 0 ? "datorie" : balance < 0 ? "avans" : "achitat"
     }
