@@ -51,7 +51,9 @@ function computeReceiptEstimate({ quantity, price, humidity, impurity, product, 
   const cleaningServiceTotal = grossQuantity * Number(cleaningTariff || 0);
   const dryingServiceTotal = grossQuantity * excessHumidity * Number(dryingTariff || 0);
   const preliminaryServicesTotal = cleaningServiceTotal + dryingServiceTotal;
-  const preliminaryMerchandiseValue = provisionalNetQuantity * unitPrice;
+  // Pretul e in lei/kg, cantitatea in TONE -> ×1000 pentru kg (aceeasi regula ca receiptPayableValue
+  // si getReceiptEstimate din frontend; a se pastra sincronizate).
+  const preliminaryMerchandiseValue = provisionalNetQuantity * 1000 * unitPrice;
   const preliminaryBeforeWithholding = Math.max(
     preliminaryMerchandiseValue - preliminaryServicesTotal,
     0
