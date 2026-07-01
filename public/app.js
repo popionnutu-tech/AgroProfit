@@ -2593,8 +2593,8 @@ function renderDailyReport(report) {
       `
     )
     .join("");
-  setReportFoot(dailyReportReceiptsFootEl, report.receipts.length, [
-    { colspan: 5, label: `TOTAL (${report.receipts.length})` },
+  setReportFoot(dailyReportReceiptsFootEl, [
+    { colspan: 6, value: `TOTAL (${report.receipts.length})` },
     { value: currency.format(report.receipts.reduce((s, r) => s + receiptValueOf(r), 0)) },
     { value: "" }
   ]);
