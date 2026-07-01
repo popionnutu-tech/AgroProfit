@@ -1391,7 +1391,10 @@ async function listReceipts() {
     receiptsByPartner.get(pid).push(r);
   }
   for (const [pid, list] of receiptsByPartner) {
-    list.sort((a, b) => new Date(a.createdAt || a.receivedAt) - new Date(b.createdAt || b.receivedAt));
+    // FIFO: cea mai veche recepție întâi; la timestamp egal, ordonăm după id (determinist).
+    list.sort((a, b) =>
+      (new Date(a.createdAt || a.receivedAt) - new Date(b.createdAt || b.receivedAt)) || (Number(a.id) - Number(b.id))
+    );
     let remaining = Number(paidByPartner.get(pid) || 0);
     for (const r of list) {
       const target = receiptPayableValue(r);
