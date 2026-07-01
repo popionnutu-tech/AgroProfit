@@ -3421,13 +3421,14 @@ function renderSetupSelectors(config) {
   // Populate supplier select for Act de verificare (Etapa 7)
   const statementPartnerSelect = document.getElementById("statement-partner-select");
   if (statementPartnerSelect) {
-    const suppliers = (config.partners || []).filter(
-      (p) => p.role === "furnizor" || p.role === "ambele"
-    );
+    // Toți partenerii (furnizori ȘI cumpărători), alfabetic — actul de verificare e universal.
+    const partners = (config.partners || [])
+      .slice()
+      .sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "ro", { sensitivity: "base" }));
     const prev = statementPartnerSelect.value;
     statementPartnerSelect.innerHTML =
-      '<option value="">Selecteaza furnizor</option>' +
-      suppliers.map((p) => `<option value="${p.id}">${p.name}</option>`).join("");
+      '<option value="">Selectează partenerul</option>' +
+      partners.map((p) => `<option value="${p.id}">${escapeComboHtml(p.name || "")}</option>`).join("");
     if (prev) statementPartnerSelect.value = prev;
   }
 }
@@ -5328,36 +5329,56 @@ function buildStatementPrintHtml(data) {
     <tr><td>${formatDateShort(r.date)}</td><td>${escapeComboHtml(r.product || "")}</td><td>${formatNumber(r.quantity * 1000)} kg</td><td>${moneyRo(r.price)}/kg</td><td>${moneyRo(r.amount)}</td></tr>`).join("");
   const paymentRows = data.payments.map((pm) => `
     <tr><td>${formatDateShort(pm.date)}</td><td>${escapeComboHtml(pm.paymentType || "-")}</td><td>${escapeComboHtml(pm.note || "")}</td><td>${escapeComboHtml(pm.reference || "-")}</td><td>${moneyRo(pm.amount)}</td></tr>`).join("");
+  const deliveries = data.deliveries || [];
+  const collections = data.collections || [];
+  const deliveryRows = deliveries.map((d) => `
+    <tr><td>${formatDateShort(d.date)}</td><td>${escapeComboHtml(d.product || "")}</td><td>${formatNumber(d.quantity * 1000)} kg</td><td>${moneyRo(d.amount)}</td></tr>`).join("");
+  const collectionRows = collections.map((c) => `
+    <tr><td>${formatDateShort(c.date)}</td><td>${escapeComboHtml(c.paymentType || "-")}</td><td>${escapeComboHtml(c.note || "")}</td><td>${escapeComboHtml(c.reference || "-")}</td><td>${moneyRo(c.amount)}</td></tr>`).join("");
   const balanceText = t.balance > 0
-    ? `Datorie către furnizor: ${moneyRo(t.balance)} MDL`
-    : t.balance < 0 ? `Avans: ${moneyRo(Math.abs(t.balance))} MDL` : "Achitat integral";
+    ? `Noi datorăm partenerului: ${moneyRo(t.balance)} MDL`
+    : t.balance < 0 ? `Partenerul ne datorează: ${moneyRo(Math.abs(t.balance))} MDL` : "Achitat integral";
   const periodText = data.period.from || data.period.to
     ? `Perioada: ${data.period.from || "început"} — ${data.period.to || "azi"}` : "Toată perioada";
+  const customerSide = (deliveries.length || collections.length) ? `
+    <h4 style="color:#1B5E3F;">Livrări (partenerul cumpără)</h4>
+    <table class="doc-table">
+      <thead><tr><th>Data</th><th>Produs</th><th>Cantitate</th><th>Sumă</th></tr></thead>
+      <tbody>${deliveryRows || '<tr><td colspan="4">Nicio livrare</td></tr>'}</tbody>
+      <tfoot><tr><td colspan="2">TOTAL</td><td>${formatNumber((t.totalDeliveredQuantity || 0) * 1000)} kg</td><td>${moneyRo(t.totalDeliveries || 0)} MDL</td></tr></tfoot>
+    </table>
+    <h4 style="color:#1B5E3F;">Încasări</h4>
+    <table class="doc-table">
+      <thead><tr><th>Data</th><th>Tip</th><th>Comentariu</th><th>Referință</th><th>Sumă</th></tr></thead>
+      <tbody>${collectionRows || '<tr><td colspan="5">Nicio încasare</td></tr>'}</tbody>
+      <tfoot><tr><td colspan="4">TOTAL ÎNCASAT</td><td>${moneyRo(t.totalCollected || 0)} MDL</td></tr></tfoot>
+    </table>` : "";
   return `${docHeader()}
     <div class="doc-title">Act de verificare</div>
     <div class="doc-subtitle">${periodText}</div>
     <div class="doc-party" style="margin-bottom:14px;">
-      <h4>Furnizor</h4>
-      <div><b>${p.name}</b></div>
-      ${p.idno ? `<div>IDNO: ${p.idno}</div>` : ""}
-      ${p.address ? `<div>Adresa: ${p.address}</div>` : ""}
-      ${p.bankName ? `<div>Banca: ${p.bankName}</div>` : ""}
-      ${p.iban ? `<div>IBAN: ${p.iban}</div>` : ""}
+      <h4>Partener</h4>
+      <div><b>${escapeComboHtml(p.name || "")}</b></div>
+      ${p.idno ? `<div>IDNO: ${escapeComboHtml(p.idno)}</div>` : ""}
+      ${p.address ? `<div>Adresa: ${escapeComboHtml(p.address)}</div>` : ""}
+      ${p.bankName ? `<div>Banca: ${escapeComboHtml(p.bankName)}</div>` : ""}
+      ${p.iban ? `<div>IBAN: ${escapeComboHtml(p.iban)}</div>` : ""}
     </div>
-    <h4 style="color:#1B5E3F;">Recepții</h4>
+    <h4 style="color:#1B5E3F;">Recepții (partenerul furnizează)</h4>
     <table class="doc-table">
       <thead><tr><th>Data</th><th>Produs</th><th>Cantitate</th><th>Preț</th><th>Sumă</th></tr></thead>
       <tbody>${receiptRows || '<tr><td colspan="5">Nicio recepție</td></tr>'}</tbody>
       <tfoot><tr><td colspan="2">TOTAL</td><td>${formatNumber(t.totalQuantity * 1000)} kg</td><td></td><td>${moneyRo(t.totalReceipts)} MDL</td></tr></tfoot>
     </table>
-    <h4 style="color:#1B5E3F;">Achitări</h4>
+    <h4 style="color:#1B5E3F;">Achitări (către partener)</h4>
     <table class="doc-table">
       <thead><tr><th>Data</th><th>Tip plată</th><th>Comentariu</th><th>Referință</th><th>Sumă</th></tr></thead>
       <tbody>${paymentRows || '<tr><td colspan="5">Nicio achitare</td></tr>'}</tbody>
       <tfoot><tr><td colspan="4">TOTAL ACHITAT</td><td>${moneyRo(t.totalPaid)} MDL</td></tr></tfoot>
     </table>
+    ${customerSide}
     <div class="doc-total">SOLD FINAL: ${balanceText}</div>
-    <div class="doc-sign"><div>Furnizor</div><div>Reprezentant AgroProfit+</div></div>`;
+    <div class="doc-sign"><div>Partener</div><div>Reprezentant AgroProfit+</div></div>`;
 }
 
 // Build invoice / certificate / purchase act from a delivery + config
@@ -5670,24 +5691,70 @@ function renderSupplierStatement(data) {
         </tr>`).join("")
     : '<tr><td colspan="6" class="empty-state">Nicio achitare în perioadă.</td></tr>';
 
+  const deliveries = data.deliveries || [];
+  const collections = data.collections || [];
+  const hasCustomerSide = deliveries.length > 0 || collections.length > 0;
+
+  const deliveryRows = deliveries.length
+    ? deliveries.map((d) => `
+        <tr>
+          <td>#${d.id}</td>
+          <td>${formatDateShort(d.date)}</td>
+          <td>${escapeComboHtml(d.product || "")}</td>
+          <td>${formatNumber(d.quantity * 1000)} kg</td>
+          <td>${currency.format(d.amount)}</td>
+        </tr>`).join("")
+    : '<tr><td colspan="5" class="empty-state">Nicio livrare în perioadă.</td></tr>';
+
+  const collectionRows = collections.length
+    ? collections.map((c) => `
+        <tr>
+          <td>#${c.id}</td>
+          <td>${formatDateShort(c.date)}</td>
+          <td>${escapeComboHtml(c.paymentType || "-")}</td>
+          <td>${escapeComboHtml(c.note || "")}</td>
+          <td>${escapeComboHtml(c.reference || "-")}</td>
+          <td>${currency.format(c.amount)}</td>
+        </tr>`).join("")
+    : '<tr><td colspan="6" class="empty-state">Nicio încasare în perioadă.</td></tr>';
+
   const balanceColor = t.balance > 0 ? "var(--danger)" : t.balance < 0 ? "var(--accent-bright)" : "var(--muted)";
   const balanceText = t.balance > 0
-    ? `Datorie către furnizor: ${currency.format(t.balance)}`
+    ? `Noi datorăm partenerului: ${currency.format(t.balance)}`
     : t.balance < 0
-      ? `Avans (furnizorul ne datorează): ${currency.format(Math.abs(t.balance))}`
+      ? `Partenerul ne datorează: ${currency.format(Math.abs(t.balance))}`
       : "Sold zero — achitat integral";
+
+  const customerSide = hasCustomerSide ? `
+    <h4 class="statement-sub">Livrări (partenerul cumpără)</h4>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>ID</th><th>Data</th><th>Produs</th><th>Cantitate</th><th>Sumă</th></tr></thead>
+        <tbody>${deliveryRows}</tbody>
+        <tfoot><tr class="totals-row"><td colspan="3">TOTAL livrări (${deliveries.length})</td><td>${formatNumber((t.totalDeliveredQuantity || 0) * 1000)} kg</td><td>${currency.format(t.totalDeliveries || 0)}</td></tr></tfoot>
+      </table>
+    </div>
+
+    <h4 class="statement-sub">Încasări</h4>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>ID</th><th>Data</th><th>Tip</th><th>Comentariu</th><th>Referință</th><th>Sumă</th></tr></thead>
+        <tbody>${collectionRows}</tbody>
+        <tfoot><tr class="totals-row"><td colspan="5">TOTAL încasat (${collections.length})</td><td>${currency.format(t.totalCollected || 0)}</td></tr></tfoot>
+      </table>
+    </div>` : "";
 
   resultEl.innerHTML = `
     <div class="statement-partner">
-      <h3>${p.name}</h3>
+      <h3>${escapeComboHtml(p.name || "")}</h3>
       <div class="statement-partner-meta">
-        ${p.idno ? `IDNO: ${p.idno} · ` : ""}${p.fiscalProfile || ""}
-        ${p.address ? `<br>Adresa: ${p.address}` : ""}
-        ${p.bankName || p.iban ? `<br>Banca: ${p.bankName || "-"} · IBAN: ${p.iban || "-"}` : ""}
+        ${p.idno ? `IDNO: ${escapeComboHtml(p.idno)} · ` : ""}${escapeComboHtml(p.fiscalProfile || "")}
+        ${p.address ? `<br>Adresa: ${escapeComboHtml(p.address)}` : ""}
+        ${p.bankName || p.iban ? `<br>Banca: ${escapeComboHtml(p.bankName || "-")} · IBAN: ${escapeComboHtml(p.iban || "-")}` : ""}
       </div>
     </div>
 
-    <h4 class="statement-sub">Recepții</h4>
+    <h4 class="statement-sub">Recepții (partenerul furnizează)</h4>
     <div class="table-wrap">
       <table>
         <thead><tr><th>ID</th><th>Data</th><th>Produs</th><th>Cantitate</th><th>Preț</th><th>Sumă</th></tr></thead>
@@ -5696,7 +5763,7 @@ function renderSupplierStatement(data) {
       </table>
     </div>
 
-    <h4 class="statement-sub">Achitări</h4>
+    <h4 class="statement-sub">Achitări (către partener)</h4>
     <div class="table-wrap">
       <table>
         <thead><tr><th>ID</th><th>Data</th><th>Tip plată</th><th>Comentariu</th><th>Referință</th><th>Sumă</th></tr></thead>
@@ -5704,6 +5771,7 @@ function renderSupplierStatement(data) {
         <tfoot><tr class="totals-row"><td colspan="5">TOTAL achitat (${data.payments.length})</td><td>${currency.format(t.totalPaid)}</td></tr></tfoot>
       </table>
     </div>
+    ${customerSide}
 
     <div class="statement-balance" style="border-color:${balanceColor};color:${balanceColor};">
       <span>SOLD FINAL</span>

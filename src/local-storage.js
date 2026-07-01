@@ -1681,7 +1681,7 @@ async function getSupplierStatement(partnerId, fromDate, toDate) {
   const config = readConfigState();
   const partner = (config.partners || []).find((p) => Number(p.id) === Number(partnerId));
   if (!partner) {
-    throw new Error("Furnizorul selectat nu exista.");
+    throw new Error("Partenerul selectat nu exista.");
   }
 
   const from = fromDate ? String(fromDate).slice(0, 10) : "";
@@ -1735,10 +1735,52 @@ async function getSupplierStatement(partnerId, fromDate, toDate) {
     }))
     .sort((a, b) => new Date(a.date) - new Date(b.date));
 
+  // Livrari catre acest partener (ca CUMPARATOR) — el ne datoreaza contravaloarea (contractPrice × tone).
+  const deliveries = (state.deliveries || [])
+    .filter((d) => d.status !== "Anulat")
+    .filter((d) => Number(d.customerId) === Number(partnerId))
+    .filter((d) => inRange(d.createdAt || d.deliveredAt))
+    .map((d) => {
+      const qty = Number(d.deliveredQuantity || d.netWeight || 0);
+      return {
+        id: d.id,
+        date: d.createdAt || d.deliveredAt || "",
+        product: d.product || "",
+        quantity: qty,
+        amount: Number(d.contractPrice || 0) * qty
+      };
+    })
+    .sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  // Incasari de la acest partener (ca CUMPARATOR)
+  const collections = (state.transactions || [])
+    .filter((t) => t.direction === "collection")
+    .filter((t) => isActiveTransaction(t))
+    .filter((t) => {
+      const byId = t.partnerId && Number(t.partnerId) === Number(partnerId);
+      const byName = t.partner && partner.name && String(t.partner).trim().toLowerCase() === String(partner.name).trim().toLowerCase();
+      return byId || byName;
+    })
+    .filter((t) => inRange(t.createdAt || t.transactedAt))
+    .map((t) => ({
+      id: t.id,
+      date: t.createdAt || t.transactedAt || "",
+      amount: Number(t.amount || 0),
+      paymentType: t.paymentType || "",
+      note: t.note || "",
+      reference: t.deliveryId ? `Livrare #${t.deliveryId}` : (t.referenceType || "")
+    }))
+    .sort((a, b) => new Date(a.date) - new Date(b.date));
+
   const totalReceipts = receipts.reduce((s, r) => s + r.amount, 0);
   const totalQuantity = receipts.reduce((s, r) => s + r.quantity, 0);
   const totalPaid = payments.reduce((s, p) => s + p.amount, 0);
-  const balance = totalReceipts - totalPaid; // >0 datorie catre furnizor, <0 avans
+  const totalDeliveries = deliveries.reduce((s, d) => s + d.amount, 0);
+  const totalDeliveredQuantity = deliveries.reduce((s, d) => s + d.quantity, 0);
+  const totalCollected = collections.reduce((s, c) => s + c.amount, 0);
+  const supplierBalance = totalReceipts - totalPaid; // >0 noi ii datoram (ca furnizor)
+  const customerBalance = totalDeliveries - totalCollected; // >0 el ne datoreaza (ca cumparator)
+  const balance = supplierBalance - customerBalance; // net: >0 noi ii datoram, <0 el ne datoreaza
 
   // Totals per product
   const byProduct = {};
@@ -1763,11 +1805,18 @@ async function getSupplierStatement(partnerId, fromDate, toDate) {
     period: { from, to },
     receipts,
     payments,
+    deliveries,
+    collections,
     byProduct,
     totals: {
       totalReceipts,
       totalQuantity,
       totalPaid,
+      totalDeliveries,
+      totalDeliveredQuantity,
+      totalCollected,
+      supplierBalance,
+      customerBalance,
       balance,
       balanceLabel: balance > 0 ? "datorie" : balance < 0 ? "avans" : "achitat"
     }

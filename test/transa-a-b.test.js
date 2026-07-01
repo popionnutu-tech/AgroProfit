@@ -897,3 +897,25 @@ test("computeReceiptEstimate: datoria = marfa integrala (fara scadere servicii/r
   assert.equal(est.preliminaryPayableAmount, est.preliminaryMerchandiseValue);
   assert.ok(est.preliminaryServicesTotal > 0, "serviciile se estimeaza (informativ)");
 });
+
+test("Act de verificare universal: latura cumparator (livrari + incasari + sold net)", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const receipt = await seedReceipt(storage); // stoc pentru livrare
+    const delivery = await storage.createDelivery({
+      receiptId: receipt.id, customerId: 2, customer: "Export Grain",
+      plannedQuantity: 10, contractPrice: 5000, createdBy: "op"
+    });
+    await storage.createTransaction({
+      referenceType: "delivery", deliveryId: delivery.id, partnerId: 2, partner: "Export Grain",
+      direction: "collection", amount: 20000, paymentType: "Transfer", createdBy: "contabil"
+    });
+    const st = await storage.getSupplierStatement(2); // Export Grain = cumparator
+    assert.equal(st.deliveries.length, 1);
+    assert.equal(st.totals.totalDeliveries, 50000); // 10 t × 5000 lei/t
+    assert.equal(st.totals.totalCollected, 20000);
+    assert.equal(st.totals.customerBalance, 30000); // 50000 - 20000 el ne datoreaza
+    assert.equal(st.totals.supplierBalance, 0); // nu e furnizor
+    assert.equal(st.totals.balance, -30000); // net: el ne datoreaza
+  });
+});
