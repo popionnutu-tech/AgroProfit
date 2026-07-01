@@ -915,8 +915,8 @@ function renderDashFeed() {
         <div class="dash-feed-item">
           <div class="dash-feed-dot ${dot}"></div>
           <div class="dash-feed-body-text">
-            <div class="dash-feed-title">${reason || `${entity}${entityId} · ${log.action || ""}`}</div>
-            <div class="dash-feed-meta">${when} · ${user}</div>
+            <div class="dash-feed-title">${escapeComboHtml(reason || `${entity}${entityId} · ${log.action || ""}`)}</div>
+            <div class="dash-feed-meta">${when} · ${escapeComboHtml(user)}</div>
           </div>
         </div>
       `;
@@ -2511,10 +2511,10 @@ function renderAuditLogs(auditLogs) {
       (item) => `
         <tr>
           <td>#${item.id}</td>
-          <td>${item.entityType}${item.entityId ? ` #${item.entityId}` : ""}</td>
-          <td>${item.action}</td>
-          <td>${item.user || "-"}</td>
-          <td>${item.reason}</td>
+          <td>${escapeComboHtml(item.entityType || "")}${item.entityId ? ` #${escapeComboHtml(String(item.entityId))}` : ""}</td>
+          <td>${escapeComboHtml(item.action || "")}</td>
+          <td>${escapeComboHtml(item.user || "-")}</td>
+          <td>${escapeComboHtml(item.reason || "")}</td>
           <td>${String(item.createdAt || "").replace("T", " ").slice(0, 16)}</td>
         </tr>
       `
@@ -5325,7 +5325,7 @@ function buildStatementPrintHtml(data) {
   const p = data.partner;
   const t = data.totals;
   const receiptRows = data.receipts.map((r) => `
-    <tr><td>${formatDateShort(r.date)}</td><td>${r.product}</td><td>${formatNumber(r.quantity)} ${r.unit}</td><td>${moneyRo(r.price)}</td><td>${moneyRo(r.amount)}</td></tr>`).join("");
+    <tr><td>${formatDateShort(r.date)}</td><td>${escapeComboHtml(r.product || "")}</td><td>${formatNumber(r.quantity * 1000)} kg</td><td>${moneyRo(r.price)}/kg</td><td>${moneyRo(r.amount)}</td></tr>`).join("");
   const paymentRows = data.payments.map((pm) => `
     <tr><td>${formatDateShort(pm.date)}</td><td>${escapeComboHtml(pm.paymentType || "-")}</td><td>${escapeComboHtml(pm.note || "")}</td><td>${escapeComboHtml(pm.reference || "-")}</td><td>${moneyRo(pm.amount)}</td></tr>`).join("");
   const balanceText = t.balance > 0
@@ -5348,7 +5348,7 @@ function buildStatementPrintHtml(data) {
     <table class="doc-table">
       <thead><tr><th>Data</th><th>Produs</th><th>Cantitate</th><th>Preț</th><th>Sumă</th></tr></thead>
       <tbody>${receiptRows || '<tr><td colspan="5">Nicio recepție</td></tr>'}</tbody>
-      <tfoot><tr><td colspan="2">TOTAL</td><td>${formatNumber(t.totalQuantity)}</td><td></td><td>${moneyRo(t.totalReceipts)} MDL</td></tr></tfoot>
+      <tfoot><tr><td colspan="2">TOTAL</td><td>${formatNumber(t.totalQuantity * 1000)} kg</td><td></td><td>${moneyRo(t.totalReceipts)} MDL</td></tr></tfoot>
     </table>
     <h4 style="color:#1B5E3F;">Achitări</h4>
     <table class="doc-table">
@@ -5973,6 +5973,7 @@ function openReceiptDetails(id) {
         ${rdRow("Rest", currency.format(rest))}
         ${rdRow("Stare plată", escapeComboHtml(item.paymentStatus || "—"))}
         ${rdRow("Ultima plată", formatDateShort(item.lastPaymentDate))}
+        ${item.amountNote ? rdRow("Corectare valoare", escapeComboHtml(item.amountNote)) : ""}
       </div>`
     : "";
 
@@ -7289,11 +7290,17 @@ bodyEl.addEventListener("click", async (event) => {
     window.alert("Introdu o valoare numerică validă (ex. 14340 sau 14340,50).");
     return;
   }
+  const comment = window.prompt("Comentariu pentru această corectare (obligatoriu — de ce se ajustează suma):", "");
+  if (comment === null) return; // anulat
+  if (!String(comment).trim()) {
+    window.alert("Comentariul este obligatoriu la corectarea sumei.");
+    return;
+  }
   try {
     const res = await fetch(`/api/receipts/${id}/amount`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ amount: value })
+      body: JSON.stringify({ amount: value, note: comment })
     });
     if (!res.ok) {
       const e = await res.json().catch(() => ({}));

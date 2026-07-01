@@ -40,7 +40,8 @@ const {
   healthHandler,
   listReceiptsHandler,
   reopenReceiptHandler,
-  updateReceiptStatusHandler
+  updateReceiptStatusHandler,
+  receiptForRequest
 } = require("./receipt-handlers");
 const {
   createProcessingHandler,
@@ -334,9 +335,10 @@ app.patch(
       const receipt = await storage.updateReceiptAmount(
         req.params.id,
         req.body && req.body.amount,
-        getActorLabel(req)
+        getActorLabel(req),
+        req.body && req.body.note
       );
-      return res.status(200).json(receipt);
+      return res.status(200).json(receiptForRequest(req, receipt));
     } catch (error) {
       console.error("Failed to adjust receipt amount:", error.message);
       return res.status(400).json({ error: error.message || "Nu am putut ajusta valoarea." });

@@ -105,7 +105,9 @@ const FINANCIAL_RECEIPT_FIELDS = [
   "paidAmount",
   "soldRestant",
   "paymentStatus",
-  "lastPaymentDate"
+  "lastPaymentDate",
+  "amountNote",
+  "amountCorrections"
 ];
 
 function stripReceiptFinancials(receipt) {
@@ -397,5 +399,6 @@ module.exports = {
   // expuse pentru teste (filtrare financiara dupa capabilitate)
   stripReceiptFinancials,
   stripFinancialStats,
-  computeReceiptEstimate
+  computeReceiptEstimate,
+  receiptForRequest
 };

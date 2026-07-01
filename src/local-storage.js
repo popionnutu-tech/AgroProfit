@@ -3217,7 +3217,7 @@ async function updateReceiptSupplier(id, partnerId, changedBy) {
 // Contabilul ajusteaza valoarea (suma) unei receptii — ex. pretul nu a fost completat de
 // operator (care nu are acces financiar), deci valoarea a ramas 0. Setam preliminaryPayableAmount
 // si derivam pretul/tona pentru afisare. Soldul/statusul platii se recalculeaza on-read in listReceipts.
-async function updateReceiptAmount(id, amount, changedBy) {
+async function updateReceiptAmount(id, amount, changedBy, note) {
   const state = readReceiptsState();
   const receipt = state.receipts.find((item) => item.id === Number(id));
   if (!receipt) {
@@ -3225,6 +3225,10 @@ async function updateReceiptAmount(id, amount, changedBy) {
   }
   if (receipt.status === "Anulat") {
     throw new Error("Receptia este anulata. Nu se poate ajusta valoarea.");
+  }
+  const comment = String(note || "").trim();
+  if (!comment) {
+    throw new Error("Comentariul este obligatoriu la corectarea sumei.");
   }
   if (typeof amount !== "number" && typeof amount !== "string") {
     throw new Error("Valoarea trebuie sa fie un numar.");
@@ -3239,21 +3243,32 @@ async function updateReceiptAmount(id, amount, changedBy) {
   }
 
   const oldValue = { preliminaryPayableAmount: receipt.preliminaryPayableAmount, price: receipt.price };
+  const now = new Date().toISOString();
   receipt.preliminaryPayableAmount = value; // valoare manuala (>0) -> are prioritate in receiptPayableValue
   const netTonnes = Number(receipt.provisionalNetQuantity ?? receipt.quantity ?? 0);
   if (netTonnes > 0) {
     receipt.price = Number((value / (netTonnes * 1000)).toFixed(4)); // lei / kg, pentru afisare in act
   }
-  receipt.updatedAt = new Date().toISOString();
+  // Istoric corectari (fiecare corectare pastreaza comentariul + cine/cand).
+  if (!Array.isArray(receipt.amountCorrections)) receipt.amountCorrections = [];
+  receipt.amountCorrections.push({
+    at: now,
+    by: changedBy || "dashboard",
+    oldAmount: Number(oldValue.preliminaryPayableAmount || 0),
+    newAmount: value,
+    note: comment
+  });
+  receipt.amountNote = comment; // ultima justificare, pentru afisare rapida
+  receipt.updatedAt = now;
 
   createAuditEntry(state, {
     entityType: "receipt",
     entityId: receipt.id,
     action: "receipt-adjust-amount",
-    reason: "Ajustare valoare receptie de catre contabil",
+    reason: `Corectare valoare: ${comment}`,
     user: changedBy || "dashboard",
     oldValue,
-    newValue: { preliminaryPayableAmount: receipt.preliminaryPayableAmount, price: receipt.price }
+    newValue: { preliminaryPayableAmount: receipt.preliminaryPayableAmount, price: receipt.price, note: comment }
   });
 
   writeReceiptsState(state);

@@ -795,10 +795,12 @@ test("Contabil ajusteaza valoarea receptiei (suma) + se reflecta in actul de ver
     let st = await storage.getSupplierStatement(1);
     assert.equal(st.totals.totalReceipts, 0);
 
-    // contabilul ajusteaza valoarea la 14340
-    const updated = await storage.updateReceiptAmount(receipt.id, 14340, "contabil");
+    // contabilul ajusteaza valoarea la 14340 (comentariu obligatoriu)
+    const updated = await storage.updateReceiptAmount(receipt.id, 14340, "contabil", "diferenta la achitare +43.02");
     assert.equal(updated.preliminaryPayableAmount, 14340);
     assert.equal(updated.price, 7.17); // 14340 / (2 t × 1000) = lei/kg
+    assert.equal(updated.amountNote, "diferenta la achitare +43.02");
+    assert.equal(updated.amountCorrections.length, 1);
 
     // actul de verificare reflecta noua valoare
     st = await storage.getSupplierStatement(1);
@@ -806,7 +808,9 @@ test("Contabil ajusteaza valoarea receptiei (suma) + se reflecta in actul de ver
     assert.equal(st.totals.balance, 14340); // nicio plata inca
 
     // refuza valoare negativa
-    await assert.rejects(storage.updateReceiptAmount(receipt.id, -5, "contabil"), /pozitiv/i);
+    await assert.rejects(storage.updateReceiptAmount(receipt.id, -5, "contabil", "x"), /pozitiv/i);
+    // refuza fara comentariu
+    await assert.rejects(storage.updateReceiptAmount(receipt.id, 100, "contabil"), /Comentariul/i);
   });
 });
 
