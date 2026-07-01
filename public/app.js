@@ -7289,11 +7289,17 @@ bodyEl.addEventListener("click", async (event) => {
     window.alert("Introdu o valoare numerică validă (ex. 14340 sau 14340,50).");
     return;
   }
+  const comment = window.prompt("Comentariu pentru această corectare (obligatoriu — de ce se ajustează suma):", "");
+  if (comment === null) return; // anulat
+  if (!String(comment).trim()) {
+    window.alert("Comentariul este obligatoriu la corectarea sumei.");
+    return;
+  }
   try {
     const res = await fetch(`/api/receipts/${id}/amount`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ amount: value })
+      body: JSON.stringify({ amount: value, note: comment })
     });
     if (!res.ok) {
       const e = await res.json().catch(() => ({}));
