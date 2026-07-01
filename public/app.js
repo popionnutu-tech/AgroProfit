@@ -1894,7 +1894,8 @@ function renderProcessings(processings) {
     const productMatch =
       !processingProductFilterEl || !processingProductFilterEl.value || item.product === processingProductFilterEl.value;
     const dateMatch = withinDateRange(item, ["createdAt", "processedAt"], processingDateFromEl, processingDateToEl);
-    return typeMatch && productMatch && dateMatch;
+    // Documentele anulate: vizibile doar celor cu drept (admin); operatorul nu le vede (ca la receptii/livrari).
+    return typeMatch && productMatch && dateMatch && canViewCanceled(item);
   });
 
   processingsBodyEl.innerHTML = filteredProcessings
