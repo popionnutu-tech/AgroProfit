@@ -2082,8 +2082,20 @@ function renderTransactions(transactions) {
   const canEditStatuses = role === "admin" || role === "accountant-sef";
   // Tranzacțiile anulate sunt vizibile doar contabilului-șef + admin (restul nu le văd).
   const canSeeCanceledTx = role === "admin" || role === "accountant-sef";
+  // Filtru pe partener (alfabetic), pe lângă filtrul de perioadă existent.
+  if (transactionPartnerFilterEl) {
+    const partners = Array.from(new Set(transactions.map((t) => t.partner).filter(Boolean)))
+      .sort((a, b) => String(a).localeCompare(String(b), "ro", { sensitivity: "base" }));
+    const prev = transactionPartnerFilterEl.value;
+    transactionPartnerFilterEl.innerHTML =
+      '<option value="">Toți partenerii</option>' +
+      partners.map((p) => `<option value="${escapeComboHtml(p)}">${escapeComboHtml(p)}</option>`).join("");
+    if (prev) transactionPartnerFilterEl.value = prev;
+  }
+  const partnerFilter = transactionPartnerFilterEl ? transactionPartnerFilterEl.value : "";
   const filtered = transactions.filter((item) =>
     withinDateRange(item, ["createdAt", "transactedAt"], transactionDateFromEl, transactionDateToEl) &&
+    (!partnerFilter || item.partner === partnerFilter) &&
     (item.status !== "Anulat" || canSeeCanceledTx)
   );
   transactionsBodyEl.innerHTML = filtered
