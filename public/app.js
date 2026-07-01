@@ -158,6 +158,7 @@ const deliveryCustomerSelect = document.getElementById("delivery-customer-select
 const deliveryGrossInput = document.getElementById("delivery-gross-input");
 const deliveryTareInput = document.getElementById("delivery-tare-input");
 const deliveryVehicleSelect = document.getElementById("delivery-vehicle-select");
+const deliveryTrailerSelect = document.getElementById("delivery-trailer-select");
 const deliveryAvailableEl = document.getElementById("delivery-available");
 const deliveryNetEl = document.getElementById("delivery-net");
 const deliveryStatusPreviewEl = document.getElementById("delivery-status");
