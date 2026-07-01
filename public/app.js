@@ -5299,8 +5299,8 @@ function buildStatementPrintHtml(data) {
     </table>
     <h4 style="color:#1B5E3F;">Achitări</h4>
     <table class="doc-table">
-      <thead><tr><th>Data</th><th>Tip plată</th><th>Referință</th><th>Sumă</th></tr></thead>
-      <tbody>${paymentRows || '<tr><td colspan="4">Nicio achitare</td></tr>'}</tbody>
+      <thead><tr><th>Data</th><th>Tip plată</th><th>Comentariu</th><th>Referință</th><th>Sumă</th></tr></thead>
+      <tbody>${paymentRows || '<tr><td colspan="5">Nicio achitare</td></tr>'}</tbody>
       <tfoot><tr><td colspan="3">TOTAL ACHITAT</td><td>${moneyRo(t.totalPaid)} MDL</td></tr></tfoot>
     </table>
     <div class="doc-total">SOLD FINAL: ${balanceText}</div>
