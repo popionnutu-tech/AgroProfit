@@ -1071,7 +1071,13 @@
         </section>
 
         <section class="grid finance-grid" data-access="finance" data-view="financiar">
-          <form class="panel form-panel" id="transaction-form">
+          <div class="receipt-new-bar" style="grid-column: 1 / -1;">
+            <button type="button" id="transaction-new-toggle" class="receipt-new-btn" aria-expanded="false" aria-controls="transaction-form">
+              <span class="rnb-icon">＋</span> Plată
+            </button>
+            <span class="receipt-new-hint">Apasă pentru a înregistra o plată / încasare.</span>
+          </div>
+          <form class="panel form-panel collapsed" id="transaction-form">
             <div class="panel-head">
               <h2>Plata / incasare</h2>
               <p>Flux rapid pentru plata furnizorului sau incasarea de la client.</p>
