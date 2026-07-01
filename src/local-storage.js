@@ -1747,6 +1747,7 @@ async function getSupplierStatement(partnerId, fromDate, toDate) {
   const payments = (state.transactions || [])
     .filter((t) => t.direction === "payment")
     .filter((t) => isActiveTransaction(t)) // plata anulata (storno) nu intra in extras
+    .filter((t) => t.source !== "advance-applied") // realocare de avans, nu bani noi (evita dublarea)
     .filter((t) => {
       const byId = t.supplierId && Number(t.supplierId) === Number(partnerId);
       const byName = t.partner && partner.name && String(t.partner).trim().toLowerCase() === String(partner.name).trim().toLowerCase();
