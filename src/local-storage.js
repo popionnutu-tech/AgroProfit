@@ -1681,7 +1681,7 @@ async function getSupplierStatement(partnerId, fromDate, toDate) {
   const config = readConfigState();
   const partner = (config.partners || []).find((p) => Number(p.id) === Number(partnerId));
   if (!partner) {
-    throw new Error("Furnizorul selectat nu exista.");
+    throw new Error("Partenerul selectat nu exista.");
   }
 
   const from = fromDate ? String(fromDate).slice(0, 10) : "";
