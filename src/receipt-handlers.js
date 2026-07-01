@@ -396,5 +396,6 @@ module.exports = {
   updateReceiptStatusHandler,
   // expuse pentru teste (filtrare financiara dupa capabilitate)
   stripReceiptFinancials,
-  stripFinancialStats
+  stripFinancialStats,
+  computeReceiptEstimate
 };
