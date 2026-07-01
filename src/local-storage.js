@@ -123,7 +123,9 @@ const defaultConfigState = {
   ],
   paymentTypes: [
     { id: 1, name: "Numerar", active: true },
-    { id: 2, name: "Transfer", active: true }
+    { id: 2, name: "Transfer", active: true },
+    // Barter: contravaloarea serviciilor (uscare/recoltare) retinuta stinge datoria furnizorului.
+    { id: 3, name: "Servicii", active: true }
   ],
   fiscalProfiles: [
     { id: 1, name: "Persoana fizica", withholdingPercent: 7, vat: false, active: true },
@@ -489,6 +491,19 @@ function readConfigState() {
         lossMethod: "fara",
         active: true
       }
+    ];
+  }
+
+  // Asigura tipul de plata "Servicii" (barter: contravaloarea serviciilor retinuta stinge datoria
+  // furnizorului) — sa fie mereu disponibil, inclusiv pe datele live. Idempotent (dupa nume).
+  if (
+    !(state.paymentTypes || []).some(
+      (t) => String((t && t.name) || "").trim().toLowerCase() === "servicii"
+    )
+  ) {
+    state.paymentTypes = [
+      ...(state.paymentTypes || []),
+      { id: nextId(state.paymentTypes || []), name: "Servicii", active: true }
     ];
   }
 
@@ -1715,6 +1730,7 @@ async function getSupplierStatement(partnerId, fromDate, toDate) {
       date: t.createdAt || t.transactedAt || "",
       amount: Number(t.amount || 0),
       paymentType: t.paymentType || "",
+      note: t.note || "",
       reference: t.receiptId ? `Receptie #${t.receiptId}` : (t.referenceType || "")
     }))
     .sort((a, b) => new Date(a.date) - new Date(b.date));

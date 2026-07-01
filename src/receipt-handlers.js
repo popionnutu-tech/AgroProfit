@@ -60,10 +60,10 @@ function computeReceiptEstimate({ quantity, price, humidity, impurity, product, 
   );
   const withholdingPercent = Number(fiscalProfile?.withholdingPercent || 0);
   const withholdingAmount = preliminaryBeforeWithholding * (withholdingPercent / 100);
-  const preliminaryPayableAmount = Math.max(
-    preliminaryBeforeWithholding - withholdingAmount,
-    0
-  );
+  // Datoria catre furnizor = valoarea INTEGRALA a marfii. Serviciile (uscare/recoltare) si eventualele
+  // retineri se sting ca PLATI (tip „Servicii" / barter) in Financiar, nu se scad automat din valoare.
+  // Campurile servicii/retinere raman informative (estimare in panou). Evita dubla scadere.
+  const preliminaryPayableAmount = preliminaryMerchandiseValue;
 
   return {
     grossQuantity,

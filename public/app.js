@@ -2130,6 +2130,7 @@ function renderTransactionTotals(rows) {
   let totalPayments = 0;
   let cashTotal = 0;
   let transferTotal = 0;
+  let serviceTotal = 0;
   rows.forEach((item) => {
     const amt = Number(item.amount || 0);
     if (item.direction === "collection") totalCollections += amt;
@@ -2137,10 +2138,11 @@ function renderTransactionTotals(rows) {
     const pt = String(item.paymentType || "").toLowerCase();
     if (pt.includes("numerar") || pt.includes("cash")) cashTotal += amt;
     else if (pt.includes("transfer")) transferTotal += amt;
+    else if (pt.includes("servici")) serviceTotal += amt;
   });
   transactionsFootEl.innerHTML = `
     <tr class="totals-row">
-      <td colspan="10">TOTAL (${rows.length}) &nbsp;·&nbsp; Numerar: <b>${currency.format(cashTotal)}</b> · Transfer: <b>${currency.format(transferTotal)}</b> &nbsp;·&nbsp; Încasări: <b>${currency.format(totalCollections)}</b> · Plăți: <b>${currency.format(totalPayments)}</b></td>
+      <td colspan="10">TOTAL (${rows.length}) &nbsp;·&nbsp; Numerar: <b>${currency.format(cashTotal)}</b> · Transfer: <b>${currency.format(transferTotal)}</b> · Servicii (barter): <b>${currency.format(serviceTotal)}</b> &nbsp;·&nbsp; Încasări: <b>${currency.format(totalCollections)}</b> · Plăți: <b>${currency.format(totalPayments)}</b></td>
     </tr>
   `;
 }
@@ -3736,10 +3738,8 @@ function getReceiptEstimate() {
   const withholdingAmount =
     Math.max(preliminaryMerchandiseValue - preliminaryServicesTotal, 0) *
     (withholdingPercent / 100);
-  const preliminaryPayableAmount = Math.max(
-    preliminaryMerchandiseValue - preliminaryServicesTotal - withholdingAmount,
-    0
-  );
+  // Datoria = valoarea integrala a marfii; serviciile se retin ca plati (barter) in Financiar.
+  const preliminaryPayableAmount = preliminaryMerchandiseValue;
 
   return {
     humidityNorm,
@@ -5276,7 +5276,7 @@ function buildStatementPrintHtml(data) {
   const receiptRows = data.receipts.map((r) => `
     <tr><td>${formatDateShort(r.date)}</td><td>${r.product}</td><td>${formatNumber(r.quantity)} ${r.unit}</td><td>${moneyRo(r.price)}</td><td>${moneyRo(r.amount)}</td></tr>`).join("");
   const paymentRows = data.payments.map((pm) => `
-    <tr><td>${formatDateShort(pm.date)}</td><td>${pm.paymentType || "-"}</td><td>${pm.reference || "-"}</td><td>${moneyRo(pm.amount)}</td></tr>`).join("");
+    <tr><td>${formatDateShort(pm.date)}</td><td>${escapeComboHtml(pm.paymentType || "-")}</td><td>${escapeComboHtml(pm.note || "")}</td><td>${escapeComboHtml(pm.reference || "-")}</td><td>${moneyRo(pm.amount)}</td></tr>`).join("");
   const balanceText = t.balance > 0
     ? `Datorie către furnizor: ${moneyRo(t.balance)} MDL`
     : t.balance < 0 ? `Avans: ${moneyRo(Math.abs(t.balance))} MDL` : "Achitat integral";
@@ -5301,9 +5301,9 @@ function buildStatementPrintHtml(data) {
     </table>
     <h4 style="color:#1B5E3F;">Achitări</h4>
     <table class="doc-table">
-      <thead><tr><th>Data</th><th>Tip plată</th><th>Referință</th><th>Sumă</th></tr></thead>
-      <tbody>${paymentRows || '<tr><td colspan="4">Nicio achitare</td></tr>'}</tbody>
-      <tfoot><tr><td colspan="3">TOTAL ACHITAT</td><td>${moneyRo(t.totalPaid)} MDL</td></tr></tfoot>
+      <thead><tr><th>Data</th><th>Tip plată</th><th>Comentariu</th><th>Referință</th><th>Sumă</th></tr></thead>
+      <tbody>${paymentRows || '<tr><td colspan="5">Nicio achitare</td></tr>'}</tbody>
+      <tfoot><tr><td colspan="4">TOTAL ACHITAT</td><td>${moneyRo(t.totalPaid)} MDL</td></tr></tfoot>
     </table>
     <div class="doc-total">SOLD FINAL: ${balanceText}</div>
     <div class="doc-sign"><div>Furnizor</div><div>Reprezentant AgroProfit+</div></div>`;
@@ -5612,11 +5612,12 @@ function renderSupplierStatement(data) {
         <tr>
           <td>#${pm.id}</td>
           <td>${formatDateShort(pm.date)}</td>
-          <td>${pm.paymentType || "-"}</td>
-          <td>${pm.reference || "-"}</td>
+          <td>${escapeComboHtml(pm.paymentType || "-")}</td>
+          <td>${escapeComboHtml(pm.note || "")}</td>
+          <td>${escapeComboHtml(pm.reference || "-")}</td>
           <td>${currency.format(pm.amount)}</td>
         </tr>`).join("")
-    : '<tr><td colspan="5" class="empty-state">Nicio achitare în perioadă.</td></tr>';
+    : '<tr><td colspan="6" class="empty-state">Nicio achitare în perioadă.</td></tr>';
 
   const balanceColor = t.balance > 0 ? "var(--danger)" : t.balance < 0 ? "var(--accent-bright)" : "var(--muted)";
   const balanceText = t.balance > 0
@@ -5647,9 +5648,9 @@ function renderSupplierStatement(data) {
     <h4 class="statement-sub">Achitări</h4>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>ID</th><th>Data</th><th>Tip plată</th><th>Referință</th><th>Sumă</th></tr></thead>
+        <thead><tr><th>ID</th><th>Data</th><th>Tip plată</th><th>Comentariu</th><th>Referință</th><th>Sumă</th></tr></thead>
         <tbody>${paymentRows}</tbody>
-        <tfoot><tr class="totals-row"><td colspan="4">TOTAL achitat (${data.payments.length})</td><td>${currency.format(t.totalPaid)}</td></tr></tfoot>
+        <tfoot><tr class="totals-row"><td colspan="5">TOTAL achitat (${data.payments.length})</td><td>${currency.format(t.totalPaid)}</td></tr></tfoot>
       </table>
     </div>
 
