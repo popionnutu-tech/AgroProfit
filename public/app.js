@@ -2629,7 +2629,8 @@ function renderDailyReport(report) {
     )
     .join("");
 
-  dailyReportDeliveriesEl.innerHTML = (report.deliveries || [])
+  const deliveries = report.deliveries || [];
+  dailyReportDeliveriesEl.innerHTML = deliveries
     .map(
       (item) => `
         <tr>
@@ -2638,11 +2639,18 @@ function renderDailyReport(report) {
           <td>${escapeComboHtml(item.customer)}</td>
           <td>${escapeComboHtml(item.product)}</td>
           <td>${formatNumber(item.deliveredQuantity)}</td>
+          <td>${currency.format(deliveryInvoiceTotals(item).totalLei)}</td>
           <td>${escapeComboHtml(item.invoiceNumber || "-")}</td>
         </tr>
       `
     )
     .join("");
+  setReportFoot(dailyReportDeliveriesFootEl, [
+    { colspan: 4, value: `TOTAL (${deliveries.length})` },
+    { value: formatNumber(deliveries.reduce((s, d) => s + Number(d.deliveredQuantity || 0), 0)) },
+    { value: currency.format(deliveries.reduce((s, d) => s + deliveryInvoiceTotals(d).totalLei, 0)) },
+    { value: "" }
+  ]);
 
   dailyReportComplaintsEl.innerHTML = (report.complaints || [])
     .map(
