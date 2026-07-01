@@ -3736,10 +3736,8 @@ function getReceiptEstimate() {
   const withholdingAmount =
     Math.max(preliminaryMerchandiseValue - preliminaryServicesTotal, 0) *
     (withholdingPercent / 100);
-  const preliminaryPayableAmount = Math.max(
-    preliminaryMerchandiseValue - preliminaryServicesTotal - withholdingAmount,
-    0
-  );
+  // Datoria = valoarea integrala a marfii; serviciile se retin ca plati (barter) in Financiar.
+  const preliminaryPayableAmount = preliminaryMerchandiseValue;
 
   return {
     humidityNorm,
