@@ -2576,6 +2576,7 @@ function renderDailyReport(report) {
     )
     .join("");
 
+  const receiptValueOf = (r) => Number(r.amountToPay ?? r.preliminaryPayableAmount ?? 0);
   dailyReportReceiptsEl.innerHTML = report.receipts
     .map(
       (item) => `
@@ -2586,11 +2587,17 @@ function renderDailyReport(report) {
           <td>${escapeComboHtml(item.product)}</td>
           <td>${formatNumber(item.grossQuantity || item.quantity)}</td>
           <td>${formatNumber(item.provisionalNetQuantity || item.quantity)}</td>
+          <td>${currency.format(receiptValueOf(item))}</td>
           <td>${paymentBadge(item.paymentStatus)}</td>
         </tr>
       `
     )
     .join("");
+  setReportFoot(dailyReportReceiptsFootEl, report.receipts.length, [
+    { colspan: 5, label: `TOTAL (${report.receipts.length})` },
+    { value: currency.format(report.receipts.reduce((s, r) => s + receiptValueOf(r), 0)) },
+    { value: "" }
+  ]);
 
   dailyReportProcessingsEl.innerHTML = report.processings
     .map(
