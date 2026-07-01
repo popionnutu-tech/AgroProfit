@@ -5650,7 +5650,7 @@ function renderSupplierStatement(data) {
       <table>
         <thead><tr><th>ID</th><th>Data</th><th>Tip plată</th><th>Comentariu</th><th>Referință</th><th>Sumă</th></tr></thead>
         <tbody>${paymentRows}</tbody>
-        <tfoot><tr class="totals-row"><td colspan="4">TOTAL achitat (${data.payments.length})</td><td>${currency.format(t.totalPaid)}</td></tr></tfoot>
+        <tfoot><tr class="totals-row"><td colspan="5">TOTAL achitat (${data.payments.length})</td><td>${currency.format(t.totalPaid)}</td></tr></tfoot>
       </table>
     </div>
 

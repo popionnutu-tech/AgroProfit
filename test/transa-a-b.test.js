@@ -846,3 +846,50 @@ test("computeReceiptEstimate: pret lei/kg -> valoare = kg × pret (800 kg × 6 =
   assert.equal(est.preliminaryMerchandiseValue, 4800); // NU 4,8
   assert.equal(est.preliminaryPayableAmount, 4800);
 });
+
+test("Tipul de plata Servicii (barter) exista in nomenclator", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const config = await storage.getConfig();
+    const names = (config.paymentTypes || []).map((t) => t.name);
+    assert.ok(names.includes("Servicii"), "Servicii trebuie sa fie tip de plata disponibil");
+  });
+});
+
+test("Plata Servicii (barter) stinge datoria furnizorului + apare in actul de verificare cu comentariu", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const receipt = await seedReceipt(storage, { preliminaryPayableAmount: 4800 });
+    // barter: se retine contravaloarea serviciilor ca plata de tip „Servicii"
+    await storage.createTransaction({
+      referenceType: "receipt", receiptId: receipt.id, partnerId: 1, partner: "Agro Nord",
+      direction: "payment", amount: 1800, paymentType: "Servicii",
+      note: "uscare 1000 + recoltare 800", createdBy: "contabil"
+    });
+    const r = (await storage.listReceipts()).find((x) => x.id === receipt.id);
+    assert.equal(r.paidAmount, 1800);
+    assert.equal(r.soldRestant, 3000); // 4800 - 1800
+    assert.equal(r.paymentStatus, "Partial");
+    // actul de verificare: plata Servicii cu comentariul barter
+    const st = await storage.getSupplierStatement(1);
+    const pay = st.payments.find((p) => p.paymentType === "Servicii");
+    assert.ok(pay, "plata Servicii trebuie sa apara in extras");
+    assert.equal(pay.amount, 1800);
+    assert.equal(pay.note, "uscare 1000 + recoltare 800");
+    assert.equal(st.totals.balance, 3000);
+  });
+});
+
+test("computeReceiptEstimate: datoria = marfa integrala (fara scadere servicii/retinere)", () => {
+  const { computeReceiptEstimate } = require("../src/receipt-handlers");
+  // umiditate peste norma -> exista servicii uscare, DAR valoarea de plata ramane marfa integrala
+  const est = computeReceiptEstimate({
+    quantity: 10, price: 5, humidity: 20, impurity: 5,
+    product: { humidityNorm: 14, impurityNorm: 2 },
+    tariffs: [{ service: "Uscare", value: 250, active: true }, { service: "Curatire", value: 120, active: true }],
+    fiscalProfile: { withholdingPercent: 7 }
+  });
+  // marfa = provisionalNetQuantity(t) × 1000 × 5 ; payable trebuie sa fie EGAL cu marfa (fara deduceri)
+  assert.equal(est.preliminaryPayableAmount, est.preliminaryMerchandiseValue);
+  assert.ok(est.preliminaryServicesTotal > 0, "serviciile se estimeaza (informativ)");
+});
