@@ -2628,6 +2628,14 @@ function renderDailyReport(report) {
       `
     )
     .join("");
+  {
+    const inc = report.transactions.filter((t) => t.direction === "collection").reduce((s, t) => s + Number(t.amount || 0), 0);
+    const pla = report.transactions.filter((t) => t.direction !== "collection").reduce((s, t) => s + Number(t.amount || 0), 0);
+    setReportFoot(dailyReportTransactionsFootEl, [
+      { colspan: 5, value: `TOTAL (${report.transactions.length}) · Plăți: ${currency.format(pla)} · Încasări: ${currency.format(inc)}` },
+      { value: currency.format(inc + pla) }
+    ]);
+  }
 
   const deliveries = report.deliveries || [];
   dailyReportDeliveriesEl.innerHTML = deliveries
