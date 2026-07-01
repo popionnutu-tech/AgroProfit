@@ -1894,7 +1894,8 @@ function renderProcessings(processings) {
     const productMatch =
       !processingProductFilterEl || !processingProductFilterEl.value || item.product === processingProductFilterEl.value;
     const dateMatch = withinDateRange(item, ["createdAt", "processedAt"], processingDateFromEl, processingDateToEl);
-    return typeMatch && productMatch && dateMatch;
+    // Documentele anulate: vizibile doar celor cu drept (admin); operatorul nu le vede (ca la receptii/livrari).
+    return typeMatch && productMatch && dateMatch && canViewCanceled(item);
   });
 
   processingsBodyEl.innerHTML = filteredProcessings
@@ -1984,6 +1985,7 @@ function renderProcessingTotals(rows) {
   let totWaste = 0;
   let totFinal = 0;
   rows.forEach((item) => {
+    if (item.status === "Anulat") return; // procesarea anulata nu intra in totaluri
     const proc = Number(item.processedQuantity || 0);
     const waste = Number(item.confirmedWaste || 0);
     const fin = Number(item.finalNetQuantity || 0);
