@@ -5614,7 +5614,7 @@ function renderSupplierStatement(data) {
           <td>${formatDateShort(pm.date)}</td>
           <td>${escapeComboHtml(pm.paymentType || "-")}</td>
           <td>${escapeComboHtml(pm.note || "")}</td>
-          <td>${pm.reference || "-"}</td>
+          <td>${escapeComboHtml(pm.reference || "-")}</td>
           <td>${currency.format(pm.amount)}</td>
         </tr>`).join("")
     : '<tr><td colspan="6" class="empty-state">Nicio achitare în perioadă.</td></tr>';
