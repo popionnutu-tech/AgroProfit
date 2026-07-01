@@ -1985,6 +1985,7 @@ function renderProcessingTotals(rows) {
   let totWaste = 0;
   let totFinal = 0;
   rows.forEach((item) => {
+    if (item.status === "Anulat") return; // procesarea anulata nu intra in totaluri
     const proc = Number(item.processedQuantity || 0);
     const waste = Number(item.confirmedWaste || 0);
     const fin = Number(item.finalNetQuantity || 0);
