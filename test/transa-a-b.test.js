@@ -835,3 +835,14 @@ test("Valoare = kg × lei/kg (cazul Lupu Diana: 800 kg × 6 = 4800)", async () =
     assert.equal(st.totals.totalReceipts, 4800);
   });
 });
+
+test("computeReceiptEstimate: pret lei/kg -> valoare = kg × pret (800 kg × 6 = 4800)", () => {
+  const { computeReceiptEstimate } = require("../src/receipt-handlers");
+  // 0,8 t = 800 kg, pret 6 lei/kg, fara umiditate/impuritati peste norma, fara servicii/retinere
+  const est = computeReceiptEstimate({
+    quantity: 0.8, price: 6, humidity: 0, impurity: 0,
+    product: { humidityNorm: 0, impurityNorm: 0 }, tariffs: [], fiscalProfile: null
+  });
+  assert.equal(est.preliminaryMerchandiseValue, 4800); // NU 4,8
+  assert.equal(est.preliminaryPayableAmount, 4800);
+});
