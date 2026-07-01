@@ -5332,7 +5332,7 @@ function buildInvoicePrintHtml(delivery) {
       <div class="doc-party"><h4>Exportator (vânzător)</h4><div><b>${delivery.seller || seller?.name || "-"}</b></div>${seller?.idno ? `<div>IDNO: ${seller.idno}</div>` : ""}${seller?.address ? `<div>${seller.address}</div>` : ""}${seller?.iban ? `<div>IBAN: ${seller.iban}</div>` : ""}</div>
       <div class="doc-party"><h4>Destinatar (cumpărător)</h4><div><b>${delivery.customer || buyer?.name || "-"}</b></div>${buyer?.idno ? `<div>IDNO: ${buyer.idno}</div>` : ""}${buyer?.address ? `<div>${buyer.address}</div>` : ""}</div>
     </div>
-    <div class="doc-grid"><div><b>AUTO (mașină):</b> ${delivery.vehicle || "-"}</div><div><b>Valuta:</b> ${cur}</div></div>
+    <div class="doc-grid"><div><b>AUTO (mașină):</b> ${delivery.vehicle || "-"}${delivery.trailer ? " + remorcă " + delivery.trailer : ""}</div><div><b>Valuta:</b> ${cur}</div></div>
     <table class="doc-table">
       <thead><tr><th>Denumirea mărfii</th><th>Greutate (${qtyUnit})</th><th>Preț/${priceUnit} în ${cur}</th><th>Sumă în ${cur}</th></tr></thead>
       <tbody><tr><td>${code ? code + " - " : ""}${delivery.product}</td><td>${formatNumber(qtyDisplay)}</td><td>${moneyRo(unitPrice)}</td><td>${moneyRo(total)}</td></tr></tbody>
