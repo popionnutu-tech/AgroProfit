@@ -916,7 +916,7 @@ function renderDashFeed() {
           <div class="dash-feed-dot ${dot}"></div>
           <div class="dash-feed-body-text">
             <div class="dash-feed-title">${escapeComboHtml(reason || `${entity}${entityId} · ${log.action || ""}`)}</div>
-            <div class="dash-feed-meta">${when} · ${user}</div>
+            <div class="dash-feed-meta">${when} · ${escapeComboHtml(user)}</div>
           </div>
         </div>
       `;
