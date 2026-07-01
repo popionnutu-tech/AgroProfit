@@ -2130,6 +2130,7 @@ function renderTransactionTotals(rows) {
   let totalPayments = 0;
   let cashTotal = 0;
   let transferTotal = 0;
+  let serviceTotal = 0;
   rows.forEach((item) => {
     const amt = Number(item.amount || 0);
     if (item.direction === "collection") totalCollections += amt;
@@ -2137,10 +2138,11 @@ function renderTransactionTotals(rows) {
     const pt = String(item.paymentType || "").toLowerCase();
     if (pt.includes("numerar") || pt.includes("cash")) cashTotal += amt;
     else if (pt.includes("transfer")) transferTotal += amt;
+    else if (pt.includes("servici")) serviceTotal += amt;
   });
   transactionsFootEl.innerHTML = `
     <tr class="totals-row">
-      <td colspan="10">TOTAL (${rows.length}) &nbsp;·&nbsp; Numerar: <b>${currency.format(cashTotal)}</b> · Transfer: <b>${currency.format(transferTotal)}</b> &nbsp;·&nbsp; Încasări: <b>${currency.format(totalCollections)}</b> · Plăți: <b>${currency.format(totalPayments)}</b></td>
+      <td colspan="10">TOTAL (${rows.length}) &nbsp;·&nbsp; Numerar: <b>${currency.format(cashTotal)}</b> · Transfer: <b>${currency.format(transferTotal)}</b> · Servicii (barter): <b>${currency.format(serviceTotal)}</b> &nbsp;·&nbsp; Încasări: <b>${currency.format(totalCollections)}</b> · Plăți: <b>${currency.format(totalPayments)}</b></td>
     </tr>
   `;
 }
