@@ -2641,9 +2641,13 @@ function renderDailyReport(report) {
 }
 
 function renderSelectOptions(select, items, mapLabel, placeholder, mapValue = (item) => item.id || item.code) {
+  // Ordine alfabetică după eticheta afișată (cerință: filtrele/listele să fie sortate).
+  const sorted = [...items].sort((a, b) =>
+    String(mapLabel(a)).localeCompare(String(mapLabel(b)), "ro", { numeric: true, sensitivity: "base" })
+  );
   const options = [
     `<option value="" disabled selected>${placeholder}</option>`,
-    ...items.map((item) => `<option value="${mapValue(item)}">${mapLabel(item)}</option>`)
+    ...sorted.map((item) => `<option value="${mapValue(item)}">${mapLabel(item)}</option>`)
   ];
 
   select.innerHTML = options.join("");
