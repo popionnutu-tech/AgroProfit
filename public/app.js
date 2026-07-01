@@ -5610,11 +5610,12 @@ function renderSupplierStatement(data) {
         <tr>
           <td>#${pm.id}</td>
           <td>${formatDateShort(pm.date)}</td>
-          <td>${pm.paymentType || "-"}</td>
+          <td>${escapeComboHtml(pm.paymentType || "-")}</td>
+          <td>${escapeComboHtml(pm.note || "")}</td>
           <td>${pm.reference || "-"}</td>
           <td>${currency.format(pm.amount)}</td>
         </tr>`).join("")
-    : '<tr><td colspan="5" class="empty-state">Nicio achitare în perioadă.</td></tr>';
+    : '<tr><td colspan="6" class="empty-state">Nicio achitare în perioadă.</td></tr>';
 
   const balanceColor = t.balance > 0 ? "var(--danger)" : t.balance < 0 ? "var(--accent-bright)" : "var(--muted)";
   const balanceText = t.balance > 0
