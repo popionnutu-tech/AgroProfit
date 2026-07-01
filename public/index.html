@@ -508,9 +508,9 @@
 
             <div class="split">
               <label>
-                Pret / tonă
-                <input name="price" type="number" min="0" step="0.01" placeholder="0 daca se completeaza ulterior" />
-                <span class="field-hint">Optional. Daca lipseste, ramane 0 si se poate completa ulterior.</span>
+                Preț / kg
+                <input name="price" type="number" min="0" step="0.01" placeholder="lei / kg (ex. 6)" />
+                <span class="field-hint">Lei / kg. Optional — dacă lipsește, valoarea rămâne 0 și se poate completa ulterior.</span>
               </label>
               <label>
                 Locatie initiala
@@ -1223,6 +1223,14 @@
               <small class="field-hint">Alege mașina companiei; pentru mașina cumpărătorului lasă gol și scrie-o la Observații.</small>
             </label>
 
+            <label>
+              Remorcă (din nomenclator)
+              <select name="trailer" id="delivery-trailer-select">
+                <option value="">Fără remorcă</option>
+              </select>
+              <small class="field-hint">Opțional. Alege numărul remorcii din nomenclatorul Mașini.</small>
+            </label>
+
             <div class="split">
               <label>
                 Masă brută (kg)
@@ -1378,6 +1386,7 @@
               <label>Data contract<input name="contractDate" type="date" /></label>
             </div>
             <label>Mașină (nr.)<input name="vehicle" list="vehicles-datalist" placeholder="Ex: AG-102" /></label>
+            <label>Remorcă (nr.)<input name="trailer" list="vehicles-datalist" placeholder="Ex: AG-103" /></label>
             <label>Observații<input name="note" placeholder="Comentariu" /></label>
             <div class="form-actions">
               <button type="submit" value="save">Salvează</button>

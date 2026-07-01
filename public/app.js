@@ -158,6 +158,7 @@ const deliveryCustomerSelect = document.getElementById("delivery-customer-select
 const deliveryGrossInput = document.getElementById("delivery-gross-input");
 const deliveryTareInput = document.getElementById("delivery-tare-input");
 const deliveryVehicleSelect = document.getElementById("delivery-vehicle-select");
+const deliveryTrailerSelect = document.getElementById("delivery-trailer-select");
 const deliveryAvailableEl = document.getElementById("delivery-available");
 const deliveryNetEl = document.getElementById("delivery-net");
 const deliveryStatusPreviewEl = document.getElementById("delivery-status");
@@ -2260,7 +2261,7 @@ function renderDeliveries(deliveries) {
           <td class="col-fin">${item.seller || "-"}</td>
           <td>${item.product}${photosMini(item.photos)}</td>
           <td>${formatQtyByEntry(qty, item)}</td>
-          <td>${item.vehicle || "-"}</td>
+          <td>${escapeComboHtml(item.vehicle || "-")}${item.trailer ? ` <span class="trailer-badge">+ ${escapeComboHtml(item.trailer)}</span>` : ""}</td>
           <td class="col-fin">${priceLabel}</td>
           <td class="col-fin">${totalFactura > 0 ? currency.format(totalFactura) : "-"}</td>
           <td class="col-fin pay-cell ${item.invoicePaid ? "is-paid" : "is-unpaid"}">${paidSelect}</td>
@@ -3347,6 +3348,20 @@ function renderSetupSelectors(config) {
         .join("");
     if (prevV) deliveryVehicleSelect.value = prevV;
   }
+  // Select remorcă la livrare (din acelasi nomenclator Masini); gol = fara remorca.
+  if (deliveryTrailerSelect) {
+    const prevT = deliveryTrailerSelect.value;
+    deliveryTrailerSelect.innerHTML =
+      `<option value="">Fără remorcă</option>` +
+      (config.vehicles || [])
+        .filter((v) => v.active !== false)
+        .map((v) => {
+          const extra = [v.series, v.driver].filter(Boolean).join(" · ");
+          return `<option value="${escapeComboHtml(v.number)}">${escapeComboHtml(v.number)}${extra ? " — " + escapeComboHtml(extra) : ""}</option>`;
+        })
+        .join("");
+    if (prevT) deliveryTrailerSelect.value = prevT;
+  }
 
   // Populate supplier select for Act de verificare (Etapa 7)
   const statementPartnerSelect = document.getElementById("statement-partner-select");
@@ -3714,7 +3729,7 @@ function getReceiptEstimate() {
   const cleaningServiceTotal = quantity * excessImpurity * cleaningTariff;
   const dryingServiceTotal = quantity * excessHumidity * dryingTariff;
   const preliminaryServicesTotal = cleaningServiceTotal + dryingServiceTotal;
-  const preliminaryMerchandiseValue = provisionalNetQuantity * price;
+  const preliminaryMerchandiseValue = provisionalNetQuantity * 1000 * price; // kg × lei/kg
   const withholdingPercent = Number(fiscalProfile?.withholdingPercent || 0);
   const withholdingAmount =
     Math.max(preliminaryMerchandiseValue - preliminaryServicesTotal, 0) *
@@ -4209,10 +4224,9 @@ async function createReceipt(formData) {
   const isPending = !(tareKg > 0); // fara tara -> receptie "in descarcare" (asteapta a 2-a cantarire)
   const netKg = Math.max(grossKg - tareKg, 0);
 
-  // Valoarea (preliminaryPayableAmount) e calculata in estimare (net × pret − servicii − retinere),
-  // dar nu era trimisa la server → toate receptiile aveau valoare 0. O trimitem acum pentru receptiile
-  // finalizate (la „In descarcare" se calculeaza la a doua cantarire).
-  const est = getReceiptEstimate();
+  // Valoarea NU se trimite stocata: se deriva mereu din cantitate(kg) × pret(lei/kg) la afisare
+  // (receiptPayableValue), ca sa fie consecventa si pentru receptiile vechi. Contabilul o poate
+  // suprascrie manual cu ✎.
   const payload = {
     supplierId: supplierId,
     supplier: partner?.name || "",
@@ -4224,9 +4238,6 @@ async function createReceipt(formData) {
     enteredUnit: "kg",
     unit: product?.unit || formData.get("unit"),
     price: formData.get("price") || "0",
-    provisionalNetQuantity: String(isPending ? 0 : est.provisionalNetQuantity),
-    preliminaryServicesTotal: String(isPending ? 0 : est.preliminaryServicesTotal),
-    preliminaryPayableAmount: String(isPending ? 0 : est.preliminaryPayableAmount),
     humidity: formData.get("humidity") || String(selectedProduct?.humidityNorm ?? 0),
     impurity: formData.get("impurity") || String(selectedProduct?.impurityNorm ?? 0),
     vehicle: formData.get("vehicle"),
@@ -4861,10 +4872,7 @@ function renderTransactionPreview() {
     return;
   }
 
-  const targetAmount =
-    direction === "collection"
-      ? Number(receipt.preliminaryMerchandiseValue || receipt.preliminaryPayableAmount || 0)
-      : Number(receipt.preliminaryPayableAmount || 0);
+  const targetAmount = Number(receipt.amountToPay ?? receipt.preliminaryPayableAmount ?? 0);
 
   transactionPartnerEl.textContent = receipt.supplier || "-";
   transactionTargetEl.textContent = currency.format(targetAmount);
@@ -5324,7 +5332,7 @@ function buildInvoicePrintHtml(delivery) {
       <div class="doc-party"><h4>Exportator (vânzător)</h4><div><b>${delivery.seller || seller?.name || "-"}</b></div>${seller?.idno ? `<div>IDNO: ${seller.idno}</div>` : ""}${seller?.address ? `<div>${seller.address}</div>` : ""}${seller?.iban ? `<div>IBAN: ${seller.iban}</div>` : ""}</div>
       <div class="doc-party"><h4>Destinatar (cumpărător)</h4><div><b>${delivery.customer || buyer?.name || "-"}</b></div>${buyer?.idno ? `<div>IDNO: ${buyer.idno}</div>` : ""}${buyer?.address ? `<div>${buyer.address}</div>` : ""}</div>
     </div>
-    <div class="doc-grid"><div><b>AUTO (mașină):</b> ${delivery.vehicle || "-"}</div><div><b>Valuta:</b> ${cur}</div></div>
+    <div class="doc-grid"><div><b>AUTO (mașină):</b> ${delivery.vehicle || "-"}${delivery.trailer ? " + remorcă " + delivery.trailer : ""}</div><div><b>Valuta:</b> ${cur}</div></div>
     <table class="doc-table">
       <thead><tr><th>Denumirea mărfii</th><th>Greutate (${qtyUnit})</th><th>Preț/${priceUnit} în ${cur}</th><th>Sumă în ${cur}</th></tr></thead>
       <tbody><tr><td>${code ? code + " - " : ""}${delivery.product}</td><td>${formatNumber(qtyDisplay)}</td><td>${moneyRo(unitPrice)}</td><td>${moneyRo(total)}</td></tr></tbody>
@@ -5358,9 +5366,13 @@ function buildPurchaseActPrintHtml(delivery) {
   // Act de achizitie is based on the source receipt's supplier
   const receipt = (receiptsCache || []).find((r) => Number(r.id) === Number(delivery.receiptId));
   const supplier = receipt ? findPartnerByName(receipt.supplier) : null;
-  const qty = Number(delivery.netWeight > 0 ? delivery.netWeight : delivery.deliveredQuantity || 0);
-  const price = Number(receipt?.price || 0);
-  const total = Number(receipt?.preliminaryPayableAmount || qty * price);
+  // Actul de achizitie reflecta RECEPTIA (cumpararea de la furnizor): cantitate neta + pret lei/kg.
+  const qty = Number(
+    receipt?.provisionalNetQuantity || receipt?.quantity ||
+    (delivery.netWeight > 0 ? delivery.netWeight : delivery.deliveredQuantity) || 0
+  ); // tone
+  const price = Number(receipt?.price || 0); // lei/kg
+  const total = Number(receipt?.amountToPay ?? (qty * 1000 * price));
   return `${docHeader()}
     <div class="doc-title">Act de achiziție</div>
     <div class="doc-subtitle">${formatDateShort(delivery.createdAt)} · Recepție #${delivery.receiptId}</div>
@@ -5373,7 +5385,7 @@ function buildPurchaseActPrintHtml(delivery) {
     </div>
     <table class="doc-table">
       <thead><tr><th>Produs</th><th>Cantitate</th><th>Preț</th><th>Sumă</th></tr></thead>
-      <tbody><tr><td>${delivery.product}</td><td>${formatNumber(qty)} t</td><td>${moneyRo(price)}</td><td>${moneyRo(total)}</td></tr></tbody>
+      <tbody><tr><td>${delivery.product}</td><td>${formatNumber(qty * 1000)} kg</td><td>${moneyRo(price)}/kg</td><td>${moneyRo(total)}</td></tr></tbody>
       <tfoot><tr><td colspan="3">TOTAL</td><td>${moneyRo(total)} MDL</td></tr></tfoot>
     </table>
     <div class="doc-sign"><div>Furnizor</div><div>Achizitor AgroProfit+</div></div>`;
@@ -5446,7 +5458,7 @@ function buildBonCantarHtml(delivery) {
       <div class="doc-party"><h4>Client</h4><div><b>${delivery.customer || buyer?.name || "-"}</b></div>${buyer?.idno ? `<div>IDNO: ${buyer.idno}</div>` : ""}</div>
     </div>
     <div class="doc-grid">
-      <div><b>Autovehicul:</b> ${delivery.vehicle || "-"}</div>
+      <div><b>Autovehicul:</b> ${delivery.vehicle || "-"}${delivery.trailer ? " + remorcă " + delivery.trailer : ""}</div>
       <div><b>Produs:</b> ${delivery.product}</div>
       <div><b>Masă brută:</b> ${formatNumber(delivery.grossWeight || 0)} t</div>
       <div><b>Masă camion (tară):</b> ${formatNumber(delivery.tareWeight || 0)} t</div>
@@ -5470,7 +5482,7 @@ function buildCmrHtml(delivery) {
     <div class="doc-grid">
       <div><b>Marfă:</b> ${getProductCode(delivery.product) ? getProductCode(delivery.product) + " - " : ""}${delivery.product}</div>
       <div><b>Greutate netă:</b> ${formatNumber(qty)} t</div>
-      <div><b>Autovehicul:</b> ${delivery.vehicle || "-"}</div>
+      <div><b>Autovehicul:</b> ${delivery.vehicle || "-"}${delivery.trailer ? " + remorcă " + delivery.trailer : ""}</div>
       <div><b>Contract:</b> ${delivery.contractNumber || "-"}</div>
     </div>
     <div class="doc-sign"><div>Expeditor</div><div>Transportator</div></div>
@@ -5489,7 +5501,7 @@ function buildImputernicireHtml(delivery) {
       reprezentată prin administrator <b>________________________</b>,
       împuternicește societatea <b>${delivery.customer || buyer?.name || "________________"}</b>${buyer?.idno ? ` (IDNO ${buyer.idno})` : ""},
       reprezentată prin administrator <b>________________________</b>,
-      pentru transportul mărfii conform unității de transport <b>${delivery.vehicle || "____________"}</b>,
+      pentru transportul mărfii conform unității de transport <b>${delivery.vehicle || "____________"}${delivery.trailer ? " + remorcă " + delivery.trailer : ""}</b>,
       în cantitate de <b>${formatNumber(qty)} tone</b> de <b>${delivery.product}</b>,
       conform datelor din invoice nr. ${delivery.invoiceNumber || "______"} din ${formatDateShort(delivery.invoiceDate || delivery.createdAt)}.
     </p>
@@ -5587,8 +5599,8 @@ function renderSupplierStatement(data) {
           <td>#${r.id}</td>
           <td>${formatDateShort(r.date)}</td>
           <td>${r.product}</td>
-          <td>${formatNumber(r.quantity)} ${r.unit}</td>
-          <td>${currency.format(r.price)}</td>
+          <td>${formatNumber(r.quantity * 1000)} kg</td>
+          <td>${currency.format(r.price)}/kg</td>
           <td>${currency.format(r.amount)}</td>
         </tr>`).join("")
     : '<tr><td colspan="6" class="empty-state">Nicio recepție în perioadă.</td></tr>';
@@ -5626,7 +5638,7 @@ function renderSupplierStatement(data) {
       <table>
         <thead><tr><th>ID</th><th>Data</th><th>Produs</th><th>Cantitate</th><th>Preț</th><th>Sumă</th></tr></thead>
         <tbody>${receiptRows}</tbody>
-        <tfoot><tr class="totals-row"><td colspan="3">TOTAL recepții (${data.receipts.length})</td><td>${formatNumber(t.totalQuantity)}</td><td></td><td>${currency.format(t.totalReceipts)}</td></tr></tfoot>
+        <tfoot><tr class="totals-row"><td colspan="3">TOTAL recepții (${data.receipts.length})</td><td>${formatNumber(t.totalQuantity * 1000)} kg</td><td></td><td>${currency.format(t.totalReceipts)}</td></tr></tfoot>
       </table>
     </div>
 
@@ -5901,7 +5913,7 @@ function openReceiptDetails(id) {
 
   const finBlock = fin
     ? `<div class="rd-section"><h4>Financiar</h4>
-        ${rdRow("Preț / tonă", Number(item.price) > 0 ? currency.format(Number(item.price)) : "—")}
+        ${rdRow("Preț / kg", Number(item.price) > 0 ? currency.format(Number(item.price)) : "—")}
         ${rdRow("Valoare preliminară", currency.format(valoare))}
         ${rdRow("Achitat", currency.format(achitat))}
         ${rdRow("Rest", currency.format(rest))}
@@ -6902,6 +6914,7 @@ if (deliveryBillingDialog && deliveryBillingForm) {
     f.elements.exchangeRate.value = delivery.exchangeRate || "";
     f.elements.currency.value = delivery.currency || "MDL";
     f.elements.vehicle.value = delivery.vehicle || "";
+    if (f.elements.trailer) f.elements.trailer.value = delivery.trailer || "";
     f.elements.note.value = delivery.note || "";
     if (f.elements.vatRate) f.elements.vatRate.value = delivery.vatRate !== undefined && delivery.vatRate !== null ? String(delivery.vatRate) : "-";
     billingDelivery = delivery; // memorăm livrarea pentru calculul TVA (cantitate)
@@ -6949,6 +6962,7 @@ if (deliveryBillingDialog && deliveryBillingForm) {
       currency: f.elements.currency.value,
       vatRate: f.elements.vatRate ? f.elements.vatRate.value : "-",
       vehicle: f.elements.vehicle.value,
+      trailer: f.elements.trailer ? f.elements.trailer.value : "",
       note: f.elements.note.value,
       changeReason: "Completare date factura",
       changedBy: "dashboard"

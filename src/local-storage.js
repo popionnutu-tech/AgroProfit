@@ -1329,15 +1329,16 @@ function assertEntity(entity) {
   }
 }
 
-// Valoarea de plata a receptiei. Sursa unica: preliminaryPayableAmount daca e setat (>0);
-// altfel se DERIVA din cantitate × pret/tona — cazul in care pretul a fost completat dar
-// valoarea nu a fost salvata (formularul nu o trimitea). Repara si receptiile existente cu valoare 0.
+// Valoarea de plata a receptiei. Sursa unica:
+//  - preliminaryPayableAmount daca e setat (>0) — ex. valoare setata manual de contabil (✎);
+//  - altfel se DERIVA: cantitate (KG) × pret (LEI/KG). Cantitatea interna e in TONE -> ×1000.
+// Pretul se introduce in lei/kg (ex. 6 lei/kg), cantitatea neta 0,8 t = 800 kg -> 800×6 = 4800.
 function receiptPayableValue(r) {
   const stored = Number((r && r.preliminaryPayableAmount) || 0);
   if (stored > 0) return stored;
-  const net = Number((r && (r.provisionalNetQuantity || r.quantity)) || 0);
-  const price = Number((r && r.price) || 0);
-  return net > 0 && price > 0 ? Number((net * price).toFixed(2)) : 0;
+  const netTonnes = Number((r && (r.provisionalNetQuantity || r.quantity)) || 0);
+  const priceKg = Number((r && r.price) || 0);
+  return netTonnes > 0 && priceKg > 0 ? Number((netTonnes * 1000 * priceKg).toFixed(2)) : 0;
 }
 
 async function listReceipts() {
@@ -2524,6 +2525,7 @@ async function createDelivery(payload) {
     product: productName,
     location: sourceLocation,
     vehicle: payload.vehicle || "",
+    trailer: payload.trailer || "",
     contractNumber: payload.contractNumber || "",
     contractDate: payload.contractDate || "",
     contractPrice: sanitizeNumber(payload.contractPrice),
@@ -2782,7 +2784,8 @@ async function updateDelivery(id, payload = {}) {
     currency: delivery.currency,
     contractNumber: delivery.contractNumber,
     contractDate: delivery.contractDate,
-    vehicle: delivery.vehicle
+    vehicle: delivery.vehicle,
+    trailer: delivery.trailer
   };
 
   if (payload.note !== undefined) {
@@ -2833,6 +2836,9 @@ async function updateDelivery(id, payload = {}) {
   if (payload.vehicle !== undefined) {
     delivery.vehicle = String(payload.vehicle || "").trim();
   }
+  if (payload.trailer !== undefined) {
+    delivery.trailer = String(payload.trailer || "").trim();
+  }
   // Recompute priceLei = preț valută × curs (if both present)
   if (payload.priceForeign !== undefined || payload.exchangeRate !== undefined) {
     const pf = Number(delivery.priceForeign || 0);
@@ -2864,7 +2870,8 @@ async function updateDelivery(id, payload = {}) {
       currency: delivery.currency,
       contractNumber: delivery.contractNumber,
       contractDate: delivery.contractDate,
-      vehicle: delivery.vehicle
+      vehicle: delivery.vehicle,
+      trailer: delivery.trailer
     }
   });
 
@@ -3216,10 +3223,10 @@ async function updateReceiptAmount(id, amount, changedBy) {
   }
 
   const oldValue = { preliminaryPayableAmount: receipt.preliminaryPayableAmount, price: receipt.price };
-  receipt.preliminaryPayableAmount = value;
-  const net = Number(receipt.provisionalNetQuantity ?? receipt.quantity ?? 0);
-  if (net > 0) {
-    receipt.price = Number((value / net).toFixed(2)); // lei / tona, pentru afisare in actul de verificare
+  receipt.preliminaryPayableAmount = value; // valoare manuala (>0) -> are prioritate in receiptPayableValue
+  const netTonnes = Number(receipt.provisionalNetQuantity ?? receipt.quantity ?? 0);
+  if (netTonnes > 0) {
+    receipt.price = Number((value / (netTonnes * 1000)).toFixed(4)); // lei / kg, pentru afisare in act
   }
   receipt.updatedAt = new Date().toISOString();
 

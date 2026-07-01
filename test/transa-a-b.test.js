@@ -798,7 +798,7 @@ test("Contabil ajusteaza valoarea receptiei (suma) + se reflecta in actul de ver
     // contabilul ajusteaza valoarea la 14340
     const updated = await storage.updateReceiptAmount(receipt.id, 14340, "contabil");
     assert.equal(updated.preliminaryPayableAmount, 14340);
-    assert.equal(updated.price, 7170); // 14340 / 2 tone
+    assert.equal(updated.price, 7.17); // 14340 / (2 t × 1000) = lei/kg
 
     // actul de verificare reflecta noua valoare
     st = await storage.getSupplierStatement(1);
@@ -813,13 +813,36 @@ test("Contabil ajusteaza valoarea receptiei (suma) + se reflecta in actul de ver
 test("Valoare receptie derivata din pret × cantitate cand suma nu a fost salvata", async () => {
   await withIsolatedWorkspace(async ({ load }) => {
     const storage = load("src/local-storage.js");
-    // receptie cu pret completat dar preliminaryPayableAmount 0 (cazul vechi: valoarea nu se trimitea)
-    await seedReceipt(storage, { preliminaryPayableAmount: 0, price: 3000, provisionalNetQuantity: 100 });
+    // receptie cu pret completat (lei/kg) dar preliminaryPayableAmount 0 (cazul vechi: valoarea nu se trimitea)
+    await seedReceipt(storage, { preliminaryPayableAmount: 0, price: 3, provisionalNetQuantity: 100 });
     const r = (await storage.listReceipts())[0];
-    assert.equal(r.amountToPay, 300000); // 100 t × 3000 lei/t -> derivat
+    assert.equal(r.amountToPay, 300000); // 100 t = 100000 kg × 3 lei/kg -> derivat
     assert.equal(r.paymentStatus, "Neachitat");
     // actul de verificare reflecta valoarea derivata
     const st = await storage.getSupplierStatement(1);
     assert.equal(st.totals.totalReceipts, 300000);
   });
+});
+
+test("Valoare = kg × lei/kg (cazul Lupu Diana: 800 kg × 6 = 4800)", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    // 800 kg = 0,8 t net, pret 6 lei/kg, fara valoare salvata
+    await seedReceipt(storage, { quantity: 0.8, provisionalNetQuantity: 0, price: 6, preliminaryPayableAmount: 0 });
+    const r = (await storage.listReceipts())[0];
+    assert.equal(r.amountToPay, 4800); // 800 kg × 6 lei/kg, NU 4,8
+    const st = await storage.getSupplierStatement(1);
+    assert.equal(st.totals.totalReceipts, 4800);
+  });
+});
+
+test("computeReceiptEstimate: pret lei/kg -> valoare = kg × pret (800 kg × 6 = 4800)", () => {
+  const { computeReceiptEstimate } = require("../src/receipt-handlers");
+  // 0,8 t = 800 kg, pret 6 lei/kg, fara umiditate/impuritati peste norma, fara servicii/retinere
+  const est = computeReceiptEstimate({
+    quantity: 0.8, price: 6, humidity: 0, impurity: 0,
+    product: { humidityNorm: 0, impurityNorm: 0 }, tariffs: [], fiscalProfile: null
+  });
+  assert.equal(est.preliminaryMerchandiseValue, 4800); // NU 4,8
+  assert.equal(est.preliminaryPayableAmount, 4800);
 });
