@@ -1730,6 +1730,7 @@ async function getSupplierStatement(partnerId, fromDate, toDate) {
       date: t.createdAt || t.transactedAt || "",
       amount: Number(t.amount || 0),
       paymentType: t.paymentType || "",
+      note: t.note || "",
       reference: t.receiptId ? `Receptie #${t.receiptId}` : (t.referenceType || "")
     }))
     .sort((a, b) => new Date(a.date) - new Date(b.date));
