@@ -5348,7 +5348,7 @@ function buildStatementPrintHtml(data) {
     <table class="doc-table">
       <thead><tr><th>Data</th><th>Produs</th><th>Cantitate</th><th>Preț</th><th>Sumă</th></tr></thead>
       <tbody>${receiptRows || '<tr><td colspan="5">Nicio recepție</td></tr>'}</tbody>
-      <tfoot><tr><td colspan="2">TOTAL</td><td>${formatNumber(t.totalQuantity)}</td><td></td><td>${moneyRo(t.totalReceipts)} MDL</td></tr></tfoot>
+      <tfoot><tr><td colspan="2">TOTAL</td><td>${formatNumber(t.totalQuantity * 1000)} kg</td><td></td><td>${moneyRo(t.totalReceipts)} MDL</td></tr></tfoot>
     </table>
     <h4 style="color:#1B5E3F;">Achitări</h4>
     <table class="doc-table">
