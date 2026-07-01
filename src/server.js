@@ -40,7 +40,8 @@ const {
   healthHandler,
   listReceiptsHandler,
   reopenReceiptHandler,
-  updateReceiptStatusHandler
+  updateReceiptStatusHandler,
+  receiptForRequest
 } = require("./receipt-handlers");
 const {
   createProcessingHandler,
