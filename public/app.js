@@ -5329,36 +5329,56 @@ function buildStatementPrintHtml(data) {
     <tr><td>${formatDateShort(r.date)}</td><td>${escapeComboHtml(r.product || "")}</td><td>${formatNumber(r.quantity * 1000)} kg</td><td>${moneyRo(r.price)}/kg</td><td>${moneyRo(r.amount)}</td></tr>`).join("");
   const paymentRows = data.payments.map((pm) => `
     <tr><td>${formatDateShort(pm.date)}</td><td>${escapeComboHtml(pm.paymentType || "-")}</td><td>${escapeComboHtml(pm.note || "")}</td><td>${escapeComboHtml(pm.reference || "-")}</td><td>${moneyRo(pm.amount)}</td></tr>`).join("");
+  const deliveries = data.deliveries || [];
+  const collections = data.collections || [];
+  const deliveryRows = deliveries.map((d) => `
+    <tr><td>${formatDateShort(d.date)}</td><td>${escapeComboHtml(d.product || "")}</td><td>${formatNumber(d.quantity * 1000)} kg</td><td>${moneyRo(d.amount)}</td></tr>`).join("");
+  const collectionRows = collections.map((c) => `
+    <tr><td>${formatDateShort(c.date)}</td><td>${escapeComboHtml(c.paymentType || "-")}</td><td>${escapeComboHtml(c.note || "")}</td><td>${escapeComboHtml(c.reference || "-")}</td><td>${moneyRo(c.amount)}</td></tr>`).join("");
   const balanceText = t.balance > 0
-    ? `Datorie către furnizor: ${moneyRo(t.balance)} MDL`
-    : t.balance < 0 ? `Avans: ${moneyRo(Math.abs(t.balance))} MDL` : "Achitat integral";
+    ? `Noi datorăm partenerului: ${moneyRo(t.balance)} MDL`
+    : t.balance < 0 ? `Partenerul ne datorează: ${moneyRo(Math.abs(t.balance))} MDL` : "Achitat integral";
   const periodText = data.period.from || data.period.to
     ? `Perioada: ${data.period.from || "început"} — ${data.period.to || "azi"}` : "Toată perioada";
+  const customerSide = (deliveries.length || collections.length) ? `
+    <h4 style="color:#1B5E3F;">Livrări (partenerul cumpără)</h4>
+    <table class="doc-table">
+      <thead><tr><th>Data</th><th>Produs</th><th>Cantitate</th><th>Sumă</th></tr></thead>
+      <tbody>${deliveryRows || '<tr><td colspan="4">Nicio livrare</td></tr>'}</tbody>
+      <tfoot><tr><td colspan="2">TOTAL</td><td>${formatNumber((t.totalDeliveredQuantity || 0) * 1000)} kg</td><td>${moneyRo(t.totalDeliveries || 0)} MDL</td></tr></tfoot>
+    </table>
+    <h4 style="color:#1B5E3F;">Încasări</h4>
+    <table class="doc-table">
+      <thead><tr><th>Data</th><th>Tip</th><th>Comentariu</th><th>Referință</th><th>Sumă</th></tr></thead>
+      <tbody>${collectionRows || '<tr><td colspan="5">Nicio încasare</td></tr>'}</tbody>
+      <tfoot><tr><td colspan="4">TOTAL ÎNCASAT</td><td>${moneyRo(t.totalCollected || 0)} MDL</td></tr></tfoot>
+    </table>` : "";
   return `${docHeader()}
     <div class="doc-title">Act de verificare</div>
     <div class="doc-subtitle">${periodText}</div>
     <div class="doc-party" style="margin-bottom:14px;">
-      <h4>Furnizor</h4>
-      <div><b>${p.name}</b></div>
-      ${p.idno ? `<div>IDNO: ${p.idno}</div>` : ""}
-      ${p.address ? `<div>Adresa: ${p.address}</div>` : ""}
-      ${p.bankName ? `<div>Banca: ${p.bankName}</div>` : ""}
-      ${p.iban ? `<div>IBAN: ${p.iban}</div>` : ""}
+      <h4>Partener</h4>
+      <div><b>${escapeComboHtml(p.name || "")}</b></div>
+      ${p.idno ? `<div>IDNO: ${escapeComboHtml(p.idno)}</div>` : ""}
+      ${p.address ? `<div>Adresa: ${escapeComboHtml(p.address)}</div>` : ""}
+      ${p.bankName ? `<div>Banca: ${escapeComboHtml(p.bankName)}</div>` : ""}
+      ${p.iban ? `<div>IBAN: ${escapeComboHtml(p.iban)}</div>` : ""}
     </div>
-    <h4 style="color:#1B5E3F;">Recepții</h4>
+    <h4 style="color:#1B5E3F;">Recepții (partenerul furnizează)</h4>
     <table class="doc-table">
       <thead><tr><th>Data</th><th>Produs</th><th>Cantitate</th><th>Preț</th><th>Sumă</th></tr></thead>
       <tbody>${receiptRows || '<tr><td colspan="5">Nicio recepție</td></tr>'}</tbody>
       <tfoot><tr><td colspan="2">TOTAL</td><td>${formatNumber(t.totalQuantity * 1000)} kg</td><td></td><td>${moneyRo(t.totalReceipts)} MDL</td></tr></tfoot>
     </table>
-    <h4 style="color:#1B5E3F;">Achitări</h4>
+    <h4 style="color:#1B5E3F;">Achitări (către partener)</h4>
     <table class="doc-table">
       <thead><tr><th>Data</th><th>Tip plată</th><th>Comentariu</th><th>Referință</th><th>Sumă</th></tr></thead>
       <tbody>${paymentRows || '<tr><td colspan="5">Nicio achitare</td></tr>'}</tbody>
       <tfoot><tr><td colspan="4">TOTAL ACHITAT</td><td>${moneyRo(t.totalPaid)} MDL</td></tr></tfoot>
     </table>
+    ${customerSide}
     <div class="doc-total">SOLD FINAL: ${balanceText}</div>
-    <div class="doc-sign"><div>Furnizor</div><div>Reprezentant AgroProfit+</div></div>`;
+    <div class="doc-sign"><div>Partener</div><div>Reprezentant AgroProfit+</div></div>`;
 }
 
 // Build invoice / certificate / purchase act from a delivery + config
