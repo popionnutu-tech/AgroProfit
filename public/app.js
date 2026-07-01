@@ -5325,7 +5325,7 @@ function buildStatementPrintHtml(data) {
   const p = data.partner;
   const t = data.totals;
   const receiptRows = data.receipts.map((r) => `
-    <tr><td>${formatDateShort(r.date)}</td><td>${r.product}</td><td>${formatNumber(r.quantity)} ${r.unit}</td><td>${moneyRo(r.price)}</td><td>${moneyRo(r.amount)}</td></tr>`).join("");
+    <tr><td>${formatDateShort(r.date)}</td><td>${escapeComboHtml(r.product || "")}</td><td>${formatNumber(r.quantity * 1000)} kg</td><td>${moneyRo(r.price)}/kg</td><td>${moneyRo(r.amount)}</td></tr>`).join("");
   const paymentRows = data.payments.map((pm) => `
     <tr><td>${formatDateShort(pm.date)}</td><td>${escapeComboHtml(pm.paymentType || "-")}</td><td>${escapeComboHtml(pm.note || "")}</td><td>${escapeComboHtml(pm.reference || "-")}</td><td>${moneyRo(pm.amount)}</td></tr>`).join("");
   const balanceText = t.balance > 0
