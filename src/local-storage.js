@@ -2835,6 +2835,9 @@ async function updateDelivery(id, payload = {}) {
   if (payload.vehicle !== undefined) {
     delivery.vehicle = String(payload.vehicle || "").trim();
   }
+  if (payload.trailer !== undefined) {
+    delivery.trailer = String(payload.trailer || "").trim();
+  }
   // Recompute priceLei = preț valută × curs (if both present)
   if (payload.priceForeign !== undefined || payload.exchangeRate !== undefined) {
     const pf = Number(delivery.priceForeign || 0);
