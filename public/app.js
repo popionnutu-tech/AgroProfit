@@ -2261,7 +2261,7 @@ function renderDeliveries(deliveries) {
           <td class="col-fin">${item.seller || "-"}</td>
           <td>${item.product}${photosMini(item.photos)}</td>
           <td>${formatQtyByEntry(qty, item)}</td>
-          <td>${item.vehicle || "-"}</td>
+          <td>${escapeComboHtml(item.vehicle || "-")}${item.trailer ? ` <span class="trailer-badge">+ ${escapeComboHtml(item.trailer)}</span>` : ""}</td>
           <td class="col-fin">${priceLabel}</td>
           <td class="col-fin">${totalFactura > 0 ? currency.format(totalFactura) : "-"}</td>
           <td class="col-fin pay-cell ${item.invoicePaid ? "is-paid" : "is-unpaid"}">${paidSelect}</td>
