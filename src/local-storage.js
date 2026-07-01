@@ -123,7 +123,9 @@ const defaultConfigState = {
   ],
   paymentTypes: [
     { id: 1, name: "Numerar", active: true },
-    { id: 2, name: "Transfer", active: true }
+    { id: 2, name: "Transfer", active: true },
+    // Barter: contravaloarea serviciilor (uscare/recoltare) retinuta stinge datoria furnizorului.
+    { id: 3, name: "Servicii", active: true }
   ],
   fiscalProfiles: [
     { id: 1, name: "Persoana fizica", withholdingPercent: 7, vat: false, active: true },
