@@ -3421,13 +3421,14 @@ function renderSetupSelectors(config) {
   // Populate supplier select for Act de verificare (Etapa 7)
   const statementPartnerSelect = document.getElementById("statement-partner-select");
   if (statementPartnerSelect) {
-    const suppliers = (config.partners || []).filter(
-      (p) => p.role === "furnizor" || p.role === "ambele"
-    );
+    // Toți partenerii (furnizori ȘI cumpărători), alfabetic — actul de verificare e universal.
+    const partners = (config.partners || [])
+      .slice()
+      .sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "ro", { sensitivity: "base" }));
     const prev = statementPartnerSelect.value;
     statementPartnerSelect.innerHTML =
-      '<option value="">Selecteaza furnizor</option>' +
-      suppliers.map((p) => `<option value="${p.id}">${p.name}</option>`).join("");
+      '<option value="">Selectează partenerul</option>' +
+      partners.map((p) => `<option value="${p.id}">${escapeComboHtml(p.name || "")}</option>`).join("");
     if (prev) statementPartnerSelect.value = prev;
   }
 }
