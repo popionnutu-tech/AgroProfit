@@ -5274,7 +5274,7 @@ function buildStatementPrintHtml(data) {
   const receiptRows = data.receipts.map((r) => `
     <tr><td>${formatDateShort(r.date)}</td><td>${r.product}</td><td>${formatNumber(r.quantity)} ${r.unit}</td><td>${moneyRo(r.price)}</td><td>${moneyRo(r.amount)}</td></tr>`).join("");
   const paymentRows = data.payments.map((pm) => `
-    <tr><td>${formatDateShort(pm.date)}</td><td>${pm.paymentType || "-"}</td><td>${pm.reference || "-"}</td><td>${moneyRo(pm.amount)}</td></tr>`).join("");
+    <tr><td>${formatDateShort(pm.date)}</td><td>${escapeComboHtml(pm.paymentType || "-")}</td><td>${escapeComboHtml(pm.note || "")}</td><td>${pm.reference || "-"}</td><td>${moneyRo(pm.amount)}</td></tr>`).join("");
   const balanceText = t.balance > 0
     ? `Datorie către furnizor: ${moneyRo(t.balance)} MDL`
     : t.balance < 0 ? `Avans: ${moneyRo(Math.abs(t.balance))} MDL` : "Achitat integral";
