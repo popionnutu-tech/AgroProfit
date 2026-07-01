@@ -919,3 +919,46 @@ test("Act de verificare universal: latura cumparator (livrari + incasari + sold 
     assert.equal(st.totals.balance, -30000); // net: el ne datoreaza
   });
 });
+
+test("Auto-FIFO: o plata integrala catre furnizor stinge toate receptiile (cazul Reaboi Vitalie)", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    // 2 receptii pentru acelasi furnizor (partner 1)
+    const r1 = await seedReceipt(storage, { preliminaryPayableAmount: 5000 });
+    const r2 = await seedReceipt(storage, { preliminaryPayableAmount: 3000 });
+    // O SINGURA plata integrala (8000), inregistrata pe prima receptie
+    await storage.createTransaction({
+      referenceType: "receipt", receiptId: r1.id, partnerId: 1, partner: "Agro Nord",
+      direction: "payment", amount: 8000, createdBy: "contabil"
+    });
+    const list = await storage.listReceipts();
+    const a = list.find((x) => x.id === r1.id);
+    const b = list.find((x) => x.id === r2.id);
+    // ambele achitate (FIFO: 5000 la prima, 3000 la a doua)
+    assert.equal(a.paidAmount, 5000);
+    assert.equal(a.paymentStatus, "Achitat");
+    assert.equal(b.paidAmount, 3000);
+    assert.equal(b.paymentStatus, "Achitat");
+    assert.equal(a.soldRestant + b.soldRestant, 0);
+  });
+});
+
+test("Auto-FIFO: plata partiala se aplica pe cea mai veche receptie intai", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const r1 = await seedReceipt(storage, { preliminaryPayableAmount: 5000 });
+    const r2 = await seedReceipt(storage, { preliminaryPayableAmount: 3000 });
+    // plata partiala 6000 -> prima integral (5000), a doua partial (1000)
+    await storage.createTransaction({
+      referenceType: "receipt", receiptId: r2.id, partnerId: 1, partner: "Agro Nord",
+      direction: "payment", amount: 6000, createdBy: "contabil"
+    });
+    const list = await storage.listReceipts();
+    const a = list.find((x) => x.id === r1.id);
+    const b = list.find((x) => x.id === r2.id);
+    assert.equal(a.paidAmount, 5000);
+    assert.equal(a.paymentStatus, "Achitat");
+    assert.equal(b.paidAmount, 1000);
+    assert.equal(b.paymentStatus, "Partial");
+  });
+});

@@ -1358,22 +1358,53 @@ function receiptPayableValue(r) {
 
 async function listReceipts() {
   const state = readReceiptsState();
-  // Recompute payment state from transactions on the fly so cifrele coincid mereu
-  const paidByReceipt = new Map();
-  const lastPaymentByReceipt = new Map();
+  const receiptById = new Map();
+  for (const r of state.receipts || []) receiptById.set(Number(r.id), r);
+
+  // Total platit REAL catre fiecare PARTENER (plati directe active). Excludem realocarile de avans
+  // (source "advance-applied") ca sa nu dublam banii. Astfel o plata catre furnizor conteaza integral,
+  // indiferent de receptia pe care a fost inregistrata.
+  const paidByPartner = new Map();
+  const lastPaymentByPartner = new Map();
   for (const t of state.transactions || []) {
     if (t.referenceType !== "receipt" || t.direction !== "payment") continue;
     if (t.stornata === true) continue; // storned payments don't count
     if (t.status === "Anulat") continue; // anularea plății = storno: datoria se redeschide
-    const rid = Number(t.receiptId);
-    if (!rid) continue;
-    const applied = Number(t.appliedAmount ?? t.amount ?? 0);
-    paidByReceipt.set(rid, (paidByReceipt.get(rid) || 0) + applied);
+    if (t.source === "advance-applied") continue; // realocare de avans, nu bani noi
+    const r = receiptById.get(Number(t.receiptId));
+    const partnerId = t.partnerId != null ? Number(t.partnerId) : (r ? Number(r.supplierId) : NaN);
+    if (Number.isNaN(partnerId)) continue;
+    paidByPartner.set(partnerId, (paidByPartner.get(partnerId) || 0) + Number(t.amount || 0));
     const when = t.createdAt || t.transactedAt || "";
-    const prev = lastPaymentByReceipt.get(rid);
-    if (!prev || String(when) > String(prev)) lastPaymentByReceipt.set(rid, when);
+    const prev = lastPaymentByPartner.get(partnerId);
+    if (!prev || String(when) > String(prev)) lastPaymentByPartner.set(partnerId, when);
   }
-  const enriched = state.receipts.map((r) => {
+
+  // Distribuie plata fiecarui partener FIFO (cea mai veche receptie intai) pe receptiile lui.
+  // O plata integrala catre furnizor stinge automat toate receptiile neachitate.
+  const paidByReceipt = new Map();
+  const receiptsByPartner = new Map();
+  for (const r of state.receipts || []) {
+    if (r.status === "Anulat") continue; // receptia anulata nu are datorie
+    const pid = Number(r.supplierId);
+    if (!receiptsByPartner.has(pid)) receiptsByPartner.set(pid, []);
+    receiptsByPartner.get(pid).push(r);
+  }
+  for (const [pid, list] of receiptsByPartner) {
+    // FIFO: cea mai veche recepție întâi; la timestamp egal, ordonăm după id (determinist).
+    list.sort((a, b) =>
+      (new Date(a.createdAt || a.receivedAt) - new Date(b.createdAt || b.receivedAt)) || (Number(a.id) - Number(b.id))
+    );
+    let remaining = Number(paidByPartner.get(pid) || 0);
+    for (const r of list) {
+      const target = receiptPayableValue(r);
+      const applied = Math.max(0, Math.min(target, remaining));
+      paidByReceipt.set(Number(r.id), applied);
+      remaining -= applied;
+    }
+  }
+
+  const enriched = (state.receipts || []).map((r) => {
     const target = receiptPayableValue(r);
     const paid = Number(paidByReceipt.get(Number(r.id)) || 0);
     const soldRestant = Math.max(target - paid, 0);
@@ -1384,7 +1415,7 @@ async function listReceipts() {
       paidAmount: paid,
       soldRestant,
       paymentStatus,
-      lastPaymentDate: lastPaymentByReceipt.get(Number(r.id)) || ""
+      lastPaymentDate: paid > 0 ? (lastPaymentByPartner.get(Number(r.supplierId)) || "") : ""
     };
   });
   return enriched.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
@@ -1719,6 +1750,7 @@ async function getSupplierStatement(partnerId, fromDate, toDate) {
   const payments = (state.transactions || [])
     .filter((t) => t.direction === "payment")
     .filter((t) => isActiveTransaction(t)) // plata anulata (storno) nu intra in extras
+    .filter((t) => t.source !== "advance-applied") // realocare de avans, nu bani noi (evita dublarea)
     .filter((t) => {
       const byId = t.supplierId && Number(t.supplierId) === Number(partnerId);
       const byName = t.partner && partner.name && String(t.partner).trim().toLowerCase() === String(partner.name).trim().toLowerCase();
