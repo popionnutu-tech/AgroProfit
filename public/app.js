@@ -5458,7 +5458,7 @@ function buildBonCantarHtml(delivery) {
       <div class="doc-party"><h4>Client</h4><div><b>${delivery.customer || buyer?.name || "-"}</b></div>${buyer?.idno ? `<div>IDNO: ${buyer.idno}</div>` : ""}</div>
     </div>
     <div class="doc-grid">
-      <div><b>Autovehicul:</b> ${delivery.vehicle || "-"}</div>
+      <div><b>Autovehicul:</b> ${delivery.vehicle || "-"}${delivery.trailer ? " + remorcă " + delivery.trailer : ""}</div>
       <div><b>Produs:</b> ${delivery.product}</div>
       <div><b>Masă brută:</b> ${formatNumber(delivery.grossWeight || 0)} t</div>
       <div><b>Masă camion (tară):</b> ${formatNumber(delivery.tareWeight || 0)} t</div>
@@ -5482,7 +5482,7 @@ function buildCmrHtml(delivery) {
     <div class="doc-grid">
       <div><b>Marfă:</b> ${getProductCode(delivery.product) ? getProductCode(delivery.product) + " - " : ""}${delivery.product}</div>
       <div><b>Greutate netă:</b> ${formatNumber(qty)} t</div>
-      <div><b>Autovehicul:</b> ${delivery.vehicle || "-"}</div>
+      <div><b>Autovehicul:</b> ${delivery.vehicle || "-"}${delivery.trailer ? " + remorcă " + delivery.trailer : ""}</div>
       <div><b>Contract:</b> ${delivery.contractNumber || "-"}</div>
     </div>
     <div class="doc-sign"><div>Expeditor</div><div>Transportator</div></div>
