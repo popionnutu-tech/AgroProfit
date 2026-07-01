@@ -494,6 +494,19 @@ function readConfigState() {
     ];
   }
 
+  // Asigura tipul de plata "Servicii" (barter: contravaloarea serviciilor retinuta stinge datoria
+  // furnizorului) — sa fie mereu disponibil, inclusiv pe datele live. Idempotent (dupa nume).
+  if (
+    !(state.paymentTypes || []).some(
+      (t) => String((t && t.name) || "").trim().toLowerCase() === "servicii"
+    )
+  ) {
+    state.paymentTypes = [
+      ...(state.paymentTypes || []),
+      { id: nextId(state.paymentTypes || []), name: "Servicii", active: true }
+    ];
+  }
+
   // Orice locatie de tip "parcare" (ex. Parcare afara) permite mai multe produse — singura
   // exceptie de la regula un-produs. Fortat (robust la editari din nomenclator), conform cerintei.
   state.storageLocations = (state.storageLocations || []).map((loc) => {
