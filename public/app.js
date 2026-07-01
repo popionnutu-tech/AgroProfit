@@ -5973,6 +5973,7 @@ function openReceiptDetails(id) {
         ${rdRow("Rest", currency.format(rest))}
         ${rdRow("Stare plată", escapeComboHtml(item.paymentStatus || "—"))}
         ${rdRow("Ultima plată", formatDateShort(item.lastPaymentDate))}
+        ${item.amountNote ? rdRow("Corectare valoare", escapeComboHtml(item.amountNote)) : ""}
       </div>`
     : "";
 
