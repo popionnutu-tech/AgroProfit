@@ -6230,6 +6230,7 @@ deliveriesBodyEl.addEventListener("change", async (event) => {
 
 transactionDateFromEl?.addEventListener("change", () => renderTransactions(transactionsCache));
 transactionDateToEl?.addEventListener("change", () => renderTransactions(transactionsCache));
+transactionPartnerFilterEl?.addEventListener("change", () => renderTransactions(transactionsCache));
 processingProductSelect.addEventListener("change", () => {
   autofillProcessingInitialHumidity();
   renderProcessingEstimate();
