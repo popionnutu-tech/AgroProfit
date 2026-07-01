@@ -6695,6 +6695,15 @@ if (transferFormEl) {
   });
 }
 
+// Enter pe un câmp nu trebuie să trimită formularul (evită plăți dublate — ca la livrări).
+transactionFormEl.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter") return;
+  const el = event.target;
+  const tag = (el.tagName || "").toLowerCase();
+  if (tag === "textarea" || tag === "button" || el.type === "submit") return;
+  event.preventDefault();
+});
+
 transactionFormEl.addEventListener("submit", async (event) => {
   event.preventDefault();
   transactionMessageEl.textContent = "Se salveaza...";
