@@ -3348,6 +3348,20 @@ function renderSetupSelectors(config) {
         .join("");
     if (prevV) deliveryVehicleSelect.value = prevV;
   }
+  // Select remorcă la livrare (din acelasi nomenclator Masini); gol = fara remorca.
+  if (deliveryTrailerSelect) {
+    const prevT = deliveryTrailerSelect.value;
+    deliveryTrailerSelect.innerHTML =
+      `<option value="">Fără remorcă</option>` +
+      (config.vehicles || [])
+        .filter((v) => v.active !== false)
+        .map((v) => {
+          const extra = [v.series, v.driver].filter(Boolean).join(" · ");
+          return `<option value="${escapeComboHtml(v.number)}">${escapeComboHtml(v.number)}${extra ? " — " + escapeComboHtml(extra) : ""}</option>`;
+        })
+        .join("");
+    if (prevT) deliveryTrailerSelect.value = prevT;
+  }
 
   // Populate supplier select for Act de verificare (Etapa 7)
   const statementPartnerSelect = document.getElementById("statement-partner-select");
