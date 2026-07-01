@@ -6962,6 +6962,7 @@ if (deliveryBillingDialog && deliveryBillingForm) {
       currency: f.elements.currency.value,
       vatRate: f.elements.vatRate ? f.elements.vatRate.value : "-",
       vehicle: f.elements.vehicle.value,
+      trailer: f.elements.trailer ? f.elements.trailer.value : "",
       note: f.elements.note.value,
       changeReason: "Completare date factura",
       changedBy: "dashboard"
