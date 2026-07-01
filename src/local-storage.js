@@ -2525,6 +2525,7 @@ async function createDelivery(payload) {
     product: productName,
     location: sourceLocation,
     vehicle: payload.vehicle || "",
+    trailer: payload.trailer || "",
     contractNumber: payload.contractNumber || "",
     contractDate: payload.contractDate || "",
     contractPrice: sanitizeNumber(payload.contractPrice),
