@@ -6190,6 +6190,24 @@ document.addEventListener("click", async (event) => {
   });
 })();
 
+// Financiar: formularul de plată e ascuns implicit, se deschide cu butonul „Plată".
+(function setupTransactionNewToggle() {
+  const toggle = document.getElementById("transaction-new-toggle");
+  if (!toggle || !transactionFormEl) return;
+  toggle.addEventListener("click", () => {
+    const willOpen = transactionFormEl.classList.contains("collapsed");
+    transactionFormEl.classList.toggle("collapsed", !willOpen);
+    toggle.setAttribute("aria-expanded", String(willOpen));
+    toggle.classList.toggle("is-open", willOpen);
+    toggle.innerHTML = willOpen
+      ? '<span class="rnb-icon">✕</span> Închide formularul'
+      : '<span class="rnb-icon">＋</span> Plată';
+    if (willOpen) {
+      transactionFormEl.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  });
+})();
+
 // Stock period filter (Modul F)
 document.getElementById("stock-period-from")?.addEventListener("change", renderStockPeriod);
 document.getElementById("stock-period-to")?.addEventListener("change", renderStockPeriod);
