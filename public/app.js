@@ -6914,6 +6914,7 @@ if (deliveryBillingDialog && deliveryBillingForm) {
     f.elements.exchangeRate.value = delivery.exchangeRate || "";
     f.elements.currency.value = delivery.currency || "MDL";
     f.elements.vehicle.value = delivery.vehicle || "";
+    if (f.elements.trailer) f.elements.trailer.value = delivery.trailer || "";
     f.elements.note.value = delivery.note || "";
     if (f.elements.vatRate) f.elements.vatRate.value = delivery.vatRate !== undefined && delivery.vatRate !== null ? String(delivery.vatRate) : "-";
     billingDelivery = delivery; // memorăm livrarea pentru calculul TVA (cantitate)
