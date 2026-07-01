@@ -2870,7 +2870,8 @@ async function updateDelivery(id, payload = {}) {
       currency: delivery.currency,
       contractNumber: delivery.contractNumber,
       contractDate: delivery.contractDate,
-      vehicle: delivery.vehicle
+      vehicle: delivery.vehicle,
+      trailer: delivery.trailer
     }
   });
 
