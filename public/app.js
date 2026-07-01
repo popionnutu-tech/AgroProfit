@@ -2512,9 +2512,9 @@ function renderAuditLogs(auditLogs) {
         <tr>
           <td>#${item.id}</td>
           <td>${item.entityType}${item.entityId ? ` #${item.entityId}` : ""}</td>
-          <td>${item.action}</td>
-          <td>${item.user || "-"}</td>
-          <td>${item.reason}</td>
+          <td>${escapeComboHtml(item.action || "")}</td>
+          <td>${escapeComboHtml(item.user || "-")}</td>
+          <td>${escapeComboHtml(item.reason || "")}</td>
           <td>${String(item.createdAt || "").replace("T", " ").slice(0, 16)}</td>
         </tr>
       `
