@@ -138,6 +138,7 @@ const deliveryPaidFilterEl = document.getElementById("delivery-paid-filter");
 const deliveriesFootEl = document.getElementById("deliveries-foot");
 const transactionDateFromEl = document.getElementById("transaction-date-from");
 const transactionDateToEl = document.getElementById("transaction-date-to");
+const transactionPartnerFilterEl = document.getElementById("transaction-partner-filter");
 const transactionsFootEl = document.getElementById("transactions-foot");
 const transactionsBodyEl = document.getElementById("transactions-body");
 const transactionFormEl = document.getElementById("transaction-form");
