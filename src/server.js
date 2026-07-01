@@ -334,7 +334,8 @@ app.patch(
       const receipt = await storage.updateReceiptAmount(
         req.params.id,
         req.body && req.body.amount,
-        getActorLabel(req)
+        getActorLabel(req),
+        req.body && req.body.note
       );
       return res.status(200).json(receipt);
     } catch (error) {
