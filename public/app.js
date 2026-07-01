@@ -138,6 +138,7 @@ const deliveryPaidFilterEl = document.getElementById("delivery-paid-filter");
 const deliveriesFootEl = document.getElementById("deliveries-foot");
 const transactionDateFromEl = document.getElementById("transaction-date-from");
 const transactionDateToEl = document.getElementById("transaction-date-to");
+const transactionPartnerFilterEl = document.getElementById("transaction-partner-filter");
 const transactionsFootEl = document.getElementById("transactions-foot");
 const transactionsBodyEl = document.getElementById("transactions-body");
 const transactionFormEl = document.getElementById("transaction-form");
@@ -187,6 +188,9 @@ const dailyReportReceiptsEl = document.getElementById("daily-report-receipts");
 const dailyReportProcessingsEl = document.getElementById("daily-report-processings");
 const dailyReportDeliveriesEl = document.getElementById("daily-report-deliveries");
 const dailyReportTransactionsEl = document.getElementById("daily-report-transactions");
+const dailyReportReceiptsFootEl = document.getElementById("daily-report-receipts-foot");
+const dailyReportDeliveriesFootEl = document.getElementById("daily-report-deliveries-foot");
+const dailyReportTransactionsFootEl = document.getElementById("daily-report-transactions-foot");
 const dailyReportComplaintsEl = document.getElementById("daily-report-complaints");
 const receiptSaveNewButton = document.getElementById("receipt-save-new-button");
 const transactionSaveNewButton = document.getElementById("transaction-save-new-button");
@@ -2081,8 +2085,20 @@ function renderTransactions(transactions) {
   const canEditStatuses = role === "admin" || role === "accountant-sef";
   // Tranzacțiile anulate sunt vizibile doar contabilului-șef + admin (restul nu le văd).
   const canSeeCanceledTx = role === "admin" || role === "accountant-sef";
+  // Filtru pe partener (alfabetic), pe lângă filtrul de perioadă existent.
+  if (transactionPartnerFilterEl) {
+    const partners = Array.from(new Set(transactions.map((t) => t.partner).filter(Boolean)))
+      .sort((a, b) => String(a).localeCompare(String(b), "ro", { sensitivity: "base" }));
+    const prev = transactionPartnerFilterEl.value;
+    transactionPartnerFilterEl.innerHTML =
+      '<option value="">Toți partenerii</option>' +
+      partners.map((p) => `<option value="${escapeComboHtml(p)}">${escapeComboHtml(p)}</option>`).join("");
+    if (prev) transactionPartnerFilterEl.value = prev;
+  }
+  const partnerFilter = transactionPartnerFilterEl ? transactionPartnerFilterEl.value : "";
   const filtered = transactions.filter((item) =>
     withinDateRange(item, ["createdAt", "transactedAt"], transactionDateFromEl, transactionDateToEl) &&
+    (!partnerFilter || item.partner === partnerFilter) &&
     (item.status !== "Anulat" || canSeeCanceledTx)
   );
   transactionsBodyEl.innerHTML = filtered
@@ -2538,6 +2554,14 @@ function renderLockouts(lockouts) {
     .join("");
 }
 
+// Rând de total sub un tabel de raport. cells: [{colspan?, value}] în ordinea coloanelor.
+function setReportFoot(el, cells) {
+  if (!el) return;
+  el.innerHTML = `<tr class="totals-row">${cells
+    .map((c) => `<td${c.colspan ? ` colspan="${c.colspan}"` : ""}>${c.value ?? ""}</td>`)
+    .join("")}</tr>`;
+}
+
 function renderDailyReport(report) {
   const cards = [
     ["Receptii", report.summary.receiptsCount],
@@ -2563,6 +2587,7 @@ function renderDailyReport(report) {
     )
     .join("");
 
+  const receiptValueOf = (r) => Number(r.amountToPay ?? r.preliminaryPayableAmount ?? 0);
   dailyReportReceiptsEl.innerHTML = report.receipts
     .map(
       (item) => `
@@ -2573,11 +2598,17 @@ function renderDailyReport(report) {
           <td>${escapeComboHtml(item.product)}</td>
           <td>${formatNumber(item.grossQuantity || item.quantity)}</td>
           <td>${formatNumber(item.provisionalNetQuantity || item.quantity)}</td>
+          <td>${currency.format(receiptValueOf(item))}</td>
           <td>${paymentBadge(item.paymentStatus)}</td>
         </tr>
       `
     )
     .join("");
+  setReportFoot(dailyReportReceiptsFootEl, [
+    { colspan: 6, value: `TOTAL (${report.receipts.length})` },
+    { value: currency.format(report.receipts.reduce((s, r) => s + receiptValueOf(r), 0)) },
+    { value: "" }
+  ]);
 
   dailyReportProcessingsEl.innerHTML = report.processings
     .map(
@@ -2608,8 +2639,17 @@ function renderDailyReport(report) {
       `
     )
     .join("");
+  {
+    const inc = report.transactions.filter((t) => t.direction === "collection").reduce((s, t) => s + Number(t.amount || 0), 0);
+    const pla = report.transactions.filter((t) => t.direction !== "collection").reduce((s, t) => s + Number(t.amount || 0), 0);
+    setReportFoot(dailyReportTransactionsFootEl, [
+      { colspan: 5, value: `TOTAL (${report.transactions.length}) · Plăți: ${currency.format(pla)} · Încasări: ${currency.format(inc)}` },
+      { value: currency.format(inc + pla) }
+    ]);
+  }
 
-  dailyReportDeliveriesEl.innerHTML = (report.deliveries || [])
+  const deliveries = report.deliveries || [];
+  dailyReportDeliveriesEl.innerHTML = deliveries
     .map(
       (item) => `
         <tr>
@@ -2618,11 +2658,18 @@ function renderDailyReport(report) {
           <td>${escapeComboHtml(item.customer)}</td>
           <td>${escapeComboHtml(item.product)}</td>
           <td>${formatNumber(item.deliveredQuantity)}</td>
+          <td>${currency.format(deliveryInvoiceTotals(item).totalLei)}</td>
           <td>${escapeComboHtml(item.invoiceNumber || "-")}</td>
         </tr>
       `
     )
     .join("");
+  setReportFoot(dailyReportDeliveriesFootEl, [
+    { colspan: 4, value: `TOTAL (${deliveries.length})` },
+    { value: formatNumber(deliveries.reduce((s, d) => s + Number(d.deliveredQuantity || 0), 0)) },
+    { value: currency.format(deliveries.reduce((s, d) => s + deliveryInvoiceTotals(d).totalLei, 0)) },
+    { value: "" }
+  ]);
 
   dailyReportComplaintsEl.innerHTML = (report.complaints || [])
     .map(
@@ -2641,9 +2688,13 @@ function renderDailyReport(report) {
 }
 
 function renderSelectOptions(select, items, mapLabel, placeholder, mapValue = (item) => item.id || item.code) {
+  // Ordine alfabetică după eticheta afișată (cerință: filtrele/listele să fie sortate).
+  const sorted = [...items].sort((a, b) =>
+    String(mapLabel(a)).localeCompare(String(mapLabel(b)), "ro", { numeric: true, sensitivity: "base" })
+  );
   const options = [
     `<option value="" disabled selected>${placeholder}</option>`,
-    ...items.map((item) => `<option value="${mapValue(item)}">${mapLabel(item)}</option>`)
+    ...sorted.map((item) => `<option value="${mapValue(item)}">${mapLabel(item)}</option>`)
   ];
 
   select.innerHTML = options.join("");
@@ -6173,6 +6224,24 @@ document.addEventListener("click", async (event) => {
   });
 })();
 
+// Financiar: formularul de plată e ascuns implicit, se deschide cu butonul „Plată".
+(function setupTransactionNewToggle() {
+  const toggle = document.getElementById("transaction-new-toggle");
+  if (!toggle || !transactionFormEl) return;
+  toggle.addEventListener("click", () => {
+    const willOpen = transactionFormEl.classList.contains("collapsed");
+    transactionFormEl.classList.toggle("collapsed", !willOpen);
+    toggle.setAttribute("aria-expanded", String(willOpen));
+    toggle.classList.toggle("is-open", willOpen);
+    toggle.innerHTML = willOpen
+      ? '<span class="rnb-icon">✕</span> Închide formularul'
+      : '<span class="rnb-icon">＋</span> Plată';
+    if (willOpen) {
+      transactionFormEl.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  });
+})();
+
 // Stock period filter (Modul F)
 document.getElementById("stock-period-from")?.addEventListener("change", renderStockPeriod);
 document.getElementById("stock-period-to")?.addEventListener("change", renderStockPeriod);
@@ -6213,6 +6282,7 @@ deliveriesBodyEl.addEventListener("change", async (event) => {
 
 transactionDateFromEl?.addEventListener("change", () => renderTransactions(transactionsCache));
 transactionDateToEl?.addEventListener("change", () => renderTransactions(transactionsCache));
+transactionPartnerFilterEl?.addEventListener("change", () => renderTransactions(transactionsCache));
 processingProductSelect.addEventListener("change", () => {
   autofillProcessingInitialHumidity();
   renderProcessingEstimate();
@@ -6694,6 +6764,15 @@ if (transferFormEl) {
     }
   });
 }
+
+// Enter pe un câmp nu trebuie să trimită formularul (evită plăți dublate — ca la livrări).
+transactionFormEl.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter") return;
+  const el = event.target;
+  const tag = (el.tagName || "").toLowerCase();
+  if (tag === "textarea" || tag === "button" || el.type === "submit") return;
+  event.preventDefault();
+});
 
 transactionFormEl.addEventListener("submit", async (event) => {
   event.preventDefault();

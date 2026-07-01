@@ -1071,7 +1071,13 @@
         </section>
 
         <section class="grid finance-grid" data-access="finance" data-view="financiar">
-          <form class="panel form-panel" id="transaction-form">
+          <div class="receipt-new-bar" style="grid-column: 1 / -1;">
+            <button type="button" id="transaction-new-toggle" class="receipt-new-btn" aria-expanded="false" aria-controls="transaction-form">
+              <span class="rnb-icon">＋</span> Plată
+            </button>
+            <span class="receipt-new-hint">Apasă pentru a înregistra o plată / încasare.</span>
+          </div>
+          <form class="panel form-panel collapsed" id="transaction-form">
             <div class="panel-head">
               <h2>Plata / incasare</h2>
               <p>Flux rapid pentru plata furnizorului sau incasarea de la client.</p>
@@ -1158,6 +1164,9 @@
               <p>Plati si incasari inregistrate in sistem</p>
             </div>
             <div class="inline-date-filter">
+              <label>Partener
+                <select id="transaction-partner-filter"><option value="">Toți partenerii</option></select>
+              </label>
               <label>De la<input type="date" id="transaction-date-from" /></label>
               <label>Pana la<input type="date" id="transaction-date-to" /></label>
             </div>
@@ -1696,10 +1705,12 @@
                       <th>Produs</th>
                       <th>Brut</th>
                       <th>Net prov.</th>
+                      <th>Sumă</th>
                       <th>Plata</th>
                     </tr>
                   </thead>
                   <tbody id="daily-report-receipts"></tbody>
+                  <tfoot id="daily-report-receipts-foot"></tfoot>
                 </table>
               </div>
             </details>
@@ -1734,10 +1745,12 @@
                       <th>Client</th>
                       <th>Produs</th>
                       <th>Cantitate</th>
+                      <th>Sumă</th>
                       <th>Invoice</th>
                     </tr>
                   </thead>
                   <tbody id="daily-report-deliveries"></tbody>
+                  <tfoot id="daily-report-deliveries-foot"></tfoot>
                 </table>
               </div>
             </details>
@@ -1757,6 +1770,7 @@
                     </tr>
                   </thead>
                   <tbody id="daily-report-transactions"></tbody>
+                  <tfoot id="daily-report-transactions-foot"></tfoot>
                 </table>
               </div>
             </details>
