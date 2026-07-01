@@ -2511,7 +2511,7 @@ function renderAuditLogs(auditLogs) {
       (item) => `
         <tr>
           <td>#${item.id}</td>
-          <td>${item.entityType}${item.entityId ? ` #${item.entityId}` : ""}</td>
+          <td>${escapeComboHtml(item.entityType || "")}${item.entityId ? ` #${escapeComboHtml(String(item.entityId))}` : ""}</td>
           <td>${escapeComboHtml(item.action || "")}</td>
           <td>${escapeComboHtml(item.user || "-")}</td>
           <td>${escapeComboHtml(item.reason || "")}</td>
