@@ -5501,7 +5501,7 @@ function buildImputernicireHtml(delivery) {
       reprezentată prin administrator <b>________________________</b>,
       împuternicește societatea <b>${delivery.customer || buyer?.name || "________________"}</b>${buyer?.idno ? ` (IDNO ${buyer.idno})` : ""},
       reprezentată prin administrator <b>________________________</b>,
-      pentru transportul mărfii conform unității de transport <b>${delivery.vehicle || "____________"}</b>,
+      pentru transportul mărfii conform unității de transport <b>${delivery.vehicle || "____________"}${delivery.trailer ? " + remorcă " + delivery.trailer : ""}</b>,
       în cantitate de <b>${formatNumber(qty)} tone</b> de <b>${delivery.product}</b>,
       conform datelor din invoice nr. ${delivery.invoiceNumber || "______"} din ${formatDateShort(delivery.invoiceDate || delivery.createdAt)}.
     </p>
