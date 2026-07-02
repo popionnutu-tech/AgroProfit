@@ -1,3 +1,11 @@
+// Shim defensiv: daca i18n-ru.js nu s-a incarcat, bi()/setBilingual()/applyBilingualDom()
+// raman functii inofensive (identitate), ca sa nu arunce ReferenceError si sa sparga randarea.
+if (typeof window.bi !== "function") {
+  window.bi = function (text) { return text; };
+  window.setBilingual = function () {};
+  window.applyBilingualDom = function () {};
+}
+
 const loginScreenEl = document.getElementById("login-screen");
 const pageShellEl = document.getElementById("page-shell");
 const loginFormEl = document.getElementById("login-form");
@@ -260,6 +268,10 @@ function setCurrentUser(user) {
   currentSessionUser = user || null;
   currentUserNameEl.textContent = currentSessionUser?.name || "-";
   currentUserRoleEl.textContent = currentSessionUser?.roleName || currentSessionUser?.roleCode || "-";
+  // Interfata bilingva RO + RU se activeaza automat pentru operator (vorbitor de rusa).
+  if (typeof window.setBilingual === "function") {
+    window.setBilingual(currentSessionUser?.roleCode === "operator");
+  }
 }
 
 function canAccess(capability) {
@@ -382,6 +394,10 @@ function showLoginScreen(message = "") {
 function showDashboardShell() {
   loginScreenEl.hidden = true;
   pageShellEl.hidden = false;
+  // Traduce textul static bilingv RO + RU (activ doar pentru operator; idempotent).
+  if (typeof window.applyBilingualDom === "function") {
+    window.applyBilingualDom();
+  }
 }
 
 function togglePasswordPanel(show) {
@@ -1400,7 +1416,7 @@ function statusOptions(current, allowCancel = canCancelDocuments()) {
     .filter((status) => status !== "Anulat" || allowCancel || current === "Anulat")
     .map((status) => {
       const selected = current === status ? "selected" : "";
-      return `<option value="${status}" ${selected}>${status}</option>`;
+      return `<option value="${status}" ${selected}>${bi(status)}</option>`;
     });
 }
 
@@ -1755,7 +1771,7 @@ function paymentBadge(status) {
     Achitat: { cls: "pay-achitat", label: "Achitat" }
   };
   const s = map[status] || map.Neachitat;
-  return `<span class="pay-badge ${s.cls}">${s.label}</span>`;
+  return `<span class="pay-badge ${s.cls}">${bi(s.label)}</span>`;
 }
 
 // "Achită" button: jump to Financiar with the payment pre-filled (Modul Achitări)
@@ -1917,13 +1933,13 @@ function renderProcessings(processings) {
           <td>
             <div>${formatNumber(item.outputQuantity ?? item.finalNetQuantity)}</div>
             ${item.status === "In lucru"
-              ? `<span class="badge-inlucru" title="Se finalizează din panoul „Procesări în lucru» de mai sus">În lucru</span>`
+              ? `<span class="badge-inlucru" title="Se finalizează din panoul „Procesări în lucru» de mai sus">${bi("În lucru")}</span>`
               : `<select class="processing-status" data-id="${item.id}" ${canEditStatuses ? "" : "disabled"}>
                   ${["Confirmat", "Inchis", "Anulat", "Redeschis"]
                     .filter((status) => status !== "Anulat" || canCancelDocuments() || item.status === "Anulat")
                     .map((status) => {
                     const selected = item.status === status ? "selected" : "";
-                    return `<option value="${status}" ${selected}>${status}</option>`;
+                    return `<option value="${status}" ${selected}>${bi(status)}</option>`;
                   }).join("")}
                 </select>`}
           </td>
@@ -2115,7 +2131,7 @@ function renderTransactions(transactions) {
             <select class="transaction-status" data-id="${item.id}" ${canEditStatuses ? "" : "disabled"}>
               ${["Confirmat", "Inchis", "Anulat", "Redeschis"].map((status) => {
                 const selected = item.status === status ? "selected" : "";
-                return `<option value="${status}" ${selected}>${status}</option>`;
+                return `<option value="${status}" ${selected}>${bi(status)}</option>`;
               }).join("")}
             </select>
           </td>
@@ -2182,7 +2198,7 @@ function deliveryStatusBadge(status) {
     Redeschis: "badge-warn"
   };
   const label = status === "Confirmat" ? "Confirmat (Rezervat)" : status || "Proiect";
-  return `<span class="status-badge ${classMap[status] || "badge-neutral"}">${label}</span>`;
+  return `<span class="status-badge ${classMap[status] || "badge-neutral"}">${bi(label)}</span>`;
 }
 
 // Cantitatea afisata: greutatea neta reala daca s-a livrat, altfel cantitatea livrata,
@@ -2402,7 +2418,7 @@ function renderComplaints(complaints) {
             <select class="complaint-status" data-id="${item.id}" ${canEditStatuses ? "" : "disabled"}>
               ${["Deschisa", "Acceptata", "Respinsa", "Inchisa", "Redeschisa"].map((status) => {
                 const selected = item.status === status ? "selected" : "";
-                return `<option value="${status}" ${selected}>${status}</option>`;
+                return `<option value="${status}" ${selected}>${bi(status)}</option>`;
               }).join("")}
             </select>
           </td>
