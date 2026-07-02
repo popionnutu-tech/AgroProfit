@@ -217,6 +217,12 @@
     "Livrat": "Отгружено",
     "In descarcare": "На разгрузке",
     "In lucru": "В работе",
+    "În lucru": "В работе",
+    "Deschisa": "Открыта",
+    "Acceptata": "Принята",
+    "Respinsa": "Отклонена",
+    "Inchisa": "Закрыта",
+    "Redeschisa": "Переоткрыта",
 
     // --- Statusuri plata ---
     "Neachitat": "Не оплачено",
