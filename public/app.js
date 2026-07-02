@@ -1,3 +1,11 @@
+// Shim defensiv: daca i18n-ru.js nu s-a incarcat, bi()/setBilingual()/applyBilingualDom()
+// raman functii inofensive (identitate), ca sa nu arunce ReferenceError si sa sparga randarea.
+if (typeof window.bi !== "function") {
+  window.bi = function (text) { return text; };
+  window.setBilingual = function () {};
+  window.applyBilingualDom = function () {};
+}
+
 const loginScreenEl = document.getElementById("login-screen");
 const pageShellEl = document.getElementById("page-shell");
 const loginFormEl = document.getElementById("login-form");
