@@ -206,6 +206,7 @@
     "Draft": "Черновик",
     "Proiect": "Черновик",
     "Confirmat": "Подтверждено",
+    "Confirmat (Rezervat)": "Подтверждено (Резерв)",
     "Procesata": "Обработано",
     "Inchis": "Закрыто",
     "Anulat": "Отменено",
