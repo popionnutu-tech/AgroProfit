@@ -1933,13 +1933,13 @@ function renderProcessings(processings) {
           <td>
             <div>${formatNumber(item.outputQuantity ?? item.finalNetQuantity)}</div>
             ${item.status === "In lucru"
-              ? `<span class="badge-inlucru" title="Se finalizează din panoul „Procesări în lucru» de mai sus">În lucru</span>`
+              ? `<span class="badge-inlucru" title="Se finalizează din panoul „Procesări în lucru» de mai sus">${bi("În lucru")}</span>`
               : `<select class="processing-status" data-id="${item.id}" ${canEditStatuses ? "" : "disabled"}>
                   ${["Confirmat", "Inchis", "Anulat", "Redeschis"]
                     .filter((status) => status !== "Anulat" || canCancelDocuments() || item.status === "Anulat")
                     .map((status) => {
                     const selected = item.status === status ? "selected" : "";
-                    return `<option value="${status}" ${selected}>${status}</option>`;
+                    return `<option value="${status}" ${selected}>${bi(status)}</option>`;
                   }).join("")}
                 </select>`}
           </td>
