@@ -260,6 +260,10 @@ function setCurrentUser(user) {
   currentSessionUser = user || null;
   currentUserNameEl.textContent = currentSessionUser?.name || "-";
   currentUserRoleEl.textContent = currentSessionUser?.roleName || currentSessionUser?.roleCode || "-";
+  // Interfata bilingva RO + RU se activeaza automat pentru operator (vorbitor de rusa).
+  if (typeof window.setBilingual === "function") {
+    window.setBilingual(currentSessionUser?.roleCode === "operator");
+  }
 }
 
 function canAccess(capability) {
