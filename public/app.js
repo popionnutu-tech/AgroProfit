@@ -2190,7 +2190,7 @@ function deliveryStatusBadge(status) {
     Redeschis: "badge-warn"
   };
   const label = status === "Confirmat" ? "Confirmat (Rezervat)" : status || "Proiect";
-  return `<span class="status-badge ${classMap[status] || "badge-neutral"}">${label}</span>`;
+  return `<span class="status-badge ${classMap[status] || "badge-neutral"}">${bi(label)}</span>`;
 }
 
 // Cantitatea afisata: greutatea neta reala daca s-a livrat, altfel cantitatea livrata,
