@@ -2131,7 +2131,7 @@ function renderTransactions(transactions) {
             <select class="transaction-status" data-id="${item.id}" ${canEditStatuses ? "" : "disabled"}>
               ${["Confirmat", "Inchis", "Anulat", "Redeschis"].map((status) => {
                 const selected = item.status === status ? "selected" : "";
-                return `<option value="${status}" ${selected}>${status}</option>`;
+                return `<option value="${status}" ${selected}>${bi(status)}</option>`;
               }).join("")}
             </select>
           </td>
