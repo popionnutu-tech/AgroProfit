@@ -1763,7 +1763,7 @@ function paymentBadge(status) {
     Achitat: { cls: "pay-achitat", label: "Achitat" }
   };
   const s = map[status] || map.Neachitat;
-  return `<span class="pay-badge ${s.cls}">${s.label}</span>`;
+  return `<span class="pay-badge ${s.cls}">${bi(s.label)}</span>`;
 }
 
 // "Achită" button: jump to Financiar with the payment pre-filled (Modul Achitări)
