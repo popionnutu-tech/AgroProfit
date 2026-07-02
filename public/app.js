@@ -386,6 +386,10 @@ function showLoginScreen(message = "") {
 function showDashboardShell() {
   loginScreenEl.hidden = true;
   pageShellEl.hidden = false;
+  // Traduce textul static bilingv RO + RU (activ doar pentru operator; idempotent).
+  if (typeof window.applyBilingualDom === "function") {
+    window.applyBilingualDom();
+  }
 }
 
 function togglePasswordPanel(show) {
