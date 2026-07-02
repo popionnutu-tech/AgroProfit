@@ -1408,7 +1408,7 @@ function statusOptions(current, allowCancel = canCancelDocuments()) {
     .filter((status) => status !== "Anulat" || allowCancel || current === "Anulat")
     .map((status) => {
       const selected = current === status ? "selected" : "";
-      return `<option value="${status}" ${selected}>${status}</option>`;
+      return `<option value="${status}" ${selected}>${bi(status)}</option>`;
     });
 }
 
