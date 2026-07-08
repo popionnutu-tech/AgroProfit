@@ -5290,7 +5290,7 @@ function openPrintWindow(bodyHtml, title) {
     alert("Permite ferestrele pop-up pentru a printa documentul.");
     return;
   }
-  const doc = `<!DOCTYPE html><html lang="ro"><head><meta charset="utf-8"><title>${title}</title>
+  const doc = `<!DOCTYPE html><html lang="ro"><head><meta charset="utf-8"><title>${escapeComboHtml(title)}</title>
 <style>
   @page { size: A4; margin: 18mm 16mm; }
   * { box-sizing: border-box; }
@@ -5395,6 +5395,249 @@ function buildStatementPrintHtml(data) {
     ${customerSide}
     <div class="doc-total">SOLD FINAL: ${balanceText}</div>
     <div class="doc-sign"><div>Partener</div><div>Reprezentant AgroProfit+</div></div>`;
+}
+
+// ============================================================================
+// Documente contabile tiparite pentru furnizor (Act de achizitie, Contract, Ordin de plata).
+// Operatorul NU le vede — panoul e sub data-access="finance". Reutilizeaza openPrintWindow/
+// docHeader/moneyRo/escapeComboHtml. Datele se CITESC din operatii; nu ating banii/soldurile.
+// ============================================================================
+
+// Datele cumparatorului (elevatorul). Sursa: contractul primit. Usor de editat aici; se poate
+// muta ulterior in Setari sistem daca se doreste administrare din interfata.
+const COMPANY = {
+  name: "PARCUL DE AUTOBUZE SI TAXIMETRE nr.9 S.R.L.",
+  shortName: "PAT-9 SRL",
+  idno: "1003604001469",
+  vatCode: "3200008",
+  address: "Republica Moldova, or. Briceni, str. Olimpica 3",
+  iban: "MD03AG000000022515848399",
+  bank: "BC MAIB S.A.",
+  bic: "AGRNMD2X",
+  admin: "Pop Nutu",
+  phone: "024723101, 069371924, 069807110",
+  email: "contabilitate@transportlux.com"
+};
+
+// Suma in litere (lei + bani), in limba romana. Pentru randurile „in litere / прописью".
+function intToWordsRo(num) {
+  num = Math.floor(Math.abs(Number(num) || 0));
+  if (num === 0) return "zero";
+  const U = ["zero", "unu", "doi", "trei", "patru", "cinci", "sase", "sapte", "opt", "noua"];
+  const UF = ["zero", "una", "doua", "trei", "patru", "cinci", "sase", "sapte", "opt", "noua"];
+  const TEENS = ["zece", "unsprezece", "doisprezece", "treisprezece", "paisprezece", "cincisprezece", "saisprezece", "saptesprezece", "optsprezece", "nouasprezece"];
+  const TENS = ["", "", "douazeci", "treizeci", "patruzeci", "cincizeci", "saizeci", "saptezeci", "optzeci", "nouazeci"];
+  function below1000(x, fem) {
+    if (x === 0) return "";
+    const parts = [];
+    const h = Math.floor(x / 100);
+    const rest = x % 100;
+    if (h === 1) parts.push("o suta");
+    else if (h >= 2) parts.push(UF[h] + " sute");
+    if (rest > 0) {
+      if (rest < 10) parts.push((fem ? UF : U)[rest]);
+      else if (rest < 20) parts.push(TEENS[rest - 10]);
+      else {
+        const t = Math.floor(rest / 10);
+        const u = rest % 10;
+        parts.push(u === 0 ? TENS[t] : TENS[t] + " si " + (fem ? UF : U)[u]);
+      }
+    }
+    return parts.join(" ");
+  }
+  const parts = [];
+  const millions = Math.floor(num / 1000000);
+  const thousands = Math.floor((num % 1000000) / 1000);
+  const rest = num % 1000;
+  if (millions > 0) parts.push(millions === 1 ? "un milion" : below1000(millions, true) + " milioane");
+  if (thousands > 0) parts.push(thousands === 1 ? "o mie" : below1000(thousands, true) + " mii");
+  if (rest > 0) parts.push(below1000(rest, false));
+  return parts.join(" ").trim();
+}
+
+function numberToWordsRo(amount) {
+  const cents = Math.round((Number(amount) || 0) * 100);
+  const lei = Math.floor(cents / 100);
+  const bani = cents % 100;
+  return `${intToWordsRo(lei)} lei ${String(bani).padStart(2, "0")} bani`;
+}
+
+// Net in KG dintr-o receptie: greutatea neta reala (kg) daca exista, altfel net (tone) × 1000.
+function receiptNetKg(receipt) {
+  const net = Number(receipt.netWeight);
+  if (net > 0) return net;
+  return Number(receipt.provisionalNetQuantity || receipt.quantity || 0) * 1000;
+}
+
+function receiptPrintValue(receipt) {
+  const stored = Number(receipt.amountToPay || receipt.preliminaryPayableAmount || 0);
+  if (stored > 0) return stored;
+  return receiptNetKg(receipt) * (Number(receipt.price) || 0);
+}
+
+function companyBlockHtml() {
+  return `<div><b>${escapeComboHtml(COMPANY.name)}</b></div>
+    <div>IDNO: ${escapeComboHtml(COMPANY.idno)} · Cod TVA: ${escapeComboHtml(COMPANY.vatCode)}</div>
+    <div>${escapeComboHtml(COMPANY.address)}</div>
+    <div>IBAN: ${escapeComboHtml(COMPANY.iban)} · ${escapeComboHtml(COMPANY.bank)} (${escapeComboHtml(COMPANY.bic)})</div>
+    <div>Administrator: ${escapeComboHtml(COMPANY.admin)} · Tel: ${escapeComboHtml(COMPANY.phone)}</div>`;
+}
+
+// 1) ACT DE ACHIZITIE A MARFURILOR — dintr-o receptie (cumparare de la furnizor).
+function buildPurchaseActFromReceiptHtml(receipt, partner, number) {
+  const p = partner || {};
+  const netKg = receiptNetKg(receipt);
+  // Pe actul OFICIAL, cantitate × preț TREBUIE să dea exact valoarea. Dacă prețul e completat,
+  // valoarea = net × preț (consecvent). Dacă lipsește prețul, îl derivăm din valoarea stocată,
+  // ca înmulțirea de pe hârtie să iasă mereu corect.
+  let price = Number(receipt.price) || 0;
+  let value = receiptPrintValue(receipt);
+  if (price > 0) {
+    value = Number((netKg * price).toFixed(2));
+  } else if (netKg > 0 && value > 0) {
+    price = Number((value / netKg).toFixed(4));
+  }
+  const nr = number ? String(number) : "____";
+  return `${docHeader()}
+    <div class="doc-title">Act de achiziție a mărfurilor<br><small style="font-weight:400;">Акт закупки товаров</small></div>
+    <div class="doc-subtitle">Seria PAT · Nr. ${escapeComboHtml(nr)} · din ${formatDateShort(receipt.receivedAt || receipt.createdAt)}</div>
+    <div class="doc-parties">
+      <div class="doc-party"><h4>Cumpărător / Покупатель</h4>${companyBlockHtml()}</div>
+      <div class="doc-party"><h4>Vânzător / Продавец</h4>
+        <div><b>${escapeComboHtml(p.name || receipt.supplier || "")}</b></div>
+        ${p.idno ? `<div>IDNP/IDNO: ${escapeComboHtml(p.idno)}</div>` : ""}
+        ${p.address ? `<div>Adresa: ${escapeComboHtml(p.address)}</div>` : ""}
+        ${p.phone ? `<div>Tel: ${escapeComboHtml(p.phone)}</div>` : ""}
+      </div>
+    </div>
+    <table class="doc-table">
+      <thead><tr>
+        <th>Denumirea mărfii / Наименование</th><th>U.M.</th><th>Cantitate / Кол-во</th>
+        <th>Preț unitar, lei / Цена</th><th>Valoare, lei / Стоимость</th>
+      </tr></thead>
+      <tbody><tr>
+        <td>${escapeComboHtml(receipt.product || "")}</td>
+        <td>kg</td>
+        <td>${formatNumber(netKg)}</td>
+        <td>${moneyRo(price)}</td>
+        <td>${moneyRo(value)}</td>
+      </tr></tbody>
+      <tfoot><tr><td colspan="2">Total / Итого</td><td>${formatNumber(netKg)} kg</td><td></td><td>${moneyRo(value)}</td></tr></tfoot>
+    </table>
+    <div class="doc-grid">
+      <div><b>Valoarea totală:</b> ${moneyRo(value)} lei</div>
+      <div><b>În litere:</b> ${escapeComboHtml(numberToWordsRo(value))}</div>
+      <div><b>Rețineri la buget:</b> __________________</div>
+      <div><b>Avansuri achitate:</b> __________________</div>
+      <div><b>Total de plată:</b> ${moneyRo(value)} lei</div>
+      <div><b>În litere:</b> ${escapeComboHtml(numberToWordsRo(value))}</div>
+    </div>
+    <p style="font-size:11px;color:#555;margin-top:10px;">Declarația pe propria răspundere a persoanei fizice care a predat mărfurile: confirm că marfa îmi aparține și corespunde cantității și calității indicate. / Декларация под собственную ответственность лица, передавшего товары.</p>
+    <div class="doc-sign"><div>Vânzător (a predat) / Продавец</div><div>Cumpărător (a primit) / Покупатель</div></div>`;
+}
+
+// 2) CONTRACT de cumparare-vanzare cereale — cadru, per furnizor.
+function buildSaleContractHtml(partner) {
+  const p = partner || {};
+  const seller = `
+    <div><b>${escapeComboHtml(p.name || "")}</b></div>
+    <div>IDNO/IDNP: ${escapeComboHtml(p.idno || "____________")}</div>
+    <div>Adresa: ${escapeComboHtml(p.address || "____________")}</div>
+    ${p.iban ? `<div>IBAN: ${escapeComboHtml(p.iban)}</div>` : "<div>IBAN: ____________</div>"}
+    ${p.bankName ? `<div>Banca: ${escapeComboHtml(p.bankName)}</div>` : "<div>Banca: ____________</div>"}
+    <div>Tel: ${escapeComboHtml(p.phone || "____________")}</div>`;
+  const clause = (t) => `<p style="margin:6px 0;font-size:12px;text-align:justify;">${t}</p>`;
+  return `${docHeader()}
+    <div class="doc-title">Contract de cumpărare-vânzare</div>
+    <div class="doc-subtitle">Nr. PAT-________ · din ______________ · r. Briceni</div>
+    ${clause("<b>1. PĂRȚILE CONTRACTANTE.</b> " + escapeComboHtml(p.name || "____________") + ", IDNO/IDNP " + escapeComboHtml(p.idno || "____________") + ", cu sediul în " + escapeComboHtml(p.address || "____________") + ", denumit în continuare <b>vânzător</b>, și " + escapeComboHtml(COMPANY.name) + ", IDNO " + escapeComboHtml(COMPANY.idno) + ", cu sediul în " + escapeComboHtml(COMPANY.address) + ", reprezentată de administratorul " + escapeComboHtml(COMPANY.admin) + ", denumit în continuare <b>cumpărător</b>.")}
+    ${clause("<b>2. OBIECTUL CONTRACTULUI.</b> Vânzarea/cumpărarea produsului cerealier. Cantitatea și suma totală sunt conform actelor de achiziție emise. Achitarea se efectuează prin transfer bancar: 30% în avans și restul în 3 zile lucrătoare de la livrare, în lei (MDL).")}
+    ${clause("<b>3. VALORI CANTITATIV-CALITATIVE.</b> Cantitatea se stabilește printr-o anexă la momentul livrării, cu indicarea prețului. Prețul nu poate fi modificat pe parcursul executării. Marfa se predă la masa utilă fizică cu parametri conform standardelor în vigoare: umiditate ________. Marfa trebuie să fie sănătoasă, liberă de boli și dăunători.")}
+    ${clause("<b>4. OBLIGAȚIILE VÂNZĂTORULUI.</b> Să elibereze toate documentele de însoțire pentru partida livrată; să asigure condiții de păstrare optime până la livrare.")}
+    ${clause("<b>5. OBLIGAȚIILE CUMPĂRĂTORULUI.</b> Să preia marfa comandată; să onoreze plata facturilor conform contractului; să desemneze o persoană pentru recepția mărfii. Penalitate 2,0% din valoarea neachitată pentru fiecare zi de întârziere.")}
+    ${clause("<b>6. RECLAMAȚII.</b> După preluare, în cel mult 3 zile, cumpărătorul informează vânzătorul despre abaterile cantitativ-calitative determinate de elevatorul gazdă.")}
+    ${clause("<b>7. SANCȚIUNI.</b> Dobândă de întârziere 0,01% din suma neexecutată pentru fiecare zi, conform art. 619 Cod civil.")}
+    ${clause("<b>8-9. CLAUZE FINALE.</b> Contractul se supune legislației Republicii Moldova; litigiile se soluționează pe cale amiabilă sau de instanța competentă. Încheiat în două exemplare, câte unul pentru fiecare parte.")}
+    <div class="doc-parties" style="margin-top:20px;">
+      <div class="doc-party"><h4>VÂNZĂTOR</h4>${seller}</div>
+      <div class="doc-party"><h4>CUMPĂRĂTOR</h4>${companyBlockHtml()}</div>
+    </div>
+    <div class="doc-sign"><div>Vânzător</div><div>Cumpărător — ${escapeComboHtml(COMPANY.admin)}</div></div>`;
+}
+
+// 3) ORDIN DE PLATA / Dispozitie de plata de casa (Расходный кассовый ордер) — dintr-o plata.
+function buildCashPaymentOrderHtml(transaction, partner, number) {
+  const p = partner || {};
+  const amount = Number(transaction.amount) || 0;
+  const nr = number ? String(number) : "____";
+  const refText = transaction.receiptId ? `recepția #${transaction.receiptId}` : (transaction.note || "achitare furnizor");
+  return `${docHeader()}
+    <div class="doc-subtitle" style="text-align:left;">${escapeComboHtml(COMPANY.name)} · Cod fiscal ${escapeComboHtml(COMPANY.idno)}</div>
+    <div class="doc-title">Dispoziție de plată de casă<br><small style="font-weight:400;">Расходный кассовый ордер</small></div>
+    <div class="doc-subtitle">Nr. ${escapeComboHtml(nr)} · din ${formatDateShort(transaction.createdAt || transaction.transactedAt)}</div>
+    <div class="doc-grid">
+      <div><b>A elibera / Выдать:</b> ${escapeComboHtml(p.name || transaction.partner || "")}</div>
+      <div><b>Suma / Сумма:</b> ${moneyRo(amount)} lei</div>
+      <div style="grid-column:1 / -1;"><b>Suma în litere / прописью:</b> ${escapeComboHtml(numberToWordsRo(amount))}</div>
+      <div style="grid-column:1 / -1;"><b>În baza / Основание:</b> ${escapeComboHtml(refText)} (tip plată: ${escapeComboHtml(transaction.paymentType || "-")})</div>
+      <div style="grid-column:1 / -1;"><b>Anexă / Приложение:</b> __________________</div>
+      <div><b>Actul de identitate / документ:</b> ${escapeComboHtml(p.idno || "__________________")}</div>
+      <div><b>Data primirii:</b> "____" ____________ 20____</div>
+    </div>
+    <div class="doc-sign" style="margin-top:36px;">
+      <div>Conducător / Руководитель<br>${escapeComboHtml(COMPANY.admin)}</div>
+      <div>Contabil-șef / Гл. бухгалтер</div>
+    </div>
+    <div class="doc-sign" style="margin-top:24px;">
+      <div>Am primit / Получил (semnătura)</div>
+      <div></div>
+    </div>`;
+}
+
+// Gaseste partenerul unei receptii/tranzactii dupa id (apoi dupa nume, ca fallback).
+function findPartnerById(id) {
+  if (id == null) return null;
+  return (currentConfig?.partners || []).find((p) => Number(p.id) === Number(id)) || null;
+}
+
+// Dispatcher: aloca numarul (unde e cazul) si deschide fereastra de tipar completata.
+async function printAccountingDocument(docType, refId) {
+  try {
+    if (docType === "purchaseAct") {
+      const receipt = (receiptsCache || []).find((r) => Number(r.id) === Number(refId));
+      if (!receipt) { alert("Recepția nu a fost găsită."); return; }
+      const partner = findPartnerById(receipt.supplierId) || findPartnerByName(receipt.supplier);
+      const { number } = await allocatePrintNumber("purchaseAct", receipt.id);
+      openPrintWindow(buildPurchaseActFromReceiptHtml(receipt, partner, number), `Act de achizitie ${number || receipt.id}`);
+    } else if (docType === "paymentOrder") {
+      const tx = (transactionsCache || []).find((t) => Number(t.id) === Number(refId));
+      if (!tx) { alert("Plata nu a fost găsită."); return; }
+      const partner = findPartnerById(tx.partnerId) || findPartnerByName(tx.partner);
+      const { number } = await allocatePrintNumber("paymentOrder", tx.id);
+      openPrintWindow(buildCashPaymentOrderHtml(tx, partner, number), `Ordin de plata ${number || tx.id}`);
+    } else if (docType === "saleContract") {
+      const partner = findPartnerById(refId);
+      if (!partner) { alert("Selectează un furnizor."); return; }
+      openPrintWindow(buildSaleContractHtml(partner), `Contract ${partner.name}`);
+    }
+  } catch (error) {
+    alert(error.message || "Nu am putut genera documentul.");
+  }
+}
+
+// Cere serverului un numar oficial (crescator, per tip). Idempotent: acelasi document -> acelasi numar.
+async function allocatePrintNumber(docType, refId) {
+  const res = await fetch("/api/print-docs/allocate-number", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ docType, refId })
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Nu am putut aloca numărul documentului.");
+  }
+  return res.json();
 }
 
 // Build invoice / certificate / purchase act from a delivery + config
@@ -6324,6 +6567,54 @@ document.addEventListener("click", async (event) => {
     if (willOpen) {
       transactionFormEl.scrollIntoView({ behavior: "smooth", block: "start" });
     }
+  });
+})();
+
+// Panou „Tipar documente" (Financiar, doar contabil/admin): alegi tipul + operatia, tipareste.
+(function setupPrintDocsPanel() {
+  const typeEl = document.getElementById("print-doc-type");
+  const refEl = document.getElementById("print-doc-ref");
+  const labelEl = document.getElementById("print-doc-ref-label");
+  const btnEl = document.getElementById("print-doc-generate");
+  const panelEl = document.getElementById("print-docs-panel");
+  if (!typeEl || !refEl || !btnEl) return;
+
+  function fillRefOptions() {
+    const type = typeEl.value;
+    let options = [];
+    if (type === "purchaseAct") {
+      if (labelEl) labelEl.textContent = "Recepția";
+      options = (receiptsCache || [])
+        .filter((r) => r.status !== "Anulat")
+        .slice()
+        .sort((a, b) => new Date(b.receivedAt || b.createdAt) - new Date(a.receivedAt || a.createdAt))
+        .map((r) => ({ value: r.id, label: `#${r.id} · ${formatDateShort(r.receivedAt || r.createdAt)} · ${r.supplier || "-"} · ${r.product || "-"}` }));
+    } else if (type === "saleContract") {
+      if (labelEl) labelEl.textContent = "Furnizorul";
+      options = (currentConfig?.partners || [])
+        .filter((p) => p.role === "furnizor" || p.role === "ambele")
+        .slice()
+        .sort((a, b) => String(a.name).localeCompare(String(b.name), "ro"))
+        .map((p) => ({ value: p.id, label: p.name }));
+    } else if (type === "paymentOrder") {
+      if (labelEl) labelEl.textContent = "Plata";
+      options = (transactionsCache || [])
+        .filter((t) => t.direction === "payment" && t.status !== "Anulat")
+        .slice()
+        .sort((a, b) => new Date(b.createdAt || b.transactedAt) - new Date(a.createdAt || a.transactedAt))
+        .map((t) => ({ value: t.id, label: `#${t.id} · ${formatDateShort(t.createdAt || t.transactedAt)} · ${t.partner || "-"} · ${moneyRo(t.amount)} lei` }));
+    }
+    refEl.innerHTML = options.length
+      ? options.map((o) => `<option value="${escapeComboHtml(String(o.value))}">${escapeComboHtml(o.label)}</option>`).join("")
+      : '<option value="">— nimic disponibil —</option>';
+  }
+
+  typeEl.addEventListener("change", fillRefOptions);
+  if (panelEl) panelEl.addEventListener("toggle", () => { if (panelEl.open) fillRefOptions(); });
+  btnEl.addEventListener("click", () => {
+    const refId = refEl.value;
+    if (!refId) { alert("Nu există niciun document de tipărit pentru tipul ales."); return; }
+    printAccountingDocument(typeEl.value, refId);
   });
 })();
 

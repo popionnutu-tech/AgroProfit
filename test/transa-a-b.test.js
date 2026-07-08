@@ -962,3 +962,42 @@ test("Auto-FIFO: plata partiala se aplica pe cea mai veche receptie intai", asyn
     assert.equal(b.paymentStatus, "Partial");
   });
 });
+
+test("DOC: allocateDocumentNumber e crescator per tip si idempotent per document", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const r1 = await seedReceipt(storage, { preliminaryPayableAmount: 1000 });
+    const r2 = await seedReceipt(storage, { preliminaryPayableAmount: 2000 });
+
+    // Prima alocare pentru fiecare receptie -> 1, 2 (crescator).
+    const a1 = storage.allocateDocumentNumber("purchaseAct", r1.id, "contabil");
+    const a2 = storage.allocateDocumentNumber("purchaseAct", r2.id, "contabil");
+    assert.equal(a1.number, 1);
+    assert.equal(a1.allocated, true);
+    assert.equal(a2.number, 2);
+
+    // Re-tiparire acelasi document -> ACELASI numar, fara sa incrementeze.
+    const a1again = storage.allocateDocumentNumber("purchaseAct", r1.id, "contabil");
+    assert.equal(a1again.number, 1);
+    assert.equal(a1again.allocated, false);
+
+    // Ordinul de plata are secventa PROPRIE (incepe de la 1).
+    const tx = await storage.createTransaction({
+      referenceType: "receipt",
+      receiptId: r1.id,
+      partnerId: 1,
+      partner: "Agro Nord",
+      direction: "payment",
+      amount: 500,
+      createdBy: "contabil"
+    });
+    const p1 = storage.allocateDocumentNumber("paymentOrder", tx.id, "contabil");
+    assert.equal(p1.number, 1);
+    const p1again = storage.allocateDocumentNumber("paymentOrder", tx.id, "contabil");
+    assert.equal(p1again.number, 1);
+
+    // Tip necunoscut / referinta lipsa -> eroare.
+    assert.throws(() => storage.allocateDocumentNumber("altceva", r1.id, "contabil"));
+    assert.throws(() => storage.allocateDocumentNumber("purchaseAct", 999999, "contabil"));
+  });
+});
