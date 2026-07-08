@@ -5487,8 +5487,16 @@ function companyBlockHtml() {
 function buildPurchaseActFromReceiptHtml(receipt, partner, number) {
   const p = partner || {};
   const netKg = receiptNetKg(receipt);
-  const price = Number(receipt.price) || 0;
-  const value = receiptPrintValue(receipt);
+  // Pe actul OFICIAL, cantitate × preț TREBUIE să dea exact valoarea. Dacă prețul e completat,
+  // valoarea = net × preț (consecvent). Dacă lipsește prețul, îl derivăm din valoarea stocată,
+  // ca înmulțirea de pe hârtie să iasă mereu corect.
+  let price = Number(receipt.price) || 0;
+  let value = receiptPrintValue(receipt);
+  if (price > 0) {
+    value = Number((netKg * price).toFixed(2));
+  } else if (netKg > 0 && value > 0) {
+    price = Number((value / netKg).toFixed(4));
+  }
   const nr = number ? String(number) : "____";
   return `${docHeader()}
     <div class="doc-title">Act de achiziție a mărfurilor<br><small style="font-weight:400;">Акт закупки товаров</small></div>
