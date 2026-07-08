@@ -5290,7 +5290,7 @@ function openPrintWindow(bodyHtml, title) {
     alert("Permite ferestrele pop-up pentru a printa documentul.");
     return;
   }
-  const doc = `<!DOCTYPE html><html lang="ro"><head><meta charset="utf-8"><title>${title}</title>
+  const doc = `<!DOCTYPE html><html lang="ro"><head><meta charset="utf-8"><title>${escapeComboHtml(title)}</title>
 <style>
   @page { size: A4; margin: 18mm 16mm; }
   * { box-sizing: border-box; }
