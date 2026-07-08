@@ -4578,6 +4578,7 @@ module.exports = {
   reloadFromKv,
   applyAdvanceCredit,
   appendAuditLog,
+  allocateDocumentNumber,
   cancelDelivery,
   cancelReceipt,
   cancelTransfer,
