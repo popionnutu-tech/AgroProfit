@@ -1075,6 +1075,60 @@ async function appendAuditLog(payload) {
   return entry;
 }
 
+// Aloca un numar de document oficial (crescator, per tip) pentru tiparire. Numarul se STAMPILEAZA
+// pe inregistrarea sursa (receipt.purchaseActNo / transaction.paymentOrderNo), deci re-tiparirea
+// aceluiasi document intoarce ACELASI numar (idempotent). Contractul-cadru nu primeste numar aici.
+const DOCUMENT_NUMBER_TYPES = {
+  purchaseAct: { collection: "receipts", stampField: "purchaseActNo", entityType: "receipt" },
+  paymentOrder: { collection: "transactions", stampField: "paymentOrderNo", entityType: "transaction" }
+};
+
+function allocateDocumentNumber(docType, refId, changedBy) {
+  const meta = DOCUMENT_NUMBER_TYPES[docType];
+  if (!meta) {
+    const err = new Error("Tip de document necunoscut.");
+    err.statusCode = 400;
+    throw err;
+  }
+  const id = Number(refId);
+  if (!Number.isFinite(id)) {
+    const err = new Error("Referinta documentului lipseste.");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const state = readReceiptsState();
+  const record = (state[meta.collection] || []).find((item) => Number(item.id) === id);
+  if (!record) {
+    const err = new Error("Documentul sursa nu a fost gasit.");
+    err.statusCode = 404;
+    throw err;
+  }
+
+  // Idempotent: daca deja are numar, il intoarce fara sa mai incrementeze secventa.
+  const existing = Number(record[meta.stampField]);
+  if (Number.isFinite(existing) && existing > 0) {
+    return { number: existing, allocated: false };
+  }
+
+  const seq = state.documentSequences || { purchaseAct: 0, paymentOrder: 0 };
+  const next = Number(seq[docType] || 0) + 1;
+  seq[docType] = next;
+  state.documentSequences = seq;
+  record[meta.stampField] = next;
+
+  createAuditEntry(state, {
+    entityType: meta.entityType,
+    entityId: id,
+    action: "document-number",
+    reason: `Numar ${docType} alocat: ${next}`,
+    user: changedBy || "dashboard"
+  });
+
+  writeReceiptsState(state);
+  return { number: next, allocated: true };
+}
+
 function computeReservedQuantity(state, receiptId) {
   return (state.deliveries || [])
     .filter((item) => item.receiptId === Number(receiptId))
