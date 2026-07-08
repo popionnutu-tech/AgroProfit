@@ -42,6 +42,7 @@ const defaultReceiptsState = {
   complaints: [],
   auditLogs: [],
   partnerAdvances: [],
+  documentSequences: { purchaseAct: 0, paymentOrder: 0 },
   lastId: 0
 };
 
