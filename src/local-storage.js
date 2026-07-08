@@ -448,6 +448,14 @@ function readReceiptsState() {
   if (!Array.isArray(state.partnerAdvances)) {
     state.partnerAdvances = [];
   }
+  // Backfill secventele de numerotare a documentelor tiparite (Act de achizitie, Ordin de plata)
+  // pe datele vechi. Idempotent.
+  if (!state.documentSequences || typeof state.documentSequences !== "object") {
+    state.documentSequences = { purchaseAct: 0, paymentOrder: 0 };
+  } else {
+    if (typeof state.documentSequences.purchaseAct !== "number") state.documentSequences.purchaseAct = 0;
+    if (typeof state.documentSequences.paymentOrder !== "number") state.documentSequences.paymentOrder = 0;
+  }
   return state;
 }
 
