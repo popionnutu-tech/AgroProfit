@@ -346,6 +346,26 @@ app.patch(
   }
 );
 
+// Aloca numarul oficial (crescator, per tip) pentru documentele tiparite de contabil
+// (Act de achizitie, Ordin de plata). Idempotent: acelasi document -> acelasi numar.
+app.post(
+  "/api/print-docs/allocate-number",
+  requireRoles(["accountant", "accountant-sef", "manager", "admin"]),
+  async (req, res) => {
+    try {
+      const result = storage.allocateDocumentNumber(
+        req.body && req.body.docType,
+        req.body && req.body.refId,
+        getActorLabel(req)
+      );
+      return res.status(200).json(result);
+    } catch (error) {
+      console.error("Failed to allocate document number:", error.message);
+      return res.status(error.statusCode || 400).json({ error: error.message || "Nu am putut aloca numarul." });
+    }
+  }
+);
+
 // Cantar in 2 pasi: a doua cantarire (tara) finalizeaza receptia "In descarcare".
 app.patch(
   "/api/receipts/:id/complete-weighing",
