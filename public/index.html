@@ -1077,6 +1077,29 @@
             </button>
             <span class="receipt-new-hint">Apasă pentru a înregistra o plată / încasare.</span>
           </div>
+
+          <details class="panel form-panel" id="print-docs-panel" style="grid-column: 1 / -1;">
+            <summary style="cursor:pointer;font-weight:600;list-style:none;">🖨️ Tipar documente</summary>
+            <div class="split" style="margin-top:12px;">
+              <label>
+                Tip document
+                <select id="print-doc-type">
+                  <option value="purchaseAct">Act de achiziție (recepție)</option>
+                  <option value="saleContract">Contract de cumpărare-vânzare (furnizor)</option>
+                  <option value="paymentOrder">Ordin de plată (plată)</option>
+                </select>
+              </label>
+              <label>
+                <span id="print-doc-ref-label">Recepția</span>
+                <select id="print-doc-ref"></select>
+              </label>
+            </div>
+            <div class="form-actions" style="margin-top:12px;">
+              <button type="button" id="print-doc-generate" class="cell-btn cell-btn-primary">Tipărește</button>
+            </div>
+            <p class="field-hint">Documentul se completează automat cu datele operației alese. Actul și ordinul primesc număr automat, crescător (același la re-tipărire).</p>
+          </details>
+
           <form class="panel form-panel collapsed" id="transaction-form">
             <div class="panel-head">
               <h2>Plata / incasare</h2>
