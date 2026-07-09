@@ -5436,21 +5436,56 @@ function buildStatementPrintHtml(data) {
 // docHeader/moneyRo/escapeComboHtml. Datele se CITESC din operatii; nu ating banii/soldurile.
 // ============================================================================
 
-// Datele cumparatorului (elevatorul). Sursa: contractul primit. Usor de editat aici; se poate
-// muta ulterior in Setari sistem daca se doreste administrare din interfata.
-const COMPANY = {
-  name: "PARCUL DE AUTOBUZE SI TAXIMETRE nr.9 S.R.L.",
-  shortName: "PAT-9 SRL",
-  idno: "1003604001469",
-  vatCode: "3200008",
-  address: "Republica Moldova, or. Briceni, str. Olimpica 3",
-  iban: "MD03AG000000022515848399",
-  bank: "BC MAIB S.A.",
-  bic: "AGRNMD2X",
-  admin: "Pop Nutu",
-  phone: "024723101, 069371924, 069807110",
-  email: "contabilitate@transportlux.com"
-};
+// Compania emitenta se ALEGE la tipar (nomenclatorul „Companiile mele", Setari). Fallback minim
+// daca nu exista nicio companie configurata.
+const DEFAULT_COMPANY = { name: "", shortName: "", idno: "", vatCode: "", address: "", iban: "", bank: "", bic: "", admin: "", phone: "", email: "" };
+
+function resolveCompany(companyId) {
+  const list = currentConfig?.companies || [];
+  const byId = companyId != null && companyId !== "" ? list.find((c) => Number(c.id) === Number(companyId)) : null;
+  return byId || list.find((c) => c.active !== false) || list[0] || DEFAULT_COMPANY;
+}
+
+// Fereastra de tipar „oficiala" — reproduce fidel formularele originale (fara branding AgroProfit,
+// fara subsol). Alb-negru, Times New Roman, format A4. Fiecare builder isi aduce structura proprie.
+function openOfficialDocWindow(bodyHtml, title) {
+  const win = window.open("", "_blank");
+  if (!win) {
+    alert("Permite ferestrele pop-up pentru a printa documentul.");
+    return;
+  }
+  const doc = `<!DOCTYPE html><html lang="ro"><head><meta charset="utf-8"><title>${escapeComboHtml(title)}</title>
+<style>
+  @page { size: A4; margin: 12mm 14mm; }
+  * { box-sizing: border-box; }
+  body { font-family: 'Times New Roman', Georgia, serif; color:#000; font-size:12px; line-height:1.32; margin:0; }
+  .of-title { text-align:center; font-weight:bold; font-size:15px; text-transform:uppercase; margin:4px 0 2px; }
+  .of-title small { display:block; font-size:10px; font-weight:400; text-transform:none; }
+  .of-ru { font-style:italic; font-size:9px; font-weight:400; }
+  .of-cap { font-size:8px; font-style:italic; text-align:center; }
+  .of-row { margin:5px 0; }
+  .of-fill { border-bottom:1px solid #000; display:inline-block; min-width:80px; padding:0 4px; }
+  .of-b { font-weight:bold; }
+  .of-c { text-align:center; }
+  .of-r { text-align:right; }
+  table.of-tbl { width:100%; border-collapse:collapse; margin:6px 0; }
+  table.of-tbl td, table.of-tbl th { border:1px solid #000; padding:3px 5px; font-size:11px; vertical-align:top; }
+  table.of-tbl th { font-weight:bold; text-align:center; }
+  .of-sign { display:flex; justify-content:space-between; margin-top:22px; font-size:11px; gap:20px; }
+  .of-sign .col { flex:1; }
+  .of-sign .ln { border-top:1px solid #000; padding-top:3px; margin-top:18px; }
+  .of-just { text-align:justify; margin:4px 0; font-size:11px; }
+  .of-hr { border:0; border-top:1px solid #000; margin:8px 0; }
+  @media print { .no-print { display:none; } }
+</style></head><body>
+${bodyHtml}
+<div class="no-print" style="text-align:center;margin-top:20px;">
+  <button onclick="window.print()" style="padding:9px 22px;font-size:14px;background:#1B5E3F;color:#fff;border:0;border-radius:6px;cursor:pointer;">Printează</button>
+</div>
+</body></html>`;
+  win.document.write(doc);
+  win.document.close();
+}
 
 // Suma in litere (lei + bani), in limba romana. Pentru randurile „in litere / прописью".
 function intToWordsRo(num) {
