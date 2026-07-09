@@ -215,7 +215,8 @@ const entityLabels = {
   fiscalProfiles: "Statut fiscal",
   processingTypes: "Tipuri procesare",
   vehicles: "Masini",
-  labReports: "Date laborator"
+  labReports: "Date laborator",
+  companies: "Companiile mele"
 };
 
 let currentConfig = null;
