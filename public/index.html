@@ -1675,6 +1675,36 @@
           </div>
         </section>
 
+        <section class="panel" data-view="documente" data-access="finance">
+          <div class="panel-head">
+            <h2>Documente de tipar</h2>
+            <p>Completează automat și tipărește documentele oficiale pentru furnizor. Alege compania care emite, tipul documentului și operația.</p>
+          </div>
+          <div class="filter-grid">
+            <label>
+              Compania emitentă
+              <select id="print-doc-company"></select>
+            </label>
+            <label>
+              Tip document
+              <select id="print-doc-type">
+                <option value="purchaseAct">Act de achiziție (recepție)</option>
+                <option value="saleContract">Contract de cumpărare-vânzare (furnizor)</option>
+                <option value="paymentOrder">Ordin de plată (plată)</option>
+              </select>
+            </label>
+            <label>
+              <span id="print-doc-ref-label">Recepția</span>
+              <select id="print-doc-ref"></select>
+            </label>
+            <label>
+              &nbsp;
+              <button type="button" id="print-doc-generate">Tipărește</button>
+            </label>
+          </div>
+          <p class="field-hint">Actul de achiziție și ordinul de plată primesc automat un număr crescător, per companie (același la re-tipărire). Datele companiei se editează în „Companiile mele" (Setări).</p>
+        </section>
+
         <section class="panel reports-panel" data-access="reports" data-view="rapoarte">
           <div class="panel-head">
             <h2>Raport zilnic operational</h2>
