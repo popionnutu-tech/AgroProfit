@@ -5547,15 +5547,14 @@ function receiptPrintValue(receipt) {
 function buildPurchaseActFromReceiptHtml(receipt, partner, number, company) {
   const p = partner || {};
   const co = company || DEFAULT_COMPANY;
-  const netKg = receiptNetKg(receipt);
-  // Pe actul OFICIAL, cantitate × preț TREBUIE să dea exact valoarea.
-  let price = Number(receipt.price) || 0;
-  let value = receiptPrintValue(receipt);
-  if (price > 0) {
-    value = Number((netKg * price).toFixed(2));
-  } else if (netKg > 0 && value > 0) {
-    price = Number((value / netKg).toFixed(4));
-  }
+  // Cantitatea și valoarea de pe act TREBUIE să coincidă cu suma reală datorată furnizorului
+  // (cea din Financiar / FIFO). Folosim ACEEAȘI bază ca receiptPayableValue: cantitatea netă
+  // provizorie (după pierderi) × 1000 = kg, iar valoarea = suma autoritară (amountToPay, care
+  // include eventualele corecții manuale). Prețul se derivă ca cantitate × preț = valoare exact.
+  const netKg = Number(receipt.provisionalNetQuantity || receipt.quantity || 0) * 1000
+    || Number(receipt.netWeight) || 0;
+  const value = receiptPrintValue(receipt);
+  const price = netKg > 0 ? Number((value / netKg).toFixed(4)) : (Number(receipt.price) || 0);
   const nr = number ? String(number) : "____";
   const words = escapeComboHtml(numberToWordsRo(value));
   return `
