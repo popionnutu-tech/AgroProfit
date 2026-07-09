@@ -150,6 +150,11 @@
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3 8-8"/><path d="M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9"/></svg>
               </span><span>Act verificare</span>
             </button>
+            <button class="view-tab sidebar-item" data-view="documente" data-access="finance" type="button">
+              <span class="sidebar-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h8"/></svg>
+              </span><span>Documente tipar</span>
+            </button>
             <div class="sidebar-separator" aria-hidden="true"></div>
             <div class="sidebar-group" data-group="nomenclator" data-access="nomenclator-read">
               <button class="sidebar-item sidebar-group-toggle" type="button" aria-expanded="false">
@@ -168,6 +173,7 @@
                 <button class="view-tab sidebar-subitem" data-view="nom-tarife" data-access="nomenclator-read" type="button">Tarife</button>
                 <button class="view-tab sidebar-subitem" data-view="nom-masini" data-access="nomenclator-read" type="button">Mașini</button>
                 <button class="view-tab sidebar-subitem" data-view="nom-laborator" data-access="nomenclator-read" type="button">Date laborator</button>
+                <button class="view-tab sidebar-subitem" data-view="nom-companii" data-access="setup" type="button">Companiile mele</button>
                 <button class="view-tab sidebar-subitem" data-view="nom-utilizatori" data-access="setup" type="button">Roluri și utilizatori</button>
                 <button class="view-tab sidebar-subitem" data-view="nom-setari" data-access="setup" type="button">Setări sistem</button>
                 <button class="view-tab sidebar-subitem" data-view="nom-automatizare" data-access="setup" type="button">Automatizare zi</button>
@@ -1078,28 +1084,6 @@
             <span class="receipt-new-hint">Apasă pentru a înregistra o plată / încasare.</span>
           </div>
 
-          <details class="panel form-panel" id="print-docs-panel" style="grid-column: 1 / -1;">
-            <summary style="cursor:pointer;font-weight:600;list-style:none;">🖨️ Tipar documente</summary>
-            <div class="split" style="margin-top:12px;">
-              <label>
-                Tip document
-                <select id="print-doc-type">
-                  <option value="purchaseAct">Act de achiziție (recepție)</option>
-                  <option value="saleContract">Contract de cumpărare-vânzare (furnizor)</option>
-                  <option value="paymentOrder">Ordin de plată (plată)</option>
-                </select>
-              </label>
-              <label>
-                <span id="print-doc-ref-label">Recepția</span>
-                <select id="print-doc-ref"></select>
-              </label>
-            </div>
-            <div class="form-actions" style="margin-top:12px;">
-              <button type="button" id="print-doc-generate" class="cell-btn cell-btn-primary">Tipărește</button>
-            </div>
-            <p class="field-hint">Documentul se completează automat cu datele operației alese. Actul și ordinul primesc număr automat, crescător (același la re-tipărire).</p>
-          </details>
-
           <form class="panel form-panel collapsed" id="transaction-form">
             <div class="panel-head">
               <h2>Plata / incasare</h2>
@@ -1691,6 +1675,36 @@
           </div>
         </section>
 
+        <section class="panel" data-view="documente" data-access="finance">
+          <div class="panel-head">
+            <h2>Documente de tipar</h2>
+            <p>Completează automat și tipărește documentele oficiale pentru furnizor. Alege compania care emite, tipul documentului și operația.</p>
+          </div>
+          <div class="filter-grid">
+            <label>
+              Compania emitentă
+              <select id="print-doc-company"></select>
+            </label>
+            <label>
+              Tip document
+              <select id="print-doc-type">
+                <option value="purchaseAct">Act de achiziție (recepție)</option>
+                <option value="saleContract">Contract de cumpărare-vânzare (furnizor)</option>
+                <option value="paymentOrder">Ordin de plată (plată)</option>
+              </select>
+            </label>
+            <label>
+              <span id="print-doc-ref-label">Recepția</span>
+              <select id="print-doc-ref"></select>
+            </label>
+            <label>
+              &nbsp;
+              <button type="button" id="print-doc-generate">Tipărește</button>
+            </label>
+          </div>
+          <p class="field-hint">Actul de achiziție și ordinul de plată primesc automat un număr crescător, per companie (același la re-tipărire). Datele companiei se editează în „Companiile mele" (Setări).</p>
+        </section>
+
         <section class="panel reports-panel" data-access="reports" data-view="rapoarte">
           <div class="panel-head">
             <h2>Raport zilnic operational</h2>
@@ -1819,9 +1833,9 @@
           </div>
         </section>
 
-        <section class="stats config-stats" id="config-summary" data-view="nom-parteneri,nom-produse,nom-locatii,nom-tarife,nom-masini,nom-laborator,nom-utilizatori,nom-setari,nom-automatizare,nom-alerte,nom-securitate"></section>
+        <section class="stats config-stats" id="config-summary" data-view="nom-parteneri,nom-produse,nom-locatii,nom-tarife,nom-masini,nom-laborator,nom-companii,nom-utilizatori,nom-setari,nom-automatizare,nom-alerte,nom-securitate"></section>
 
-        <section class="setup-grid" data-view="nom-parteneri,nom-produse,nom-locatii,nom-tarife,nom-masini,nom-laborator,nom-utilizatori,nom-setari,nom-automatizare,nom-alerte,nom-securitate" data-access="nomenclator-read">
+        <section class="setup-grid" data-view="nom-parteneri,nom-produse,nom-locatii,nom-tarife,nom-masini,nom-laborator,nom-companii,nom-utilizatori,nom-setari,nom-automatizare,nom-alerte,nom-securitate" data-access="nomenclator-read">
           <article class="panel" data-view="nom-parteneri">
             <div class="panel-head">
               <h2>Parteneri</h2>
@@ -1865,6 +1879,36 @@
               <span class="nom-filter-count" id="partner-filter-count"></span>
             </div>
             <div class="list-block" id="partners-list"></div>
+          </article>
+
+          <article class="panel" data-view="nom-companii">
+            <div class="panel-head">
+              <h2>Companiile mele</h2>
+              <p>Companiile care emit documentele de tipar (act de achiziție, contract, ordin de plată)</p>
+            </div>
+            <form class="mini-form" data-entity-form="companies">
+              <input name="name" placeholder="Denumire completă (ex: SRL ...)" required />
+              <div class="split">
+                <input name="shortName" placeholder="Denumire scurtă" />
+                <input name="idno" placeholder="IDNO" />
+              </div>
+              <div class="split">
+                <input name="vatCode" placeholder="Cod TVA" />
+                <input name="admin" placeholder="Administrator" />
+              </div>
+              <input name="address" placeholder="Adresa" />
+              <div class="split">
+                <input name="iban" placeholder="IBAN" />
+                <input name="bank" placeholder="Banca" />
+              </div>
+              <div class="split">
+                <input name="bic" placeholder="BIC / cod bancă" />
+                <input name="phone" placeholder="Telefon / fax" />
+              </div>
+              <input name="email" placeholder="Email" />
+              <button type="submit">Adauga companie</button>
+            </form>
+            <div class="list-block" id="companies-list"></div>
           </article>
 
           <article class="panel" data-view="nom-produse">

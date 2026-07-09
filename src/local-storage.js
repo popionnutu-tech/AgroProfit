@@ -58,7 +58,8 @@ const defaultConfigState = {
     fiscalProfiles: 3,
     processingTypes: 3,
     vehicles: 0,
-    labReports: 0
+    labReports: 0,
+    companies: 3
   },
   roles: listSystemRoles(),
   users: [
@@ -140,6 +141,40 @@ const defaultConfigState = {
   ],
   vehicles: [],
   labReports: [],
+  // Companiile proprii care emit documentele de tipar (Act de achizitie, Contract, Ordin de plata,
+  // ulterior factura de livrare). La tipar utilizatorul alege care companie emite.
+  companies: [
+    {
+      id: 1,
+      name: "PARCUL DE AUTOBUZE SI TAXIMETRE nr.9 S.R.L.",
+      shortName: "PAT-9 SRL",
+      idno: "1003604001469",
+      vatCode: "3200008",
+      address: "Republica Moldova, or. Briceni, str. Olimpica 3",
+      iban: "MD03AG000000022515848399",
+      bank: "BC MAIB S.A.",
+      bic: "AGRNMD2X",
+      admin: "Pop Nutu",
+      phone: "024723101, 069371924, 069807110",
+      email: "contabilitate@transportlux.com",
+      active: true
+    },
+    {
+      id: 2,
+      name: "AgroProfit",
+      shortName: "AgroProfit",
+      idno: "",
+      vatCode: "",
+      address: "",
+      iban: "",
+      bank: "",
+      bic: "",
+      admin: "",
+      phone: "",
+      email: "",
+      active: true
+    }
+  ],
   systemSettings: {
     closeOfDayHour: 17,
     reportChannel: "telegram",
@@ -160,7 +195,8 @@ const configEntities = [
   "fiscalProfiles",
   "processingTypes",
   "vehicles",
-  "labReports"
+  "labReports",
+  "companies"
 ];
 
 const defaultUserPassword = process.env.DEFAULT_USER_PASSWORD || "Agro2026!";
@@ -1083,7 +1119,7 @@ const DOCUMENT_NUMBER_TYPES = {
   paymentOrder: { collection: "transactions", stampField: "paymentOrderNo", entityType: "transaction" }
 };
 
-function allocateDocumentNumber(docType, refId, changedBy) {
+function allocateDocumentNumber(docType, refId, companyId, changedBy) {
   const meta = DOCUMENT_NUMBER_TYPES[docType];
   if (!meta) {
     const err = new Error("Tip de document necunoscut.");
@@ -1096,6 +1132,8 @@ function allocateDocumentNumber(docType, refId, changedBy) {
     err.statusCode = 400;
     throw err;
   }
+  // Numerotarea e per COMPANIE emitenta: fiecare companie are propria secventa crescatoare pe tip.
+  const cId = Number(companyId) || 0;
 
   const state = readReceiptsState();
   const record = (state[meta.collection] || []).find((item) => Number(item.id) === id);
@@ -1105,23 +1143,26 @@ function allocateDocumentNumber(docType, refId, changedBy) {
     throw err;
   }
 
-  // Idempotent: daca deja are numar, il intoarce fara sa mai incrementeze secventa.
+  // Idempotent: daca documentul are deja numar pentru ACEEASI companie, il intoarce fara increment.
   const existing = Number(record[meta.stampField]);
-  if (Number.isFinite(existing) && existing > 0) {
+  const existingCompany = Number(record[meta.stampField + "CompanyId"]) || 0;
+  if (Number.isFinite(existing) && existing > 0 && existingCompany === cId) {
     return { number: existing, allocated: false };
   }
 
-  const seq = state.documentSequences || { purchaseAct: 0, paymentOrder: 0 };
-  const next = Number(seq[docType] || 0) + 1;
-  seq[docType] = next;
+  const seq = state.documentSequences || {};
+  const seqKey = `${docType}:${cId}`;
+  const next = Number(seq[seqKey] || 0) + 1;
+  seq[seqKey] = next;
   state.documentSequences = seq;
   record[meta.stampField] = next;
+  record[meta.stampField + "CompanyId"] = cId;
 
   createAuditEntry(state, {
     entityType: meta.entityType,
     entityId: id,
     action: "document-number",
-    reason: `Numar ${docType} alocat: ${next}`,
+    reason: `Numar ${docType} (companie ${cId}) alocat: ${next}`,
     user: changedBy || "dashboard"
   });
 
@@ -1297,6 +1338,21 @@ function normalizeEntityPayload(entity, payload) {
         number: requiredText(payload.number, "Numarul masinii"),
         series: String(payload.series || "").trim(),
         driver: String(payload.driver || "").trim(),
+        active: sanitizeBoolean(payload.active ?? true)
+      };
+    case "companies":
+      return {
+        name: requiredText(payload.name, "Denumirea companiei"),
+        shortName: String(payload.shortName || "").trim(),
+        idno: String(payload.idno || "").trim(),
+        vatCode: String(payload.vatCode || "").trim(),
+        address: String(payload.address || "").trim(),
+        iban: String(payload.iban || "").trim(),
+        bank: String(payload.bank || "").trim(),
+        bic: String(payload.bic || "").trim(),
+        admin: String(payload.admin || "").trim(),
+        phone: String(payload.phone || "").trim(),
+        email: String(payload.email || "").trim(),
         active: sanitizeBoolean(payload.active ?? true)
       };
     case "labReports":
