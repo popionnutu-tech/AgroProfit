@@ -6604,50 +6604,68 @@ document.addEventListener("click", async (event) => {
 })();
 
 // Panou „Tipar documente" (Financiar, doar contabil/admin): alegi tipul + operatia, tipareste.
-(function setupPrintDocsPanel() {
+// Populeaza selectorul de referinta (receptie/furnizor/plata) in functie de tipul ales.
+function fillPrintDocRef() {
   const typeEl = document.getElementById("print-doc-type");
   const refEl = document.getElementById("print-doc-ref");
   const labelEl = document.getElementById("print-doc-ref-label");
+  if (!typeEl || !refEl) return;
+  const type = typeEl.value;
+  let options = [];
+  if (type === "purchaseAct") {
+    if (labelEl) labelEl.textContent = "Recepția";
+    options = (receiptsCache || [])
+      .filter((r) => r.status !== "Anulat")
+      .slice()
+      .sort((a, b) => new Date(b.receivedAt || b.createdAt) - new Date(a.receivedAt || a.createdAt))
+      .map((r) => ({ value: r.id, label: `#${r.id} · ${formatDateShort(r.receivedAt || r.createdAt)} · ${r.supplier || "-"} · ${r.product || "-"}` }));
+  } else if (type === "saleContract") {
+    if (labelEl) labelEl.textContent = "Furnizorul";
+    options = (currentConfig?.partners || [])
+      .filter((p) => p.role === "furnizor" || p.role === "ambele")
+      .slice()
+      .sort((a, b) => String(a.name).localeCompare(String(b.name), "ro"))
+      .map((p) => ({ value: p.id, label: p.name }));
+  } else if (type === "paymentOrder") {
+    if (labelEl) labelEl.textContent = "Plata";
+    options = (transactionsCache || [])
+      .filter((t) => t.direction === "payment" && t.status !== "Anulat")
+      .slice()
+      .sort((a, b) => new Date(b.createdAt || b.transactedAt) - new Date(a.createdAt || a.transactedAt))
+      .map((t) => ({ value: t.id, label: `#${t.id} · ${formatDateShort(t.createdAt || t.transactedAt)} · ${t.partner || "-"} · ${moneyRo(t.amount)} lei` }));
+  }
+  refEl.innerHTML = options.length
+    ? options.map((o) => `<option value="${escapeComboHtml(String(o.value))}">${escapeComboHtml(o.label)}</option>`).join("")
+    : '<option value="">— nimic disponibil —</option>';
+}
+
+// Populeaza selectorul de companie emitenta + referinta (apelat la deschiderea paginii).
+function fillPrintDocPanel() {
+  const companyEl = document.getElementById("print-doc-company");
+  if (companyEl) {
+    const companies = (currentConfig?.companies || []).filter((c) => c.active !== false);
+    const prev = companyEl.value;
+    companyEl.innerHTML = companies.length
+      ? companies.map((c) => `<option value="${escapeComboHtml(String(c.id))}">${escapeComboHtml(c.shortName || c.name)}</option>`).join("")
+      : '<option value="">— nicio companie —</option>';
+    if (prev) companyEl.value = prev;
+  }
+  fillPrintDocRef();
+}
+
+(function setupPrintDocsPanel() {
+  const typeEl = document.getElementById("print-doc-type");
+  const refEl = document.getElementById("print-doc-ref");
   const btnEl = document.getElementById("print-doc-generate");
-  const panelEl = document.getElementById("print-docs-panel");
+  const companyEl = document.getElementById("print-doc-company");
   if (!typeEl || !refEl || !btnEl) return;
 
-  function fillRefOptions() {
-    const type = typeEl.value;
-    let options = [];
-    if (type === "purchaseAct") {
-      if (labelEl) labelEl.textContent = "Recepția";
-      options = (receiptsCache || [])
-        .filter((r) => r.status !== "Anulat")
-        .slice()
-        .sort((a, b) => new Date(b.receivedAt || b.createdAt) - new Date(a.receivedAt || a.createdAt))
-        .map((r) => ({ value: r.id, label: `#${r.id} · ${formatDateShort(r.receivedAt || r.createdAt)} · ${r.supplier || "-"} · ${r.product || "-"}` }));
-    } else if (type === "saleContract") {
-      if (labelEl) labelEl.textContent = "Furnizorul";
-      options = (currentConfig?.partners || [])
-        .filter((p) => p.role === "furnizor" || p.role === "ambele")
-        .slice()
-        .sort((a, b) => String(a.name).localeCompare(String(b.name), "ro"))
-        .map((p) => ({ value: p.id, label: p.name }));
-    } else if (type === "paymentOrder") {
-      if (labelEl) labelEl.textContent = "Plata";
-      options = (transactionsCache || [])
-        .filter((t) => t.direction === "payment" && t.status !== "Anulat")
-        .slice()
-        .sort((a, b) => new Date(b.createdAt || b.transactedAt) - new Date(a.createdAt || a.transactedAt))
-        .map((t) => ({ value: t.id, label: `#${t.id} · ${formatDateShort(t.createdAt || t.transactedAt)} · ${t.partner || "-"} · ${moneyRo(t.amount)} lei` }));
-    }
-    refEl.innerHTML = options.length
-      ? options.map((o) => `<option value="${escapeComboHtml(String(o.value))}">${escapeComboHtml(o.label)}</option>`).join("")
-      : '<option value="">— nimic disponibil —</option>';
-  }
-
-  typeEl.addEventListener("change", fillRefOptions);
-  if (panelEl) panelEl.addEventListener("toggle", () => { if (panelEl.open) fillRefOptions(); });
+  typeEl.addEventListener("change", fillPrintDocRef);
   btnEl.addEventListener("click", () => {
     const refId = refEl.value;
     if (!refId) { alert("Nu există niciun document de tipărit pentru tipul ales."); return; }
-    printAccountingDocument(typeEl.value, refId);
+    const companyId = companyEl ? companyEl.value : "";
+    printAccountingDocument(typeEl.value, refId, companyId);
   });
 })();
 
