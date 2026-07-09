@@ -195,7 +195,8 @@ const configEntities = [
   "fiscalProfiles",
   "processingTypes",
   "vehicles",
-  "labReports"
+  "labReports",
+  "companies"
 ];
 
 const defaultUserPassword = process.env.DEFAULT_USER_PASSWORD || "Agro2026!";
