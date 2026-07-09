@@ -7502,7 +7502,7 @@ if (deliveryBillingDialog && deliveryBillingForm) {
     if (sellerSelect) {
       const partners = (currentConfig?.partners || []);
       sellerSelect.innerHTML = '<option value="">— alege vânzător —</option>' +
-        partners.map((p) => `<option value="${p.id}">${p.name}</option>`).join("");
+        partners.map((p) => `<option value="${escapeComboHtml(String(p.id))}">${escapeComboHtml(p.name)}</option>`).join("");
       if (delivery.sellerId) sellerSelect.value = String(delivery.sellerId);
     }
     f.elements.id.value = delivery.id;
