@@ -3518,6 +3518,24 @@ function getEditorSchema(entity) {
         commonActiveField
       ]
     },
+    companies: {
+      title: "Editare companie",
+      copy: "Datele companiei care emite documentele de tipar (act de achiziție, contract, ordin de plată).",
+      fields: [
+        { name: "name", label: "Denumire completă", type: "text" },
+        { name: "shortName", label: "Denumire scurtă", type: "text" },
+        { name: "idno", label: "IDNO", type: "text" },
+        { name: "vatCode", label: "Cod TVA", type: "text" },
+        { name: "address", label: "Adresa", type: "text" },
+        { name: "iban", label: "IBAN", type: "text" },
+        { name: "bank", label: "Banca", type: "text" },
+        { name: "bic", label: "BIC / cod bancă", type: "text" },
+        { name: "admin", label: "Administrator", type: "text" },
+        { name: "phone", label: "Telefon / fax", type: "text" },
+        { name: "email", label: "Email", type: "text" },
+        commonActiveField
+      ]
+    },
     labReports: {
       title: "Editare raport laborator",
       copy: "Date din raportul de laborator pentru certificatul de calitate.",
