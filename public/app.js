@@ -5543,21 +5543,12 @@ function receiptPrintValue(receipt) {
   return receiptNetKg(receipt) * (Number(receipt.price) || 0);
 }
 
-function companyBlockHtml() {
-  return `<div><b>${escapeComboHtml(COMPANY.name)}</b></div>
-    <div>IDNO: ${escapeComboHtml(COMPANY.idno)} · Cod TVA: ${escapeComboHtml(COMPANY.vatCode)}</div>
-    <div>${escapeComboHtml(COMPANY.address)}</div>
-    <div>IBAN: ${escapeComboHtml(COMPANY.iban)} · ${escapeComboHtml(COMPANY.bank)} (${escapeComboHtml(COMPANY.bic)})</div>
-    <div>Administrator: ${escapeComboHtml(COMPANY.admin)} · Tel: ${escapeComboHtml(COMPANY.phone)}</div>`;
-}
-
-// 1) ACT DE ACHIZITIE A MARFURILOR — dintr-o receptie (cumparare de la furnizor).
-function buildPurchaseActFromReceiptHtml(receipt, partner, number) {
+// 1) ACT DE ACHIZITIE A MARFURILOR — fidel formularului oficial bilingv RO/RU (dintr-o receptie).
+function buildPurchaseActFromReceiptHtml(receipt, partner, number, company) {
   const p = partner || {};
+  const co = company || DEFAULT_COMPANY;
   const netKg = receiptNetKg(receipt);
-  // Pe actul OFICIAL, cantitate × preț TREBUIE să dea exact valoarea. Dacă prețul e completat,
-  // valoarea = net × preț (consecvent). Dacă lipsește prețul, îl derivăm din valoarea stocată,
-  // ca înmulțirea de pe hârtie să iasă mereu corect.
+  // Pe actul OFICIAL, cantitate × preț TREBUIE să dea exact valoarea.
   let price = Number(receipt.price) || 0;
   let value = receiptPrintValue(receipt);
   if (price > 0) {
@@ -5566,100 +5557,164 @@ function buildPurchaseActFromReceiptHtml(receipt, partner, number) {
     price = Number((value / netKg).toFixed(4));
   }
   const nr = number ? String(number) : "____";
-  return `${docHeader()}
-    <div class="doc-title">Act de achiziție a mărfurilor<br><small style="font-weight:400;">Акт закупки товаров</small></div>
-    <div class="doc-subtitle">Seria PAT · Nr. ${escapeComboHtml(nr)} · din ${formatDateShort(receipt.receivedAt || receipt.createdAt)}</div>
-    <div class="doc-parties">
-      <div class="doc-party"><h4>Cumpărător / Покупатель</h4>${companyBlockHtml()}</div>
-      <div class="doc-party"><h4>Vânzător / Продавец</h4>
-        <div><b>${escapeComboHtml(p.name || receipt.supplier || "")}</b></div>
-        ${p.idno ? `<div>IDNP/IDNO: ${escapeComboHtml(p.idno)}</div>` : ""}
-        ${p.address ? `<div>Adresa: ${escapeComboHtml(p.address)}</div>` : ""}
-        ${p.phone ? `<div>Tel: ${escapeComboHtml(p.phone)}</div>` : ""}
-      </div>
-    </div>
-    <table class="doc-table">
-      <thead><tr>
-        <th>Denumirea mărfii / Наименование</th><th>U.M.</th><th>Cantitate / Кол-во</th>
-        <th>Preț unitar, lei / Цена</th><th>Valoare, lei / Стоимость</th>
-      </tr></thead>
-      <tbody><tr>
-        <td>${escapeComboHtml(receipt.product || "")}</td>
-        <td>kg</td>
-        <td>${formatNumber(netKg)}</td>
-        <td>${moneyRo(price)}</td>
-        <td>${moneyRo(value)}</td>
-      </tr></tbody>
-      <tfoot><tr><td colspan="2">Total / Итого</td><td>${formatNumber(netKg)} kg</td><td></td><td>${moneyRo(value)}</td></tr></tfoot>
+  const words = escapeComboHtml(numberToWordsRo(value));
+  return `
+    <table style="width:100%;border-collapse:collapse;"><tr>
+      <td style="width:60px;text-align:center;font-size:16px;">◯</td>
+      <td><div class="of-title">Act de achiziție a mărfurilor<small class="of-ru">Акт закупки товаров</small></div></td>
+      <td style="width:150px;font-size:11px;">Seria <span class="of-fill">${escapeComboHtml(co.shortName || "")}</span><br>Nr. <span class="of-fill">${escapeComboHtml(nr)}</span></td>
+    </tr></table>
+    <div class="of-row of-c">din <span class="of-fill">${formatDateShort(receipt.receivedAt || receipt.createdAt)}</span></div>
+
+    <div class="of-row"><span class="of-fill" style="min-width:340px;">${escapeComboHtml(co.name || "")}</span>, IDNO <span class="of-fill">${escapeComboHtml(co.idno || "")}</span>
+      <div class="of-cap">Denumirea și rechizitele întreprinderii, adresa / Наименование, реквизиты предприятия, адрес</div></div>
+    <div class="of-row">${escapeComboHtml(co.address || "")}${co.vatCode ? " · Cod TVA " + escapeComboHtml(co.vatCode) : ""}</div>
+    <div class="of-row">Conducătorul unității: <span class="of-fill">${escapeComboHtml(co.admin || "")}</span> <span class="of-cap">/ Руководитель</span></div>
+
+    <div class="of-row">Primit marfa <span class="of-fill" style="min-width:260px;">${escapeComboHtml(receipt.receivedBy || "")}</span>
+      <div class="of-cap">numele, prenumele / Принял товар — фамилия, имя</div></div>
+    <div class="of-row">Predat marfa <span class="of-fill" style="min-width:260px;">${escapeComboHtml(p.name || receipt.supplier || "")}</span>
+      <div class="of-cap">numele, prenumele / Сдал товар — фамилия, имя</div></div>
+    <div class="of-row">Codul personal / IDNP, datele buletinului de identitate, adresa:
+      <span class="of-fill" style="min-width:340px;">${escapeComboHtml([p.idno, p.address].filter(Boolean).join(", "))}</span></div>
+
+    <table class="of-tbl">
+      <thead>
+        <tr>
+          <th>Denumirea mărfurilor<br><span class="of-ru">Наименование товаров</span></th>
+          <th>Unit. de măsură<br><span class="of-ru">Единица измерения</span></th>
+          <th>Cantitate<br><span class="of-ru">Количество</span></th>
+          <th>Preț unitar, lei<br><span class="of-ru">Цена единицы, лей</span></th>
+          <th>Valoare, lei<br><span class="of-ru">Стоимость, лей</span></th>
+        </tr>
+        <tr><td class="of-c">1</td><td class="of-c">2</td><td class="of-c">3</td><td class="of-c">4</td><td class="of-c">5 = 3 × 4</td></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>${escapeComboHtml(receipt.product || "")}</td>
+          <td class="of-c">kg</td>
+          <td class="of-r">${formatNumber(netKg)}</td>
+          <td class="of-r">${moneyRo(price)}</td>
+          <td class="of-r">${moneyRo(value)}</td>
+        </tr>
+      </tbody>
+      <tfoot>
+        <tr><td class="of-b">Total / Итого</td><td class="of-c">×</td><td class="of-r of-b">${formatNumber(netKg)}</td><td class="of-c">×</td><td class="of-r of-b">${moneyRo(value)}</td></tr>
+      </tfoot>
     </table>
-    <div class="doc-grid">
-      <div><b>Valoarea totală:</b> ${moneyRo(value)} lei</div>
-      <div><b>În litere:</b> ${escapeComboHtml(numberToWordsRo(value))}</div>
-      <div><b>Rețineri la buget:</b> __________________</div>
-      <div><b>Avansuri achitate:</b> __________________</div>
-      <div><b>Total de plată:</b> ${moneyRo(value)} lei</div>
-      <div><b>În litere:</b> ${escapeComboHtml(numberToWordsRo(value))}</div>
-    </div>
-    <p style="font-size:11px;color:#555;margin-top:10px;">Declarația pe propria răspundere a persoanei fizice care a predat mărfurile: confirm că marfa îmi aparține și corespunde cantității și calității indicate. / Декларация под собственную ответственность лица, передавшего товары.</p>
-    <div class="doc-sign"><div>Vânzător (a predat) / Продавец</div><div>Cumpărător (a primit) / Покупатель</div></div>`;
+
+    <div class="of-row"><span class="of-b">Valoarea totală / Общая стоимость:</span> <span class="of-fill" style="min-width:320px;">${words}</span>
+      <div class="of-cap">în litere / прописью</div></div>
+    <div class="of-row of-b">Rețineri / Удержания:</div>
+    <div class="of-row">— la buget / в бюджет: <span class="of-fill" style="min-width:280px;"></span> <span class="of-fill" style="min-width:110px;"></span>
+      <div class="of-cap">în litere / прописью &nbsp;·&nbsp; în cifre / цифрами</div></div>
+    <div class="of-row">— avansuri achitate / уплаченные авансы: <span class="of-fill" style="min-width:230px;"></span> <span class="of-fill" style="min-width:110px;"></span>
+      <div class="of-cap">în litere / прописью &nbsp;·&nbsp; în cifre / цифрами</div></div>
+    <div class="of-row"><span class="of-b">Total de plată / Общая сумма к оплате:</span>
+      <span class="of-fill" style="min-width:270px;">${words}</span> <span class="of-fill" style="min-width:110px;">${moneyRo(value)}</span>
+      <div class="of-cap">în litere / прописью &nbsp;·&nbsp; în cifre / цифрами</div></div>
+
+    <p class="of-just" style="margin-top:8px;">Declarația pe propria răspundere a persoanei fizice care a predat mărfurile: confirm că marfa îmi aparține, este liberă de sarcini și corespunde cantității și calității indicate. / Декларация под собственную ответственность физического лица, передавшего товары.</p>
+    <div class="of-sign">
+      <div class="col">Predat marfa / Сдал товар<div class="ln of-cap">semnătura / подпись</div></div>
+      <div class="col">Primit marfa / Принял товар<div class="ln of-cap">semnătura / подпись</div></div>
+    </div>`;
 }
 
-// 2) CONTRACT de cumparare-vanzare cereale — cadru, per furnizor.
-function buildSaleContractHtml(partner) {
+// 2) CONTRACT de cumparare-vanzare cereale — text integral, cadru, per furnizor.
+function buildSaleContractHtml(partner, company) {
   const p = partner || {};
-  const seller = `
-    <div><b>${escapeComboHtml(p.name || "")}</b></div>
-    <div>IDNO/IDNP: ${escapeComboHtml(p.idno || "____________")}</div>
-    <div>Adresa: ${escapeComboHtml(p.address || "____________")}</div>
-    ${p.iban ? `<div>IBAN: ${escapeComboHtml(p.iban)}</div>` : "<div>IBAN: ____________</div>"}
-    ${p.bankName ? `<div>Banca: ${escapeComboHtml(p.bankName)}</div>` : "<div>Banca: ____________</div>"}
-    <div>Tel: ${escapeComboHtml(p.phone || "____________")}</div>`;
-  const clause = (t) => `<p style="margin:6px 0;font-size:12px;text-align:justify;">${t}</p>`;
-  return `${docHeader()}
-    <div class="doc-title">Contract de cumpărare-vânzare</div>
-    <div class="doc-subtitle">Nr. PAT-________ · din ______________ · r. Briceni</div>
-    ${clause("<b>1. PĂRȚILE CONTRACTANTE.</b> " + escapeComboHtml(p.name || "____________") + ", IDNO/IDNP " + escapeComboHtml(p.idno || "____________") + ", cu sediul în " + escapeComboHtml(p.address || "____________") + ", denumit în continuare <b>vânzător</b>, și " + escapeComboHtml(COMPANY.name) + ", IDNO " + escapeComboHtml(COMPANY.idno) + ", cu sediul în " + escapeComboHtml(COMPANY.address) + ", reprezentată de administratorul " + escapeComboHtml(COMPANY.admin) + ", denumit în continuare <b>cumpărător</b>.")}
-    ${clause("<b>2. OBIECTUL CONTRACTULUI.</b> Vânzarea/cumpărarea produsului cerealier. Cantitatea și suma totală sunt conform actelor de achiziție emise. Achitarea se efectuează prin transfer bancar: 30% în avans și restul în 3 zile lucrătoare de la livrare, în lei (MDL).")}
-    ${clause("<b>3. VALORI CANTITATIV-CALITATIVE.</b> Cantitatea se stabilește printr-o anexă la momentul livrării, cu indicarea prețului. Prețul nu poate fi modificat pe parcursul executării. Marfa se predă la masa utilă fizică cu parametri conform standardelor în vigoare: umiditate ________. Marfa trebuie să fie sănătoasă, liberă de boli și dăunători.")}
-    ${clause("<b>4. OBLIGAȚIILE VÂNZĂTORULUI.</b> Să elibereze toate documentele de însoțire pentru partida livrată; să asigure condiții de păstrare optime până la livrare.")}
-    ${clause("<b>5. OBLIGAȚIILE CUMPĂRĂTORULUI.</b> Să preia marfa comandată; să onoreze plata facturilor conform contractului; să desemneze o persoană pentru recepția mărfii. Penalitate 2,0% din valoarea neachitată pentru fiecare zi de întârziere.")}
-    ${clause("<b>6. RECLAMAȚII.</b> După preluare, în cel mult 3 zile, cumpărătorul informează vânzătorul despre abaterile cantitativ-calitative determinate de elevatorul gazdă.")}
-    ${clause("<b>7. SANCȚIUNI.</b> Dobândă de întârziere 0,01% din suma neexecutată pentru fiecare zi, conform art. 619 Cod civil.")}
-    ${clause("<b>8-9. CLAUZE FINALE.</b> Contractul se supune legislației Republicii Moldova; litigiile se soluționează pe cale amiabilă sau de instanța competentă. Încheiat în două exemplare, câte unul pentru fiecare parte.")}
-    <div class="doc-parties" style="margin-top:20px;">
-      <div class="doc-party"><h4>VÂNZĂTOR</h4>${seller}</div>
-      <div class="doc-party"><h4>CUMPĂRĂTOR</h4>${companyBlockHtml()}</div>
-    </div>
-    <div class="doc-sign"><div>Vânzător</div><div>Cumpărător — ${escapeComboHtml(COMPANY.admin)}</div></div>`;
+  const co = company || DEFAULT_COMPANY;
+  const fill = (v, min) => `<span class="of-fill" style="min-width:${min || 120}px;">${escapeComboHtml(v || "")}</span>`;
+  const cl = (t) => `<p class="of-just">${t}</p>`;
+  return `
+    <div class="of-title">Contract de cumpărare-vânzare</div>
+    <table style="width:100%;"><tr>
+      <td style="font-size:11px;">Nr. <span class="of-fill">________</span></td>
+      <td style="font-size:11px;text-align:right;">r. Briceni, <span class="of-fill">______________</span></td>
+    </tr></table>
+    <hr class="of-hr">
+    <p class="of-just"><b>1. PĂRȚILE CONTRACTANTE.</b> ${fill(p.name, 240)}, identificat prin IDNO/IDNP ${fill(p.idno, 130)}, cu sediul în ${fill(p.address, 200)}, denumit în continuare <b>vânzător</b>, și <b>${escapeComboHtml(co.name || "")}</b>, identificată prin IDNO ${escapeComboHtml(co.idno || "")}, cu sediul în ${escapeComboHtml(co.address || "")}, reprezentată de administratorul ${escapeComboHtml(co.admin || "")}, denumită în continuare <b>cumpărător</b>, au convenit să încheie prezentul contract cu respectarea clauzelor acestuia.</p>
+    ${cl("<b>2. OBIECTUL CONTRACTULUI.</b> 2.1. Obiectul material îl reprezintă vânzarea/cumpărarea produsului cerealier. Cantitatea și suma totală sunt conform actelor de achiziție emise. 2.2. Cumpărătorul se obligă să achite prețul mărfii primite. 2.3. Achitarea se efectuează prin transfer bancar: 30% în avans și restul în 3 zile lucrătoare de la livrare. 2.4. Achitările se fac în lei (MDL), data achitării fiind data parvenirii mijloacelor bănești la contul vânzătorului. 2.5. Asortimentul, cantitatea și prețul se fixează în facturile ce însoțesc livrarea.")}
+    ${cl("<b>3. VALORI CANTITATIV-CALITATIVE, TERMENE ȘI MODALITĂȚI DE FURNIZARE.</b> 3.1. Cantitatea se stabilește printr-o anexă la momentul livrării, cu indicarea prețului. 3.2. Prețul nu poate fi modificat pe parcursul executării contractului. 3.3. Marfa se predă la masa utilă fizică cu parametri conform standardelor în vigoare: a) umiditate ________. 3.4. Marfa trebuie să fie sănătoasă, liberă de boli și dăunători, fără insecte vii. 3.5. Vânzătorul asigură încărcarea mărfii; livrarea se face la depozitul cumpărătorului cu transportul vânzătorului.")}
+    ${cl("<b>4. DREPTURILE ȘI OBLIGAȚIILE VÂNZĂTORULUI.</b> 4.1. Să elibereze toate documentele de însoțire pentru partida livrată, cu specificarea denumirii, cantității și caracteristicilor mărfii. 4.2. Să asigure condiții optime de păstrare până la livrare. Vânzătorul poate întrerupe livrarea în caz de neachitare.")}
+    ${cl("<b>5. DREPTURILE ȘI OBLIGAȚIILE CUMPĂRĂTORULUI.</b> 5.1. Să preia marfa comandată. 5.3. Să onoreze plata facturilor conform contractului. 5.4. Să desemneze o persoană responsabilă de recepția mărfii. 5.5. Să achite o penalitate de 2,0% din valoarea neachitată în termen, pentru fiecare zi de întârziere. 5.7-5.8. Marfa trebuie să corespundă normelor ISCC EU și să fie însoțită de autodeclarația ISCC EU semnată de vânzător.")}
+    ${cl("<b>6. RECLAMAȚII ȘI NOTIFICĂRI.</b> 6.1. După preluare, nu mai târziu de 3 zile, cumpărătorul informează vânzătorul despre abaterile cantitativ-calitative determinate de elevatorul gazdă. Orice reclamație ulterioară se consideră nulă.")}
+    ${cl("<b>7. SANCȚIUNI PECUNIARE.</b> 7.1. Partea în culpă plătește dobândă de întârziere de 0,01% din suma neexecutată pentru fiecare zi, conform art. 619 Cod civil.")}
+    ${cl("<b>8. ÎNCETAREA CONTRACTULUI.</b> Contractul încetează de plin drept la neexecutarea unei obligații esențiale sau la insolvabilitatea uneia dintre părți. Poate fi reziliat prin înțelegere scrisă sau unilateral, cu preaviz de 15 zile.")}
+    ${cl("<b>9. SOLUȚIONAREA LITIGIILOR.</b> 9.1-9.2. Neînțelegerile se rezolvă pe cale amiabilă, iar în caz contrar de instanța competentă, conform legislației Republicii Moldova. 9.3. Contractul este întocmit în două exemplare, câte unul pentru fiecare parte, cu aceeași valoare juridică.")}
+    <table style="width:100%;margin-top:16px;border-collapse:collapse;font-size:11px;"><tr>
+      <td style="width:50%;vertical-align:top;padding-right:10px;">
+        <div class="of-b">CUMPĂRĂTOR</div>
+        <div>${escapeComboHtml(co.name || "")}</div>
+        <div>${escapeComboHtml(co.address || "")}</div>
+        <div>IDNO: ${escapeComboHtml(co.idno || "")}${co.vatCode ? " · Cod/TVA: " + escapeComboHtml(co.vatCode) : ""}</div>
+        <div>IBAN: ${escapeComboHtml(co.iban || "")}</div>
+        <div>${escapeComboHtml(co.bank || "")}${co.bic ? "; BIC " + escapeComboHtml(co.bic) : ""}</div>
+        <div>Tel/fax: ${escapeComboHtml(co.phone || "")}</div>
+        <div style="margin-top:14px;">Administrator – ${escapeComboHtml(co.admin || "")}</div>
+      </td>
+      <td style="width:50%;vertical-align:top;padding-left:10px;">
+        <div class="of-b">VÂNZĂTOR</div>
+        <div>${escapeComboHtml(p.name || "____________")}</div>
+        <div>${escapeComboHtml(p.address || "____________")}</div>
+        <div>IDNO/IDNP: ${escapeComboHtml(p.idno || "____________")}</div>
+        <div>IBAN: ${escapeComboHtml(p.iban || "____________")}</div>
+        <div>${escapeComboHtml(p.bankName || "____________")}</div>
+        <div>Tel: ${escapeComboHtml(p.phone || "____________")}</div>
+        <div style="margin-top:14px;">Semnătura ____________</div>
+      </td>
+    </tr></table>
+    <div class="of-c" style="margin-top:16px;font-size:10px;letter-spacing:2px;">SECRET COMERCIAL</div>`;
 }
 
 // 3) ORDIN DE PLATA / Dispozitie de plata de casa (Расходный кассовый ордер) — dintr-o plata.
-function buildCashPaymentOrderHtml(transaction, partner, number) {
+function buildCashPaymentOrderHtml(transaction, partner, number, company) {
   const p = partner || {};
+  const co = company || DEFAULT_COMPANY;
   const amount = Number(transaction.amount) || 0;
   const nr = number ? String(number) : "____";
-  const refText = transaction.receiptId ? `recepția #${transaction.receiptId}` : (transaction.note || "achitare furnizor");
-  return `${docHeader()}
-    <div class="doc-subtitle" style="text-align:left;">${escapeComboHtml(COMPANY.name)} · Cod fiscal ${escapeComboHtml(COMPANY.idno)}</div>
-    <div class="doc-title">Dispoziție de plată de casă<br><small style="font-weight:400;">Расходный кассовый ордер</small></div>
-    <div class="doc-subtitle">Nr. ${escapeComboHtml(nr)} · din ${formatDateShort(transaction.createdAt || transaction.transactedAt)}</div>
-    <div class="doc-grid">
-      <div><b>A elibera / Выдать:</b> ${escapeComboHtml(p.name || transaction.partner || "")}</div>
-      <div><b>Suma / Сумма:</b> ${moneyRo(amount)} lei</div>
-      <div style="grid-column:1 / -1;"><b>Suma în litere / прописью:</b> ${escapeComboHtml(numberToWordsRo(amount))}</div>
-      <div style="grid-column:1 / -1;"><b>În baza / Основание:</b> ${escapeComboHtml(refText)} (tip plată: ${escapeComboHtml(transaction.paymentType || "-")})</div>
-      <div style="grid-column:1 / -1;"><b>Anexă / Приложение:</b> __________________</div>
-      <div><b>Actul de identitate / документ:</b> ${escapeComboHtml(p.idno || "__________________")}</div>
-      <div><b>Data primirii:</b> "____" ____________ 20____</div>
+  const dateStr = formatDateShort(transaction.createdAt || transaction.transactedAt);
+  const refText = transaction.receiptId ? `Act de achiziție / recepția #${transaction.receiptId}` : (transaction.note || "achitare furnizor");
+  return `
+    <div style="font-size:12px;"><b>${escapeComboHtml(co.shortName || co.name || "")}</b></div>
+    <div style="font-size:11px;">Cod fiscal ${escapeComboHtml(co.idno || "")} <span class="of-ru">/ Фискальный код</span></div>
+    <div class="of-title" style="margin-top:8px;">Dispoziție de plată de casă Nr. ${escapeComboHtml(nr)}<small class="of-ru">Расходный кассовый ордер № ${escapeComboHtml(nr)}</small></div>
+
+    <table class="of-tbl">
+      <thead>
+        <tr>
+          <th>Nr. document<br><span class="of-ru">Номер документа</span></th>
+          <th>Data întocmirii<br><span class="of-ru">Дата составления</span></th>
+          <th>Cont corespondent<br><span class="of-ru">Корреспондирующий счет</span></th>
+          <th>Simbol de evidenţă analitică<br><span class="of-ru">Код аналитического учета</span></th>
+          <th>Suma<br><span class="of-ru">Сумма</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="of-c">${escapeComboHtml(nr)}</td>
+          <td class="of-c">${dateStr}</td>
+          <td></td>
+          <td></td>
+          <td class="of-r of-b">${moneyRo(amount)}</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="of-row">A elibera / Выдать: <span class="of-fill" style="min-width:320px;">${escapeComboHtml(p.name || transaction.partner || "")}</span></div>
+    <div class="of-row">În baza / Основание: <span class="of-fill" style="min-width:340px;">${escapeComboHtml(refText)}</span></div>
+    <div class="of-row">Suma / Сумма: <span class="of-fill" style="min-width:340px;">${escapeComboHtml(numberToWordsRo(amount))}</span>
+      <div class="of-cap">în litere / прописью</div></div>
+    <div class="of-row">Anexă / Приложение: <span class="of-fill" style="min-width:340px;"></span></div>
+
+    <div class="of-sign">
+      <div class="col">Conducător / Руководитель<div class="ln">${escapeComboHtml(co.admin || "")}</div></div>
+      <div class="col">Contabil-șef / Главный бухгалтер<div class="ln of-cap">semnătura / подпись</div></div>
     </div>
-    <div class="doc-sign" style="margin-top:36px;">
-      <div>Conducător / Руководитель<br>${escapeComboHtml(COMPANY.admin)}</div>
-      <div>Contabil-șef / Гл. бухгалтер</div>
-    </div>
-    <div class="doc-sign" style="margin-top:24px;">
-      <div>Am primit / Получил (semnătura)</div>
-      <div></div>
-    </div>`;
+    <div class="of-row" style="margin-top:18px;">Am primit / Получил: <span class="of-fill" style="min-width:300px;"></span></div>
+    <div class="of-row">„____" ____________ 20____ &nbsp;&nbsp; Semnătura / Подпись <span class="of-fill" style="min-width:150px;"></span></div>
+    <div class="of-row">Actul de identitate / По документу: <span class="of-fill" style="min-width:280px;">${escapeComboHtml(p.idno || "")}</span></div>`;
 }
 
 // Gaseste partenerul unei receptii/tranzactii dupa id (apoi dupa nume, ca fallback).
