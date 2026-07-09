@@ -3373,7 +3373,8 @@ function renderSetupLists(config) {
     "fiscalProfiles",
     "processingTypes",
     "vehicles",
-    "labReports"
+    "labReports",
+    "companies"
   ].forEach((entity) => renderMiniList(entity, config[entity] || []));
 }
 
