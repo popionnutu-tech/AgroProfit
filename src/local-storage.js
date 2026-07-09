@@ -58,7 +58,8 @@ const defaultConfigState = {
     fiscalProfiles: 3,
     processingTypes: 3,
     vehicles: 0,
-    labReports: 0
+    labReports: 0,
+    companies: 3
   },
   roles: listSystemRoles(),
   users: [
