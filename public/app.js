@@ -3106,6 +3106,14 @@ const ENTITY_COLUMNS = {
     { key: "series", label: "Serie" },
     { key: "driver", label: "Șofer" }
   ],
+  companies: [
+    { key: "name", label: "Denumire" },
+    { key: "idno", label: "IDNO" },
+    { key: "vatCode", label: "Cod TVA" },
+    { key: "address", label: "Adresa" },
+    { key: "iban", label: "IBAN" },
+    { key: "admin", label: "Administrator" }
+  ],
   labReports: [
     { key: "reportNumber", label: "Nr. raport" },
     { key: "reportDate", label: "Data" },
