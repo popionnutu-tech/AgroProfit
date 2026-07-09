@@ -5218,7 +5218,7 @@ function askPartnerReassignTarget(item, references) {
     const dialog = document.createElement("dialog");
     dialog.className = "partner-merge-dialog";
     const options = others
-      .map((p) => `<option value="${p.id}">${p.name}${p.idno ? ` (${p.idno})` : ""}</option>`)
+      .map((p) => `<option value="${escapeComboHtml(String(p.id))}">${escapeComboHtml(p.name)}${p.idno ? ` (${escapeComboHtml(p.idno)})` : ""}</option>`)
       .join("");
     dialog.innerHTML = `
       <form method="dialog" class="mini-form">
