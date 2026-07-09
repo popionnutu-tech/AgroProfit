@@ -1868,6 +1868,36 @@
             <div class="list-block" id="partners-list"></div>
           </article>
 
+          <article class="panel" data-view="nom-companii">
+            <div class="panel-head">
+              <h2>Companiile mele</h2>
+              <p>Companiile care emit documentele de tipar (act de achiziție, contract, ordin de plată)</p>
+            </div>
+            <form class="mini-form" data-entity-form="companies">
+              <input name="name" placeholder="Denumire completă (ex: SRL ...)" required />
+              <div class="split">
+                <input name="shortName" placeholder="Denumire scurtă" />
+                <input name="idno" placeholder="IDNO" />
+              </div>
+              <div class="split">
+                <input name="vatCode" placeholder="Cod TVA" />
+                <input name="admin" placeholder="Administrator" />
+              </div>
+              <input name="address" placeholder="Adresa" />
+              <div class="split">
+                <input name="iban" placeholder="IBAN" />
+                <input name="bank" placeholder="Banca" />
+              </div>
+              <div class="split">
+                <input name="bic" placeholder="BIC / cod bancă" />
+                <input name="phone" placeholder="Telefon / fax" />
+              </div>
+              <input name="email" placeholder="Email" />
+              <button type="submit">Adauga companie</button>
+            </form>
+            <div class="list-block" id="companies-list"></div>
+          </article>
+
           <article class="panel" data-view="nom-produse">
             <div class="panel-head">
               <h2>Produse</h2>
