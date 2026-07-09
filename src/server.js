@@ -356,6 +356,7 @@ app.post(
       const result = storage.allocateDocumentNumber(
         req.body && req.body.docType,
         req.body && req.body.refId,
+        req.body && req.body.companyId,
         getActorLabel(req)
       );
       return res.status(200).json(result);
