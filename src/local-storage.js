@@ -1119,7 +1119,7 @@ const DOCUMENT_NUMBER_TYPES = {
   paymentOrder: { collection: "transactions", stampField: "paymentOrderNo", entityType: "transaction" }
 };
 
-function allocateDocumentNumber(docType, refId, changedBy) {
+function allocateDocumentNumber(docType, refId, companyId, changedBy) {
   const meta = DOCUMENT_NUMBER_TYPES[docType];
   if (!meta) {
     const err = new Error("Tip de document necunoscut.");
@@ -1132,6 +1132,8 @@ function allocateDocumentNumber(docType, refId, changedBy) {
     err.statusCode = 400;
     throw err;
   }
+  // Numerotarea e per COMPANIE emitenta: fiecare companie are propria secventa crescatoare pe tip.
+  const cId = Number(companyId) || 0;
 
   const state = readReceiptsState();
   const record = (state[meta.collection] || []).find((item) => Number(item.id) === id);
@@ -1141,23 +1143,26 @@ function allocateDocumentNumber(docType, refId, changedBy) {
     throw err;
   }
 
-  // Idempotent: daca deja are numar, il intoarce fara sa mai incrementeze secventa.
+  // Idempotent: daca documentul are deja numar pentru ACEEASI companie, il intoarce fara increment.
   const existing = Number(record[meta.stampField]);
-  if (Number.isFinite(existing) && existing > 0) {
+  const existingCompany = Number(record[meta.stampField + "CompanyId"]) || 0;
+  if (Number.isFinite(existing) && existing > 0 && existingCompany === cId) {
     return { number: existing, allocated: false };
   }
 
-  const seq = state.documentSequences || { purchaseAct: 0, paymentOrder: 0 };
-  const next = Number(seq[docType] || 0) + 1;
-  seq[docType] = next;
+  const seq = state.documentSequences || {};
+  const seqKey = `${docType}:${cId}`;
+  const next = Number(seq[seqKey] || 0) + 1;
+  seq[seqKey] = next;
   state.documentSequences = seq;
   record[meta.stampField] = next;
+  record[meta.stampField + "CompanyId"] = cId;
 
   createAuditEntry(state, {
     entityType: meta.entityType,
     entityId: id,
     action: "document-number",
-    reason: `Numar ${docType} alocat: ${next}`,
+    reason: `Numar ${docType} (companie ${cId}) alocat: ${next}`,
     user: changedBy || "dashboard"
   });
 
