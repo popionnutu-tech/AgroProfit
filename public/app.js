@@ -5723,38 +5723,40 @@ function findPartnerById(id) {
   return (currentConfig?.partners || []).find((p) => Number(p.id) === Number(id)) || null;
 }
 
-// Dispatcher: aloca numarul (unde e cazul) si deschide fereastra de tipar completata.
-async function printAccountingDocument(docType, refId) {
+// Dispatcher: rezolva compania emitenta, aloca numarul (unde e cazul) si deschide tiparul completat.
+async function printAccountingDocument(docType, refId, companyId) {
   try {
+    const company = resolveCompany(companyId);
+    const cId = company && company.id != null ? company.id : companyId;
     if (docType === "purchaseAct") {
       const receipt = (receiptsCache || []).find((r) => Number(r.id) === Number(refId));
       if (!receipt) { alert("Recepția nu a fost găsită."); return; }
       const partner = findPartnerById(receipt.supplierId) || findPartnerByName(receipt.supplier);
-      const { number } = await allocatePrintNumber("purchaseAct", receipt.id);
-      openPrintWindow(buildPurchaseActFromReceiptHtml(receipt, partner, number), `Act de achizitie ${number || receipt.id}`);
+      const { number } = await allocatePrintNumber("purchaseAct", receipt.id, cId);
+      openOfficialDocWindow(buildPurchaseActFromReceiptHtml(receipt, partner, number, company), `Act de achizitie ${number || receipt.id}`);
     } else if (docType === "paymentOrder") {
       const tx = (transactionsCache || []).find((t) => Number(t.id) === Number(refId));
       if (!tx) { alert("Plata nu a fost găsită."); return; }
       const partner = findPartnerById(tx.partnerId) || findPartnerByName(tx.partner);
-      const { number } = await allocatePrintNumber("paymentOrder", tx.id);
-      openPrintWindow(buildCashPaymentOrderHtml(tx, partner, number), `Ordin de plata ${number || tx.id}`);
+      const { number } = await allocatePrintNumber("paymentOrder", tx.id, cId);
+      openOfficialDocWindow(buildCashPaymentOrderHtml(tx, partner, number, company), `Ordin de plata ${number || tx.id}`);
     } else if (docType === "saleContract") {
       const partner = findPartnerById(refId);
       if (!partner) { alert("Selectează un furnizor."); return; }
-      openPrintWindow(buildSaleContractHtml(partner), `Contract ${partner.name}`);
+      openOfficialDocWindow(buildSaleContractHtml(partner, company), `Contract ${partner.name}`);
     }
   } catch (error) {
     alert(error.message || "Nu am putut genera documentul.");
   }
 }
 
-// Cere serverului un numar oficial (crescator, per tip). Idempotent: acelasi document -> acelasi numar.
-async function allocatePrintNumber(docType, refId) {
+// Cere serverului un numar oficial (crescator, per companie+tip). Idempotent: acelasi document -> acelasi numar.
+async function allocatePrintNumber(docType, refId, companyId) {
   const res = await fetch("/api/print-docs/allocate-number", {
     method: "POST",
     credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ docType, refId })
+    body: JSON.stringify({ docType, refId, companyId })
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
