@@ -1335,6 +1335,21 @@ function normalizeEntityPayload(entity, payload) {
         driver: String(payload.driver || "").trim(),
         active: sanitizeBoolean(payload.active ?? true)
       };
+    case "companies":
+      return {
+        name: requiredText(payload.name, "Denumirea companiei"),
+        shortName: String(payload.shortName || "").trim(),
+        idno: String(payload.idno || "").trim(),
+        vatCode: String(payload.vatCode || "").trim(),
+        address: String(payload.address || "").trim(),
+        iban: String(payload.iban || "").trim(),
+        bank: String(payload.bank || "").trim(),
+        bic: String(payload.bic || "").trim(),
+        admin: String(payload.admin || "").trim(),
+        phone: String(payload.phone || "").trim(),
+        email: String(payload.email || "").trim(),
+        active: sanitizeBoolean(payload.active ?? true)
+      };
     case "labReports":
       return {
         reportNumber: requiredText(payload.reportNumber, "Numarul raportului"),
