@@ -969,19 +969,24 @@ test("DOC: allocateDocumentNumber e crescator per tip si idempotent per document
     const r1 = await seedReceipt(storage, { preliminaryPayableAmount: 1000 });
     const r2 = await seedReceipt(storage, { preliminaryPayableAmount: 2000 });
 
-    // Prima alocare pentru fiecare receptie -> 1, 2 (crescator).
-    const a1 = storage.allocateDocumentNumber("purchaseAct", r1.id, "contabil");
-    const a2 = storage.allocateDocumentNumber("purchaseAct", r2.id, "contabil");
+    // Prima alocare pentru fiecare receptie, compania 1 -> 1, 2 (crescator).
+    const a1 = storage.allocateDocumentNumber("purchaseAct", r1.id, 1, "contabil");
+    const a2 = storage.allocateDocumentNumber("purchaseAct", r2.id, 1, "contabil");
     assert.equal(a1.number, 1);
     assert.equal(a1.allocated, true);
     assert.equal(a2.number, 2);
 
-    // Re-tiparire acelasi document -> ACELASI numar, fara sa incrementeze.
-    const a1again = storage.allocateDocumentNumber("purchaseAct", r1.id, "contabil");
+    // Re-tiparire acelasi document (aceeasi companie) -> ACELASI numar, fara increment.
+    const a1again = storage.allocateDocumentNumber("purchaseAct", r1.id, 1, "contabil");
     assert.equal(a1again.number, 1);
     assert.equal(a1again.allocated, false);
 
-    // Ordinul de plata are secventa PROPRIE (incepe de la 1).
+    // Alta COMPANIE are secventa PROPRIE (incepe de la 1 pentru acelasi tip).
+    const r3 = await seedReceipt(storage, { preliminaryPayableAmount: 3000 });
+    const c2 = storage.allocateDocumentNumber("purchaseAct", r3.id, 2, "contabil");
+    assert.equal(c2.number, 1);
+
+    // Ordinul de plata are secventa PROPRIE per companie (incepe de la 1).
     const tx = await storage.createTransaction({
       referenceType: "receipt",
       receiptId: r1.id,
@@ -991,13 +996,13 @@ test("DOC: allocateDocumentNumber e crescator per tip si idempotent per document
       amount: 500,
       createdBy: "contabil"
     });
-    const p1 = storage.allocateDocumentNumber("paymentOrder", tx.id, "contabil");
+    const p1 = storage.allocateDocumentNumber("paymentOrder", tx.id, 1, "contabil");
     assert.equal(p1.number, 1);
-    const p1again = storage.allocateDocumentNumber("paymentOrder", tx.id, "contabil");
+    const p1again = storage.allocateDocumentNumber("paymentOrder", tx.id, 1, "contabil");
     assert.equal(p1again.number, 1);
 
     // Tip necunoscut / referinta lipsa -> eroare.
-    assert.throws(() => storage.allocateDocumentNumber("altceva", r1.id, "contabil"));
-    assert.throws(() => storage.allocateDocumentNumber("purchaseAct", 999999, "contabil"));
+    assert.throws(() => storage.allocateDocumentNumber("altceva", r1.id, 1, "contabil"));
+    assert.throws(() => storage.allocateDocumentNumber("purchaseAct", 999999, 1, "contabil"));
   });
 });
