@@ -140,6 +140,40 @@ const defaultConfigState = {
   ],
   vehicles: [],
   labReports: [],
+  // Companiile proprii care emit documentele de tipar (Act de achizitie, Contract, Ordin de plata,
+  // ulterior factura de livrare). La tipar utilizatorul alege care companie emite.
+  companies: [
+    {
+      id: 1,
+      name: "PARCUL DE AUTOBUZE SI TAXIMETRE nr.9 S.R.L.",
+      shortName: "PAT-9 SRL",
+      idno: "1003604001469",
+      vatCode: "3200008",
+      address: "Republica Moldova, or. Briceni, str. Olimpica 3",
+      iban: "MD03AG000000022515848399",
+      bank: "BC MAIB S.A.",
+      bic: "AGRNMD2X",
+      admin: "Pop Nutu",
+      phone: "024723101, 069371924, 069807110",
+      email: "contabilitate@transportlux.com",
+      active: true
+    },
+    {
+      id: 2,
+      name: "AgroProfit",
+      shortName: "AgroProfit",
+      idno: "",
+      vatCode: "",
+      address: "",
+      iban: "",
+      bank: "",
+      bic: "",
+      admin: "",
+      phone: "",
+      email: "",
+      active: true
+    }
+  ],
   systemSettings: {
     closeOfDayHour: 17,
     reportChannel: "telegram",
