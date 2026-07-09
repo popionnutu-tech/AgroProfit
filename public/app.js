@@ -706,6 +706,11 @@ function setView(view) {
     checkEndOfDayProcessing();
   }
 
+  // La deschiderea paginii „Documente de tipar", populăm selectoarele cu datele curente.
+  if (view === "documente" && typeof fillPrintDocPanel === "function") {
+    fillPrintDocPanel();
+  }
+
   try {
     window.localStorage.setItem("active-view", view);
   } catch (_err) {
