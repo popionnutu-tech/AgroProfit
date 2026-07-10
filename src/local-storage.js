@@ -148,6 +148,8 @@ const defaultConfigState = {
       id: 1,
       name: "PARCUL DE AUTOBUZE SI TAXIMETRE nr.9 S.R.L.",
       shortName: "PAT-9 SRL",
+      // Seria tiparita pe documentele oficiale (ex. „Seria PAT Nr. 12").
+      series: "PAT",
       idno: "1003604001469",
       vatCode: "3200008",
       address: "Republica Moldova, or. Briceni, str. Olimpica 3",
@@ -163,6 +165,7 @@ const defaultConfigState = {
       id: 2,
       name: "AgroProfit",
       shortName: "AgroProfit",
+      series: "AGR",
       idno: "",
       vatCode: "",
       address: "",
@@ -697,7 +700,13 @@ function createReceiptSummary(receipts) {
   const active = (receipts || []).filter((item) => item.status !== "Anulat");
   const totalReceipts = active.length;
   const totalQuantity = active.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
-  const totalValue = active.reduce((sum, item) => sum + receiptPayableValue(item), 0);
+  // „Valoare estimata" = valoarea BRUTA a marfii receptionate (costul), nu datoria neta catre
+  // furnizor (care e dupa impozitul retinut la sursa). Fallback pe datoria stocata pentru
+  // receptiile vechi care nu au valoarea marfii salvata.
+  const totalValue = active.reduce(
+    (sum, item) => sum + (Number(item.preliminaryMerchandiseValue) || receiptPayableValue(item)),
+    0
+  );
 
   const byStatus = receipts.reduce((acc, item) => {
     acc[item.status] = (acc[item.status] || 0) + 1;
@@ -1344,6 +1353,7 @@ function normalizeEntityPayload(entity, payload) {
       return {
         name: requiredText(payload.name, "Denumirea companiei"),
         shortName: String(payload.shortName || "").trim(),
+        series: String(payload.series || "").trim(),
         idno: String(payload.idno || "").trim(),
         vatCode: String(payload.vatCode || "").trim(),
         address: String(payload.address || "").trim(),

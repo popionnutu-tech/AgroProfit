@@ -515,8 +515,8 @@
             <div class="split">
               <label>
                 Preț / kg
-                <input name="price" type="number" min="0" step="0.01" placeholder="lei / kg (ex. 6)" />
-                <span class="field-hint">Lei / kg. Optional — dacă lipsește, valoarea rămâne 0 și se poate completa ulterior.</span>
+                <input name="price" type="number" min="0.01" step="0.01" placeholder="lei / kg (ex. 6)" required />
+                <span class="field-hint">Lei / kg. Obligatoriu — din el se calculează valoarea mărfii și impozitul reținut.</span>
               </label>
               <label>
                 Locatie initiala
@@ -1890,12 +1890,13 @@
               <input name="name" placeholder="Denumire completă (ex: SRL ...)" required />
               <div class="split">
                 <input name="shortName" placeholder="Denumire scurtă" />
-                <input name="idno" placeholder="IDNO" />
+                <input name="series" placeholder="Serie documente (ex. PAT, AGR)" />
               </div>
               <div class="split">
+                <input name="idno" placeholder="IDNO" />
                 <input name="vatCode" placeholder="Cod TVA" />
-                <input name="admin" placeholder="Administrator" />
               </div>
+              <input name="admin" placeholder="Administrator" />
               <input name="address" placeholder="Adresa" />
               <div class="split">
                 <input name="iban" placeholder="IBAN" />
