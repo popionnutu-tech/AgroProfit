@@ -884,18 +884,45 @@ test("Plata Servicii (barter) stinge datoria furnizorului + apare in actul de ve
   });
 });
 
-test("computeReceiptEstimate: datoria = marfa integrala (fara scadere servicii/retinere)", () => {
+test("computeReceiptEstimate: impozitul se scade din datorie, serviciile NU (barter)", () => {
   const { computeReceiptEstimate } = require("../src/receipt-handlers");
-  // umiditate peste norma -> exista servicii uscare, DAR valoarea de plata ramane marfa integrala
+  // umiditate peste norma -> exista servicii uscare (informative, se sting ca plati „Servicii").
+  // Impozitul retinut la sursa se calculeaza pe valoarea BRUTA si se scade din datorie.
   const est = computeReceiptEstimate({
     quantity: 10, price: 5, humidity: 20, impurity: 5,
     product: { humidityNorm: 14, impurityNorm: 2 },
     tariffs: [{ service: "Uscare", value: 250, active: true }, { service: "Curatire", value: 120, active: true }],
     fiscalProfile: { withholdingPercent: 7 }
   });
-  // marfa = provisionalNetQuantity(t) × 1000 × 5 ; payable trebuie sa fie EGAL cu marfa (fara deduceri)
-  assert.equal(est.preliminaryPayableAmount, est.preliminaryMerchandiseValue);
+  const gross = est.preliminaryMerchandiseValue;
   assert.ok(est.preliminaryServicesTotal > 0, "serviciile se estimeaza (informativ)");
+  // impozitul se calculeaza pe BRUT, nu pe (brut − servicii)
+  assert.equal(est.withholdingAmount, gross * 0.07);
+  // datoria catre furnizor = net (brut − impozit); serviciile NU se scad aici
+  assert.equal(est.preliminaryPayableAmount, gross - est.withholdingAmount);
+});
+
+test("computeReceiptEstimate: persoana fizica 6% -> 800 kg × 6 lei = 4800 brut, 288 impozit, 4512 de plata", () => {
+  const { computeReceiptEstimate } = require("../src/receipt-handlers");
+  const est = computeReceiptEstimate({
+    quantity: 0.8, price: 6, humidity: 0, impurity: 0,
+    product: { humidityNorm: 0, impurityNorm: 0 }, tariffs: [],
+    fiscalProfile: { withholdingPercent: 6 }
+  });
+  assert.equal(est.preliminaryMerchandiseValue, 4800); // costul marfii ramane brut
+  assert.equal(est.withholdingAmount, 288);            // 6% din 4800
+  assert.equal(est.preliminaryPayableAmount, 4512);    // datoria/plata catre furnizor = net
+});
+
+test("computeReceiptEstimate: persoana juridica (0%) -> datoria = valoarea integrala", () => {
+  const { computeReceiptEstimate } = require("../src/receipt-handlers");
+  const est = computeReceiptEstimate({
+    quantity: 0.8, price: 6, humidity: 0, impurity: 0,
+    product: { humidityNorm: 0, impurityNorm: 0 }, tariffs: [],
+    fiscalProfile: { withholdingPercent: 0 }
+  });
+  assert.equal(est.withholdingAmount, 0);
+  assert.equal(est.preliminaryPayableAmount, est.preliminaryMerchandiseValue);
 });
 
 test("Act de verificare universal: latura cumparator (livrari + incasari + sold net)", async () => {

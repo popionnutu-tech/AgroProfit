@@ -3113,6 +3113,7 @@ const ENTITY_COLUMNS = {
   ],
   companies: [
     { key: "name", label: "Denumire" },
+    { key: "series", label: "Serie" },
     { key: "idno", label: "IDNO" },
     { key: "vatCode", label: "Cod TVA" },
     { key: "address", label: "Adresa" },
@@ -3530,6 +3531,7 @@ function getEditorSchema(entity) {
       fields: [
         { name: "name", label: "Denumire completă", type: "text" },
         { name: "shortName", label: "Denumire scurtă", type: "text" },
+        { name: "series", label: "Serie documente (ex. PAT, AGR)", type: "text" },
         { name: "idno", label: "IDNO", type: "text" },
         { name: "vatCode", label: "Cod TVA", type: "text" },
         { name: "address", label: "Adresa", type: "text" },
@@ -3835,18 +3837,20 @@ function getReceiptEstimate() {
   const dryingServiceTotal = quantity * excessHumidity * dryingTariff;
   const preliminaryServicesTotal = cleaningServiceTotal + dryingServiceTotal;
   const preliminaryMerchandiseValue = provisionalNetQuantity * 1000 * price; // kg × lei/kg
+  // Aceeasi regula ca in backend (computeReceiptEstimate): costul marfii ramane BRUT, iar impozitul
+  // retinut la sursa se scade din datoria catre furnizor. Serviciile NU se scad (barter, plati).
   const withholdingPercent = Number(fiscalProfile?.withholdingPercent || 0);
-  const withholdingAmount =
-    Math.max(preliminaryMerchandiseValue - preliminaryServicesTotal, 0) *
-    (withholdingPercent / 100);
-  // Datoria = valoarea integrala a marfii; serviciile se retin ca plati (barter) in Financiar.
-  const preliminaryPayableAmount = preliminaryMerchandiseValue;
+  const withholdingAmount = preliminaryMerchandiseValue * (withholdingPercent / 100);
+  const preliminaryPayableAmount = Math.max(preliminaryMerchandiseValue - withholdingAmount, 0);
 
   return {
     humidityNorm,
     impurityNorm,
     provisionalNetQuantity,
     preliminaryServicesTotal,
+    preliminaryMerchandiseValue,
+    withholdingPercent,
+    withholdingAmount,
     preliminaryPayableAmount
   };
 }
@@ -5456,9 +5460,11 @@ function openOfficialDocWindow(bodyHtml, title) {
   }
   const doc = `<!DOCTYPE html><html lang="ro"><head><meta charset="utf-8"><title>${escapeComboHtml(title)}</title>
 <style>
-  @page { size: A4; margin: 12mm 14mm; }
+  /* Marginea paginii = 0, iar marginile fizice le dam din padding-ul body-ului. Astfel browserul
+     nu mai are loc sa tipareasca antetul/subsolul propriu (data, ora, titlul paginii, URL-ul). */
+  @page { size: A4; margin: 0; }
   * { box-sizing: border-box; }
-  body { font-family: 'Times New Roman', Georgia, serif; color:#000; font-size:12px; line-height:1.32; margin:0; }
+  body { font-family: 'Times New Roman', Georgia, serif; color:#000; font-size:12px; line-height:1.32; margin:0; padding:12mm 14mm; }
   .of-title { text-align:center; font-weight:bold; font-size:15px; text-transform:uppercase; margin:4px 0 2px; }
   .of-title small { display:block; font-size:10px; font-weight:400; text-transform:none; }
   .of-ru { font-style:italic; font-size:9px; font-weight:400; }
@@ -5543,25 +5549,35 @@ function receiptPrintValue(receipt) {
   return receiptNetKg(receipt) * (Number(receipt.price) || 0);
 }
 
+
 // 1) ACT DE ACHIZITIE A MARFURILOR — fidel formularului oficial bilingv RO/RU (dintr-o receptie).
 function buildPurchaseActFromReceiptHtml(receipt, partner, number, company) {
   const p = partner || {};
   const co = company || DEFAULT_COMPANY;
-  // Cantitatea și valoarea de pe act TREBUIE să coincidă cu suma reală datorată furnizorului
-  // (cea din Financiar / FIFO). Folosim ACEEAȘI bază ca receiptPayableValue: cantitatea netă
-  // provizorie (după pierderi) × 1000 = kg, iar valoarea = suma autoritară (amountToPay, care
-  // include eventualele corecții manuale). Prețul se derivă ca cantitate × preț = valoare exact.
+  // „Valoarea totală" de pe act = valoarea BRUTĂ a mărfii (costul), NU datoria (care e netă).
+  // Cantitatea folosește aceeași bază ca valoarea: net provizoriu (după pierderi) × 1000 = kg.
+  // Prețul se derivă astfel încât cantitate × preț = valoarea brută, exact.
   const netKg = Number(receipt.provisionalNetQuantity || receipt.quantity || 0) * 1000
     || Number(receipt.netWeight) || 0;
-  const value = receiptPrintValue(receipt);
-  const price = netKg > 0 ? Number((value / netKg).toFixed(4)) : (Number(receipt.price) || 0);
+  const priceRaw = Number(receipt.price) || 0;
+  let value = Number(receipt.preliminaryMerchandiseValue) || 0;
+  if (!(value > 0)) value = Number((netKg * priceRaw).toFixed(2));
+  if (!(value > 0)) value = receiptPrintValue(receipt);
+  const price = netKg > 0 ? Number((value / netKg).toFixed(4)) : priceRaw;
   const nr = number ? String(number) : "____";
   const words = escapeComboHtml(numberToWordsRo(value));
+  // „Total de plată" = datoria REALĂ din registru (amountToPay), ca actul să nu contrazică niciodată
+  // Financiarul. Reținerea la buget se DEDUCE ca diferență (brut − datorie), deci cele trei linii se
+  // închid mereu aritmetic. NU recalculăm impozitul live din nomenclator: altfel actul unei recepții
+  // vechi (sau al uneia la care s-a schimbat procentul/furnizorul) ar afișa altă sumă decât se datorează.
+  const netPay = receiptPrintValue(receipt);
+  const tax = Math.max(Number((value - netPay).toFixed(2)), 0);
+  const taxPercent = value > 0 && tax > 0 ? Number(((tax / value) * 100).toFixed(2)) : 0;
   return `
     <table style="width:100%;border-collapse:collapse;"><tr>
       <td style="width:60px;text-align:center;font-size:16px;">◯</td>
       <td><div class="of-title">Act de achiziție a mărfurilor<small class="of-ru">Акт закупки товаров</small></div></td>
-      <td style="width:150px;font-size:11px;">Seria <span class="of-fill">${escapeComboHtml(co.shortName || "")}</span><br>Nr. <span class="of-fill">${escapeComboHtml(nr)}</span></td>
+      <td style="width:150px;font-size:11px;">Seria <span class="of-fill">${escapeComboHtml(co.series || co.shortName || "")}</span><br>Nr. <span class="of-fill">${escapeComboHtml(nr)}</span></td>
     </tr></table>
     <div class="of-row of-c">din <span class="of-fill">${formatDateShort(receipt.receivedAt || receipt.createdAt)}</span></div>
 
@@ -5605,12 +5621,13 @@ function buildPurchaseActFromReceiptHtml(receipt, partner, number, company) {
     <div class="of-row"><span class="of-b">Valoarea totală / Общая стоимость:</span> <span class="of-fill" style="min-width:320px;">${words}</span>
       <div class="of-cap">în litere / прописью</div></div>
     <div class="of-row of-b">Rețineri / Удержания:</div>
-    <div class="of-row">— la buget / в бюджет: <span class="of-fill" style="min-width:280px;"></span> <span class="of-fill" style="min-width:110px;"></span>
+    <div class="of-row">— la buget / в бюджет${taxPercent > 0 ? ` (${formatNumber(taxPercent)}%)` : ""}:
+      <span class="of-fill" style="min-width:260px;">${escapeComboHtml(numberToWordsRo(tax))}</span> <span class="of-fill" style="min-width:110px;">${moneyRo(tax)}</span>
       <div class="of-cap">în litere / прописью &nbsp;·&nbsp; în cifre / цифрами</div></div>
     <div class="of-row">— avansuri achitate / уплаченные авансы: <span class="of-fill" style="min-width:230px;"></span> <span class="of-fill" style="min-width:110px;"></span>
       <div class="of-cap">în litere / прописью &nbsp;·&nbsp; în cifre / цифрами</div></div>
     <div class="of-row"><span class="of-b">Total de plată / Общая сумма к оплате:</span>
-      <span class="of-fill" style="min-width:270px;">${words}</span> <span class="of-fill" style="min-width:110px;">${moneyRo(value)}</span>
+      <span class="of-fill" style="min-width:270px;">${escapeComboHtml(numberToWordsRo(netPay))}</span> <span class="of-fill" style="min-width:110px;">${moneyRo(netPay)}</span>
       <div class="of-cap">în litere / прописью &nbsp;·&nbsp; în cifre / цифрами</div></div>
 
     <p class="of-just" style="margin-top:8px;">Declarația pe propria răspundere a persoanei fizice care a predat mărfurile: confirm că marfa îmi aparține, este liberă de sarcini și corespunde cantității și calității indicate. / Декларация под собственную ответственность физического лица, передавшего товары.</p>
@@ -5828,23 +5845,36 @@ function buildPurchaseActPrintHtml(delivery) {
     receipt?.provisionalNetQuantity || receipt?.quantity ||
     (delivery.netWeight > 0 ? delivery.netWeight : delivery.deliveredQuantity) || 0
   ); // tone
-  const price = Number(receipt?.price || 0); // lei/kg
-  const total = Number(receipt?.amountToPay ?? (qty * 1000 * price));
+  if (!receipt) {
+    alert("Recepția sursă nu a fost găsită — reîncarcă pagina și încearcă din nou.");
+    return "";
+  }
+  const priceRaw = Number(receipt.price || 0); // lei/kg
+  // Aceeasi regula ca la actul din pagina „Documente tipar": randul arata valoarea BRUTA
+  // (cantitate × pret), iar „Total de plata" e datoria REALA din registru (neta, dupa impozitul
+  // retinut la sursa). Reținerea se deduce ca diferenta, deci documentul se inchide aritmetic.
+  const gross = Number(receipt.preliminaryMerchandiseValue) || Number((qty * 1000 * priceRaw).toFixed(2));
+  const netPay = Number(receipt.amountToPay ?? gross);
+  const tax = Math.max(Number((gross - netPay).toFixed(2)), 0);
+  // Pretul afisat se derivă din brut, ca „cantitate × preț = Sumă" să iasă exact pe hârtie.
+  const price = qty > 0 ? Number((gross / (qty * 1000)).toFixed(4)) : priceRaw;
   return `${docHeader()}
     <div class="doc-title">Act de achiziție</div>
-    <div class="doc-subtitle">${formatDateShort(delivery.createdAt)} · Recepție #${delivery.receiptId}</div>
+    <div class="doc-subtitle">${formatDateShort(delivery.createdAt)} · Recepție #${escapeComboHtml(String(delivery.receiptId))}</div>
     <div class="doc-party" style="margin-bottom:14px;">
       <h4>Furnizor</h4>
-      <div><b>${receipt?.supplier || "-"}</b></div>
-      ${supplier?.idno ? `<div>IDNO: ${supplier.idno}</div>` : ""}
-      ${supplier?.address ? `<div>${supplier.address}</div>` : ""}
-      ${supplier?.bankName ? `<div>Banca: ${supplier.bankName} · IBAN: ${supplier.iban || "-"}</div>` : ""}
+      <div><b>${escapeComboHtml(receipt?.supplier || "-")}</b></div>
+      ${supplier?.idno ? `<div>IDNO: ${escapeComboHtml(supplier.idno)}</div>` : ""}
+      ${supplier?.address ? `<div>${escapeComboHtml(supplier.address)}</div>` : ""}
+      ${supplier?.bankName ? `<div>Banca: ${escapeComboHtml(supplier.bankName)} · IBAN: ${escapeComboHtml(supplier.iban || "-")}</div>` : ""}
     </div>
     <table class="doc-table">
       <thead><tr><th>Produs</th><th>Cantitate</th><th>Preț</th><th>Sumă</th></tr></thead>
-      <tbody><tr><td>${delivery.product}</td><td>${formatNumber(qty * 1000)} kg</td><td>${moneyRo(price)}/kg</td><td>${moneyRo(total)}</td></tr></tbody>
-      <tfoot><tr><td colspan="3">TOTAL</td><td>${moneyRo(total)} MDL</td></tr></tfoot>
+      <tbody><tr><td>${escapeComboHtml(delivery.product || "")}</td><td>${formatNumber(qty * 1000)} kg</td><td>${moneyRo(price)}/kg</td><td>${moneyRo(gross)}</td></tr></tbody>
+      <tfoot><tr><td colspan="3">VALOARE TOTALĂ</td><td>${moneyRo(gross)} MDL</td></tr></tfoot>
     </table>
+    ${tax > 0 ? `<div class="doc-grid"><div><b>Rețineri la buget:</b> ${moneyRo(tax)} MDL</div></div>` : ""}
+    <div class="doc-total">TOTAL DE PLATĂ: ${moneyRo(netPay)} MDL</div>
     <div class="doc-sign"><div>Furnizor</div><div>Achizitor AgroProfit+</div></div>`;
 }
 

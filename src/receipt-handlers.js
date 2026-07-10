@@ -54,16 +54,14 @@ function computeReceiptEstimate({ quantity, price, humidity, impurity, product, 
   // Pretul e in lei/kg, cantitatea in TONE -> ×1000 pentru kg (aceeasi regula ca receiptPayableValue
   // si getReceiptEstimate din frontend; a se pastra sincronizate).
   const preliminaryMerchandiseValue = provisionalNetQuantity * 1000 * unitPrice;
-  const preliminaryBeforeWithholding = Math.max(
-    preliminaryMerchandiseValue - preliminaryServicesTotal,
-    0
-  );
+  // COSTUL marfii ramane valoarea BRUTA (integrala) = preliminaryMerchandiseValue.
+  // IMPOZITUL retinut la sursa (din statutul fiscal al furnizorului; ex. persoana fizica) se calculeaza
+  // pe valoarea bruta si se SCADE din datoria catre furnizor: furnizorul primeste NETUL, iar impozitul
+  // se varsa la buget. Serviciile (uscare/recoltare) NU se scad aici — se sting ca PLATI de tip
+  // „Servicii" (barter) in Financiar; altfel ar fi dubla scadere.
   const withholdingPercent = Number(fiscalProfile?.withholdingPercent || 0);
-  const withholdingAmount = preliminaryBeforeWithholding * (withholdingPercent / 100);
-  // Datoria catre furnizor = valoarea INTEGRALA a marfii. Serviciile (uscare/recoltare) si eventualele
-  // retineri se sting ca PLATI (tip „Servicii" / barter) in Financiar, nu se scad automat din valoare.
-  // Campurile servicii/retinere raman informative (estimare in panou). Evita dubla scadere.
-  const preliminaryPayableAmount = preliminaryMerchandiseValue;
+  const withholdingAmount = preliminaryMerchandiseValue * (withholdingPercent / 100);
+  const preliminaryPayableAmount = Math.max(preliminaryMerchandiseValue - withholdingAmount, 0);
 
   return {
     grossQuantity,
