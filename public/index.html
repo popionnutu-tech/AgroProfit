@@ -1694,15 +1694,23 @@
               </select>
             </label>
             <label>
-              <span id="print-doc-ref-label">Recepția</span>
+              <span id="print-doc-ref-label">Furnizorul</span>
               <select id="print-doc-ref"></select>
+            </label>
+            <label id="print-doc-from-wrap" hidden>
+              De la
+              <input type="date" id="print-doc-from" />
+            </label>
+            <label id="print-doc-to-wrap" hidden>
+              Pana la
+              <input type="date" id="print-doc-to" />
             </label>
             <label>
               &nbsp;
               <button type="button" id="print-doc-generate">Tipărește</button>
             </label>
           </div>
-          <p class="field-hint">Actul de achiziție și ordinul de plată primesc automat un număr crescător, per companie (același la re-tipărire). Datele companiei se editează în „Companiile mele" (Setări).</p>
+          <p class="field-hint">Actul de achiziție adună recepțiile furnizorului din perioada aleasă (gol = toate). Numărul documentelor rămâne gol — îl completezi tu. Datele companiei se editează în „Companiile mele" (Setări).</p>
         </section>
 
         <section class="panel reports-panel" data-access="reports" data-view="rapoarte">

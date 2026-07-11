@@ -5551,44 +5551,74 @@ function receiptPrintValue(receipt) {
 
 
 // 1) ACT DE ACHIZITIE A MARFURILOR — fidel formularului oficial bilingv RO/RU (dintr-o receptie).
-function buildPurchaseActFromReceiptHtml(receipt, partner, number, company) {
-  const p = partner || {};
-  const co = company || DEFAULT_COMPANY;
-  // „Valoarea totală" de pe act = valoarea BRUTĂ a mărfii (costul), NU datoria (care e netă).
-  // Cantitatea folosește aceeași bază ca valoarea: net provizoriu (după pierderi) × 1000 = kg.
-  // Prețul se derivă astfel încât cantitate × preț = valoarea brută, exact.
+// Impozitul retinut la sursa: procentul din nomenclatorul „Statut fiscal" dupa statutul partenerului
+// (ex. persoana fizica = 6%). Persoana juridica = 0.
+function partnerWithholdingPercent(partner) {
+  const name = String((partner && partner.fiscalProfile) || "").trim().toLowerCase();
+  const profile = (currentConfig?.fiscalProfiles || []).find(
+    (f) => String(f.name || "").trim().toLowerCase() === name
+  );
+  return profile ? Number(profile.withholdingPercent) || 0 : 0;
+}
+
+// Cantitate (kg) + valoare (bruta) + pret derivat pentru o receptie, pe act (cantitate × pret = valoare).
+function actReceiptFigures(receipt) {
   const netKg = Number(receipt.provisionalNetQuantity || receipt.quantity || 0) * 1000
     || Number(receipt.netWeight) || 0;
   const priceRaw = Number(receipt.price) || 0;
+  // Valoarea de pe act e BRUTĂ (cost). NU folosim ca fallback datoria netă (receiptPrintValue),
+  // fiindcă peste ea s-ar aplica din nou impozitul → dublă scădere. Dacă lipsesc și valoarea, și
+  // prețul, rândul iese 0 (contabilul completează prețul pe recepție).
   let value = Number(receipt.preliminaryMerchandiseValue) || 0;
   if (!(value > 0)) value = Number((netKg * priceRaw).toFixed(2));
-  if (!(value > 0)) value = receiptPrintValue(receipt);
   const price = netKg > 0 ? Number((value / netKg).toFixed(4)) : priceRaw;
-  const nr = number ? String(number) : "____";
+  return { netKg, price, value };
+}
+
+// ACT DE ACHIZITIE — una sau mai multe receptii ale aceluiasi furnizor (un rand per receptie).
+// Impozitul la buget = valoare × procent (din nomenclator); Total de plata = valoare − impozit.
+function buildPurchaseActHtml(receipts, partner, company) {
+  const p = partner || {};
+  const co = company || DEFAULT_COMPANY;
+  const rows = (receipts || []).filter(Boolean).map((r) => ({ r, ...actReceiptFigures(r) }));
+  const totalKg = rows.reduce((s, x) => s + x.netKg, 0);
+  const value = Number(rows.reduce((s, x) => s + x.value, 0).toFixed(2));
+  const taxPercent = partnerWithholdingPercent(p);
+  const tax = Number(((value * taxPercent) / 100).toFixed(2));
+  const netPay = Number((value - tax).toFixed(2));
+  const nr = "____";
   const words = escapeComboHtml(numberToWordsRo(value));
-  // „Total de plată" = datoria REALĂ din registru (amountToPay), ca actul să nu contrazică niciodată
-  // Financiarul. Reținerea la buget se DEDUCE ca diferență (brut − datorie), deci cele trei linii se
-  // închid mereu aritmetic. NU recalculăm impozitul live din nomenclator: altfel actul unei recepții
-  // vechi (sau al uneia la care s-a schimbat procentul/furnizorul) ar afișa altă sumă decât se datorează.
-  const netPay = receiptPrintValue(receipt);
-  const tax = Math.max(Number((value - netPay).toFixed(2)), 0);
-  const taxPercent = value > 0 && tax > 0 ? Number(((tax / value) * 100).toFixed(2)) : 0;
+  const receivedBy = (rows.find((x) => x.r.receivedBy) || {}).r ? rows.find((x) => x.r.receivedBy).r.receivedBy : "";
+  const dates = rows.map((x) => x.r.receivedAt || x.r.createdAt).filter(Boolean).sort();
+  const dateText = dates.length
+    ? (dates[0] === dates[dates.length - 1]
+      ? formatDateShort(dates[0])
+      : `${formatDateShort(dates[0])} — ${formatDateShort(dates[dates.length - 1])}`)
+    : "____";
+  const bodyRows = rows.map((x) => `
+        <tr>
+          <td>${escapeComboHtml(x.r.product || "")}</td>
+          <td class="of-c">kg</td>
+          <td class="of-r">${formatNumber(x.netKg)}</td>
+          <td class="of-r">${moneyRo(x.price)}</td>
+          <td class="of-r">${moneyRo(x.value)}</td>
+        </tr>`).join("");
   return `
     <table style="width:100%;border-collapse:collapse;"><tr>
       <td style="width:60px;text-align:center;font-size:16px;">◯</td>
       <td><div class="of-title">Act de achiziție a mărfurilor<small class="of-ru">Акт закупки товаров</small></div></td>
       <td style="width:150px;font-size:11px;">Seria <span class="of-fill">${escapeComboHtml(co.series || co.shortName || "")}</span><br>Nr. <span class="of-fill">${escapeComboHtml(nr)}</span></td>
     </tr></table>
-    <div class="of-row of-c">din <span class="of-fill">${formatDateShort(receipt.receivedAt || receipt.createdAt)}</span></div>
+    <div class="of-row of-c">din <span class="of-fill">${dateText}</span></div>
 
     <div class="of-row"><span class="of-fill" style="min-width:340px;">${escapeComboHtml(co.name || "")}</span>, IDNO <span class="of-fill">${escapeComboHtml(co.idno || "")}</span>
       <div class="of-cap">Denumirea și rechizitele întreprinderii, adresa / Наименование, реквизиты предприятия, адрес</div></div>
     <div class="of-row">${escapeComboHtml(co.address || "")}${co.vatCode ? " · Cod TVA " + escapeComboHtml(co.vatCode) : ""}</div>
     <div class="of-row">Conducătorul unității: <span class="of-fill">${escapeComboHtml(co.admin || "")}</span> <span class="of-cap">/ Руководитель</span></div>
 
-    <div class="of-row">Primit marfa <span class="of-fill" style="min-width:260px;">${escapeComboHtml(receipt.receivedBy || "")}</span>
+    <div class="of-row">Primit marfa <span class="of-fill" style="min-width:260px;">${escapeComboHtml(receivedBy)}</span>
       <div class="of-cap">numele, prenumele / Принял товар — фамилия, имя</div></div>
-    <div class="of-row">Predat marfa <span class="of-fill" style="min-width:260px;">${escapeComboHtml(p.name || receipt.supplier || "")}</span>
+    <div class="of-row">Predat marfa <span class="of-fill" style="min-width:260px;">${escapeComboHtml(p.name || "")}</span>
       <div class="of-cap">numele, prenumele / Сдал товар — фамилия, имя</div></div>
     <div class="of-row">Codul personal / IDNP, datele buletinului de identitate, adresa:
       <span class="of-fill" style="min-width:340px;">${escapeComboHtml([p.idno, p.address].filter(Boolean).join(", "))}</span></div>
@@ -5604,17 +5634,10 @@ function buildPurchaseActFromReceiptHtml(receipt, partner, number, company) {
         </tr>
         <tr><td class="of-c">1</td><td class="of-c">2</td><td class="of-c">3</td><td class="of-c">4</td><td class="of-c">5 = 3 × 4</td></tr>
       </thead>
-      <tbody>
-        <tr>
-          <td>${escapeComboHtml(receipt.product || "")}</td>
-          <td class="of-c">kg</td>
-          <td class="of-r">${formatNumber(netKg)}</td>
-          <td class="of-r">${moneyRo(price)}</td>
-          <td class="of-r">${moneyRo(value)}</td>
-        </tr>
+      <tbody>${bodyRows}
       </tbody>
       <tfoot>
-        <tr><td class="of-b">Total / Итого</td><td class="of-c">×</td><td class="of-r of-b">${formatNumber(netKg)}</td><td class="of-c">×</td><td class="of-r of-b">${moneyRo(value)}</td></tr>
+        <tr><td class="of-b">Total / Итого</td><td class="of-c">×</td><td class="of-r of-b">${formatNumber(totalKg)}</td><td class="of-c">×</td><td class="of-r of-b">${moneyRo(value)}</td></tr>
       </tfoot>
     </table>
 
@@ -5651,14 +5674,13 @@ function buildSaleContractHtml(partner, company) {
     </tr></table>
     <hr class="of-hr">
     <p class="of-just"><b>1. PĂRȚILE CONTRACTANTE.</b> ${fill(p.name, 240)}, identificat prin IDNO/IDNP ${fill(p.idno, 130)}, cu sediul în ${fill(p.address, 200)}, denumit în continuare <b>vânzător</b>, și <b>${escapeComboHtml(co.name || "")}</b>, identificată prin IDNO ${escapeComboHtml(co.idno || "")}, cu sediul în ${escapeComboHtml(co.address || "")}, reprezentată de administratorul ${escapeComboHtml(co.admin || "")}, denumită în continuare <b>cumpărător</b>, au convenit să încheie prezentul contract cu respectarea clauzelor acestuia.</p>
-    ${cl("<b>2. OBIECTUL CONTRACTULUI.</b> 2.1. Obiectul material îl reprezintă vânzarea/cumpărarea produsului cerealier. Cantitatea și suma totală sunt conform actelor de achiziție emise. 2.2. Cumpărătorul se obligă să achite prețul mărfii primite. 2.3. Achitarea se efectuează prin transfer bancar: 30% în avans și restul în 3 zile lucrătoare de la livrare. 2.4. Achitările se fac în lei (MDL), data achitării fiind data parvenirii mijloacelor bănești la contul vânzătorului. 2.5. Asortimentul, cantitatea și prețul se fixează în facturile ce însoțesc livrarea.")}
-    ${cl("<b>3. VALORI CANTITATIV-CALITATIVE, TERMENE ȘI MODALITĂȚI DE FURNIZARE.</b> 3.1. Cantitatea se stabilește printr-o anexă la momentul livrării, cu indicarea prețului. 3.2. Prețul nu poate fi modificat pe parcursul executării contractului. 3.3. Marfa se predă la masa utilă fizică cu parametri conform standardelor în vigoare: a) umiditate ________. 3.4. Marfa trebuie să fie sănătoasă, liberă de boli și dăunători, fără insecte vii. 3.5. Vânzătorul asigură încărcarea mărfii; livrarea se face la depozitul cumpărătorului cu transportul vânzătorului.")}
+    ${cl("<b>2. OBIECTUL CONTRACTULUI.</b> 2.1. Obiectul material îl reprezintă vânzarea/cumpărarea produsului cerealier. Cantitatea și suma totală sunt conform actelor de achiziție emise. 2.2. Cumpărătorul se obligă să achite prețul mărfii primite. 2.3. Achitarea se face după recepția mărfii și prezentarea de către furnizor/vânzător a documentelor necesare; achitarea poate fi prin numerar sau prin transfer. 2.4. Achitările se fac în lei (MDL), data achitării fiind data parvenirii mijloacelor bănești la contul vânzătorului. 2.5. Asortimentul, cantitatea și prețul se fixează în actele ce însoțesc livrarea.")}
+    ${cl("<b>3. VALORI CANTITATIV-CALITATIVE, TERMENE ȘI MODALITĂȚI DE FURNIZARE.</b> 3.1. Cantitatea se stabilește în actele de achiziție / factura fiscală, cu indicarea prețului. 3.2. Prețul nu poate fi modificat pe parcursul executării contractului. 3.3. Marfa se predă la masa utilă fizică cu parametri conform standardelor în vigoare: a) umiditate ________. 3.4. Marfa trebuie să fie sănătoasă, liberă de boli și dăunători, fără insecte vii. 3.5. Vânzătorul asigură încărcarea mărfii; livrarea se face la depozitul cumpărătorului cu transportul vânzătorului.")}
     ${cl("<b>4. DREPTURILE ȘI OBLIGAȚIILE VÂNZĂTORULUI.</b> 4.1. Să elibereze toate documentele de însoțire pentru partida livrată, cu specificarea denumirii, cantității și caracteristicilor mărfii. 4.2. Să asigure condiții optime de păstrare până la livrare. Vânzătorul poate întrerupe livrarea în caz de neachitare.")}
-    ${cl("<b>5. DREPTURILE ȘI OBLIGAȚIILE CUMPĂRĂTORULUI.</b> 5.1. Să preia marfa comandată. 5.3. Să onoreze plata facturilor conform contractului. 5.4. Să desemneze o persoană responsabilă de recepția mărfii. 5.5. Să achite o penalitate de 2,0% din valoarea neachitată în termen, pentru fiecare zi de întârziere. 5.7-5.8. Marfa trebuie să corespundă normelor ISCC EU și să fie însoțită de autodeclarația ISCC EU semnată de vânzător.")}
-    ${cl("<b>6. RECLAMAȚII ȘI NOTIFICĂRI.</b> 6.1. După preluare, nu mai târziu de 3 zile, cumpărătorul informează vânzătorul despre abaterile cantitativ-calitative determinate de elevatorul gazdă. Orice reclamație ulterioară se consideră nulă.")}
-    ${cl("<b>7. SANCȚIUNI PECUNIARE.</b> 7.1. Partea în culpă plătește dobândă de întârziere de 0,01% din suma neexecutată pentru fiecare zi, conform art. 619 Cod civil.")}
-    ${cl("<b>8. ÎNCETAREA CONTRACTULUI.</b> Contractul încetează de plin drept la neexecutarea unei obligații esențiale sau la insolvabilitatea uneia dintre părți. Poate fi reziliat prin înțelegere scrisă sau unilateral, cu preaviz de 15 zile.")}
-    ${cl("<b>9. SOLUȚIONAREA LITIGIILOR.</b> 9.1-9.2. Neînțelegerile se rezolvă pe cale amiabilă, iar în caz contrar de instanța competentă, conform legislației Republicii Moldova. 9.3. Contractul este întocmit în două exemplare, câte unul pentru fiecare parte, cu aceeași valoare juridică.")}
+    ${cl("<b>5. DREPTURILE ȘI OBLIGAȚIILE CUMPĂRĂTORULUI.</b> 5.1. Să preia marfa comandată. 5.3. Să onoreze plata facturilor conform contractului. 5.4. Să desemneze o persoană responsabilă de recepția mărfii. 5.7-5.8. Marfa trebuie să corespundă normelor ISCC EU și să fie însoțită de autodeclarația ISCC EU semnată de vânzător.")}
+    ${cl("<b>6. RECLAMAȚII ȘI NOTIFICĂRI.</b> 6.1. Reclamațiile se notifică în timp de 14 zile după recepția mărfii; cumpărătorul informează vânzătorul despre abaterile cantitativ-calitative determinate de elevatorul gazdă. Orice reclamație ulterioară se consideră nulă.")}
+    ${cl("<b>7. ÎNCETAREA CONTRACTULUI.</b> Contractul încetează de plin drept la neexecutarea unei obligații esențiale sau la insolvabilitatea uneia dintre părți. Poate fi reziliat prin înțelegere scrisă sau unilateral, cu preaviz de 15 zile.")}
+    ${cl("<b>8. SOLUȚIONAREA LITIGIILOR.</b> Neînțelegerile se rezolvă pe cale amiabilă, iar în caz contrar de instanța competentă, conform legislației Republicii Moldova. Contractul este întocmit în două exemplare, câte unul pentru fiecare parte, cu aceeași valoare juridică.")}
     <table style="width:100%;margin-top:16px;border-collapse:collapse;font-size:11px;"><tr>
       <td style="width:50%;vertical-align:top;padding-right:10px;">
         <div class="of-b">CUMPĂRĂTOR</div>
@@ -5685,11 +5707,11 @@ function buildSaleContractHtml(partner, company) {
 }
 
 // 3) ORDIN DE PLATA / Dispozitie de plata de casa (Расходный кассовый ордер) — dintr-o plata.
-function buildCashPaymentOrderHtml(transaction, partner, number, company) {
+function buildCashPaymentOrderHtml(transaction, partner, company) {
   const p = partner || {};
   const co = company || DEFAULT_COMPANY;
   const amount = Number(transaction.amount) || 0;
-  const nr = number ? String(number) : "____";
+  const nr = "____"; // numarul de ordine il completeaza contabilul manual
   const dateStr = formatDateShort(transaction.createdAt || transaction.transactedAt);
   const refText = transaction.receiptId ? `Act de achiziție / recepția #${transaction.receiptId}` : (transaction.note || "achitare furnizor");
   return `
@@ -5711,8 +5733,8 @@ function buildCashPaymentOrderHtml(transaction, partner, number, company) {
         <tr>
           <td class="of-c">${escapeComboHtml(nr)}</td>
           <td class="of-c">${dateStr}</td>
-          <td></td>
-          <td></td>
+          <td class="of-c">544</td>
+          <td class="of-c">241</td>
           <td class="of-r of-b">${moneyRo(amount)}</td>
         </tr>
       </tbody>
@@ -5740,22 +5762,34 @@ function findPartnerById(id) {
 }
 
 // Dispatcher: rezolva compania emitenta, aloca numarul (unde e cazul) si deschide tiparul completat.
+function printDocInRange(iso, from, to) {
+  const d = String(iso || "").slice(0, 10);
+  if (!d) return false;
+  if (from && d < from) return false;
+  if (to && d > to) return false;
+  return true;
+}
+
 async function printAccountingDocument(docType, refId, companyId) {
   try {
     const company = resolveCompany(companyId);
-    const cId = company && company.id != null ? company.id : companyId;
     if (docType === "purchaseAct") {
-      const receipt = (receiptsCache || []).find((r) => Number(r.id) === Number(refId));
-      if (!receipt) { alert("Recepția nu a fost găsită."); return; }
-      const partner = findPartnerById(receipt.supplierId) || findPartnerByName(receipt.supplier);
-      const { number } = await allocatePrintNumber("purchaseAct", receipt.id, cId);
-      openOfficialDocWindow(buildPurchaseActFromReceiptHtml(receipt, partner, number, company), `Act de achizitie ${number || receipt.id}`);
+      // refId = furnizorul; adunam recepțiile lui din perioada aleasă (gol = toate).
+      const partner = findPartnerById(refId);
+      if (!partner) { alert("Selectează furnizorul."); return; }
+      const from = (document.getElementById("print-doc-from") || {}).value || "";
+      const to = (document.getElementById("print-doc-to") || {}).value || "";
+      const receipts = (receiptsCache || [])
+        .filter((r) => Number(r.supplierId) === Number(partner.id) && r.status !== "Anulat")
+        .filter((r) => printDocInRange(r.receivedAt || r.createdAt, from, to))
+        .sort((a, b) => new Date(a.receivedAt || a.createdAt) - new Date(b.receivedAt || b.createdAt));
+      if (!receipts.length) { alert("Nu există recepții pentru acest furnizor în perioada aleasă."); return; }
+      openOfficialDocWindow(buildPurchaseActHtml(receipts, partner, company), `Act de achizitie ${partner.name}`);
     } else if (docType === "paymentOrder") {
       const tx = (transactionsCache || []).find((t) => Number(t.id) === Number(refId));
       if (!tx) { alert("Plata nu a fost găsită."); return; }
       const partner = findPartnerById(tx.partnerId) || findPartnerByName(tx.partner);
-      const { number } = await allocatePrintNumber("paymentOrder", tx.id, cId);
-      openOfficialDocWindow(buildCashPaymentOrderHtml(tx, partner, number, company), `Ordin de plata ${number || tx.id}`);
+      openOfficialDocWindow(buildCashPaymentOrderHtml(tx, partner, company), `Ordin de plata ${tx.id}`);
     } else if (docType === "saleContract") {
       const partner = findPartnerById(refId);
       if (!partner) { alert("Selectează un furnizor."); return; }
@@ -6732,14 +6766,21 @@ function fillPrintDocRef() {
   const labelEl = document.getElementById("print-doc-ref-label");
   if (!typeEl || !refEl) return;
   const type = typeEl.value;
+  // Câmpurile de perioadă apar doar la Actul de achiziție (mai multe recepții pe un act).
+  const fromWrap = document.getElementById("print-doc-from-wrap");
+  const toWrap = document.getElementById("print-doc-to-wrap");
+  const showPeriod = type === "purchaseAct";
+  if (fromWrap) fromWrap.hidden = !showPeriod;
+  if (toWrap) toWrap.hidden = !showPeriod;
   let options = [];
   if (type === "purchaseAct") {
-    if (labelEl) labelEl.textContent = "Recepția";
-    options = (receiptsCache || [])
-      .filter((r) => r.status !== "Anulat")
+    if (labelEl) labelEl.textContent = "Furnizorul";
+    // Actul aduna recepțiile unui furnizor -> alegi FURNIZORUL, apoi perioada.
+    options = (currentConfig?.partners || [])
+      .filter((p) => p.role === "furnizor" || p.role === "ambele")
       .slice()
-      .sort((a, b) => new Date(b.receivedAt || b.createdAt) - new Date(a.receivedAt || a.createdAt))
-      .map((r) => ({ value: r.id, label: `#${r.id} · ${formatDateShort(r.receivedAt || r.createdAt)} · ${r.supplier || "-"} · ${r.product || "-"}` }));
+      .sort((a, b) => String(a.name).localeCompare(String(b.name), "ro"))
+      .map((p) => ({ value: p.id, label: p.name }));
   } else if (type === "saleContract") {
     if (labelEl) labelEl.textContent = "Furnizorul";
     options = (currentConfig?.partners || [])
