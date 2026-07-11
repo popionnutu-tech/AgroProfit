@@ -93,6 +93,7 @@ textarea {
 .sidebar-brand {
   display: flex;
   justify-content: center;
+  align-items: center;
   padding: 0;
   margin: 0;
   border-bottom: 1px solid rgba(244, 239, 224, 0.18);
@@ -106,29 +107,60 @@ textarea {
   height: auto;
   display: block;
   max-width: 260px;
+  /* Antet mai compact: logoul nu mai ocupa o treime din bara → incap mai multe elemente. */
+  max-height: 132px;
+  object-fit: contain;
+}
+
+/* Buton „✕" de inchidere a meniului — vizibil doar in modul drawer (ecrane mici). */
+.sidebar-close {
+  display: none;
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.25);
+  color: #f4efe0;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 40;
 }
 
 .sidebar-nav {
   display: flex;
   flex-direction: column;
   gap: 1px;
-  padding: 0 8px;
+  padding: 0 8px 4px;
   position: relative;
   z-index: 2;
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  /* Bara de derulare VIZIBILA: se vede clar ca lista continua sub margine. */
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+  scrollbar-color: rgba(244, 239, 224, 0.45) rgba(255, 255, 255, 0.06);
 }
 
 .sidebar-nav::-webkit-scrollbar {
-  width: 4px;
+  width: 8px;
+}
+
+.sidebar-nav::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
 }
 
 .sidebar-nav::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.18);
-  border-radius: 4px;
+  background: rgba(244, 239, 224, 0.45);
+  border-radius: 8px;
+}
+
+.sidebar-nav::-webkit-scrollbar-thumb:hover {
+  background: rgba(244, 239, 224, 0.65);
 }
 
 .sidebar-item {
@@ -1808,6 +1840,9 @@ dialog.details-dialog { width: min(680px, 94vw); max-height: 88vh; overflow-y: a
   .sidebar-toggle {
     display: block;
   }
+  .sidebar-close {
+    display: block;
+  }
   .main-area {
     padding-top: 56px;
     padding-left: 16px;
@@ -2827,6 +2862,10 @@ dialog.details-dialog { width: min(680px, 94vw); max-height: 88vh; overflow-y: a
   .panel-head h2 {
     font-size: 1rem;
   }
+  /* 7 elemente in bara de jos (inclusiv „Meniu") sa incapa comod pe ecrane inguste. */
+  .bottom-nav-label { font-size: 9px; }
+  .bottom-nav-item { padding: 6px 0; }
+  .bottom-nav-item .bottom-nav-icon svg { width: 20px; height: 20px; }
 }
 
 /* === Task 2.1: Tipărire optimizată — listele (recepții etc.) încap compact pe A4,
