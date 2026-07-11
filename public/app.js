@@ -5563,15 +5563,16 @@ function partnerWithholdingPercent(partner) {
 
 // Cantitate (kg) + valoare (bruta) + pret derivat pentru o receptie, pe act (cantitate × pret = valoare).
 function actReceiptFigures(receipt) {
+  // Cantitatea = aceeași bază ca in tabelul Recepții (net provizoriu × 1000 = kg).
   const netKg = Number(receipt.provisionalNetQuantity || receipt.quantity || 0) * 1000
     || Number(receipt.netWeight) || 0;
-  const priceRaw = Number(receipt.price) || 0;
-  // Valoarea de pe act e BRUTĂ (cost). NU folosim ca fallback datoria netă (receiptPrintValue),
-  // fiindcă peste ea s-ar aplica din nou impozitul → dublă scădere. Dacă lipsesc și valoarea, și
-  // prețul, rândul iese 0 (contabilul completează prețul pe recepție).
-  let value = Number(receipt.preliminaryMerchandiseValue) || 0;
-  if (!(value > 0)) value = Number((netKg * priceRaw).toFixed(2));
-  const price = netKg > 0 ? Number((value / netKg).toFixed(4)) : priceRaw;
+  // Prețul = EXACT cel introdus la recepție (lei/kg), NU derivat din valoare ÷ cantitate.
+  const price = Number(receipt.price) || 0;
+  // Valoarea (brută, cost) = cantitate × preț, exact — ca „col.5 = col.3 × col.4" să iasă perfect.
+  // Doar dacă lipsește prețul, cădem pe valoarea brută stocată.
+  const value = price > 0 && netKg > 0
+    ? Number((netKg * price).toFixed(2))
+    : Number(receipt.preliminaryMerchandiseValue) || 0;
   return { netKg, price, value };
 }
 
@@ -5596,7 +5597,6 @@ function buildPurchaseActHtml(receipts, partner, company) {
   const netPay = Number((value - tax).toFixed(2));
   const nr = "____";
   const words = escapeComboHtml(numberToWordsRo(value));
-  const receivedBy = (rows.find((x) => x.r.receivedBy) || {}).r ? rows.find((x) => x.r.receivedBy).r.receivedBy : "";
   const dates = rows.map((x) => x.r.receivedAt || x.r.createdAt).filter(Boolean).sort();
   const dateText = dates.length
     ? (dates[0] === dates[dates.length - 1]
@@ -5607,7 +5607,7 @@ function buildPurchaseActHtml(receipts, partner, company) {
         <tr>
           <td>${escapeComboHtml(x.r.product || "")}</td>
           <td class="of-c">kg</td>
-          <td class="of-r">${actNum(x.netKg, 0)}</td>
+          <td class="of-r">${actNum(x.netKg, 2)}</td>
           <td class="of-r">${actNum(x.price, 2)}</td>
           <td class="of-r">${actNum(x.value, 2)}</td>
         </tr>`).join("");
@@ -5624,7 +5624,7 @@ function buildPurchaseActHtml(receipts, partner, company) {
     <div class="of-row">${escapeComboHtml(co.address || "")}${co.vatCode ? " · Cod TVA " + escapeComboHtml(co.vatCode) : ""}</div>
     <div class="of-row">Conducătorul unității: <span class="of-fill">${escapeComboHtml(co.admin || "")}</span> <span class="of-cap">/ Руководитель</span></div>
 
-    <div class="of-row">Primit marfa <span class="of-fill" style="min-width:260px;">${escapeComboHtml(receivedBy)}</span>
+    <div class="of-row">Primit marfa <span class="of-fill" style="min-width:260px;">${escapeComboHtml(co.admin || "")}</span>
       <div class="of-cap">numele, prenumele / Принял товар — фамилия, имя</div></div>
     <div class="of-row">Predat marfa <span class="of-fill" style="min-width:260px;">${escapeComboHtml(p.name || "")}</span>
       <div class="of-cap">numele, prenumele / Сдал товар — фамилия, имя</div></div>
@@ -5645,7 +5645,7 @@ function buildPurchaseActHtml(receipts, partner, company) {
       <tbody>${bodyRows}
       </tbody>
       <tfoot>
-        <tr><td class="of-b">Total / Итого</td><td class="of-c">×</td><td class="of-r of-b">${actNum(totalKg, 0)}</td><td class="of-c">×</td><td class="of-r of-b">${actNum(value, 2)}</td></tr>
+        <tr><td class="of-b">Total / Итого</td><td class="of-c">×</td><td class="of-r of-b">${actNum(totalKg, 2)}</td><td class="of-c">×</td><td class="of-r of-b">${actNum(value, 2)}</td></tr>
       </tfoot>
     </table>
 
