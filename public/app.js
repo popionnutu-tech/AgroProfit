@@ -5577,6 +5577,14 @@ function actReceiptFigures(receipt) {
 
 // ACT DE ACHIZITIE — una sau mai multe receptii ale aceluiasi furnizor (un rand per receptie).
 // Impozitul la buget = valoare × procent (din nomenclator); Total de plata = valoare − impozit.
+// Numar cu separator de mii = SPATIU (ex. „8 220", „49 320,00") — fara echivoc pe actul oficial,
+// ca sa nu para 8220 kg drept 8,22 (in ro-RO punctul e separator de mii). Zecimala ramane virgula.
+function actNum(n, dec) {
+  return new Intl.NumberFormat("ro-RO", { minimumFractionDigits: dec, maximumFractionDigits: dec })
+    .format(Number(n) || 0)
+    .replace(/\./g, " ");
+}
+
 function buildPurchaseActHtml(receipts, partner, company) {
   const p = partner || {};
   const co = company || DEFAULT_COMPANY;
@@ -5599,9 +5607,9 @@ function buildPurchaseActHtml(receipts, partner, company) {
         <tr>
           <td>${escapeComboHtml(x.r.product || "")}</td>
           <td class="of-c">kg</td>
-          <td class="of-r">${formatNumber(x.netKg)}</td>
-          <td class="of-r">${moneyRo(x.price)}</td>
-          <td class="of-r">${moneyRo(x.value)}</td>
+          <td class="of-r">${actNum(x.netKg, 0)}</td>
+          <td class="of-r">${actNum(x.price, 2)}</td>
+          <td class="of-r">${actNum(x.value, 2)}</td>
         </tr>`).join("");
   return `
     <table style="width:100%;border-collapse:collapse;"><tr>
@@ -5637,7 +5645,7 @@ function buildPurchaseActHtml(receipts, partner, company) {
       <tbody>${bodyRows}
       </tbody>
       <tfoot>
-        <tr><td class="of-b">Total / Итого</td><td class="of-c">×</td><td class="of-r of-b">${formatNumber(totalKg)}</td><td class="of-c">×</td><td class="of-r of-b">${moneyRo(value)}</td></tr>
+        <tr><td class="of-b">Total / Итого</td><td class="of-c">×</td><td class="of-r of-b">${actNum(totalKg, 0)}</td><td class="of-c">×</td><td class="of-r of-b">${actNum(value, 2)}</td></tr>
       </tfoot>
     </table>
 
@@ -5645,12 +5653,12 @@ function buildPurchaseActHtml(receipts, partner, company) {
       <div class="of-cap">în litere / прописью</div></div>
     <div class="of-row of-b">Rețineri / Удержания:</div>
     <div class="of-row">— la buget / в бюджет${taxPercent > 0 ? ` (${formatNumber(taxPercent)}%)` : ""}:
-      <span class="of-fill" style="min-width:260px;">${escapeComboHtml(numberToWordsRo(tax))}</span> <span class="of-fill" style="min-width:110px;">${moneyRo(tax)}</span>
+      <span class="of-fill" style="min-width:260px;">${escapeComboHtml(numberToWordsRo(tax))}</span> <span class="of-fill" style="min-width:110px;">${actNum(tax, 2)}</span>
       <div class="of-cap">în litere / прописью &nbsp;·&nbsp; în cifre / цифрами</div></div>
     <div class="of-row">— avansuri achitate / уплаченные авансы: <span class="of-fill" style="min-width:230px;"></span> <span class="of-fill" style="min-width:110px;"></span>
       <div class="of-cap">în litere / прописью &nbsp;·&nbsp; în cifre / цифрами</div></div>
     <div class="of-row"><span class="of-b">Total de plată / Общая сумма к оплате:</span>
-      <span class="of-fill" style="min-width:270px;">${escapeComboHtml(numberToWordsRo(netPay))}</span> <span class="of-fill" style="min-width:110px;">${moneyRo(netPay)}</span>
+      <span class="of-fill" style="min-width:270px;">${escapeComboHtml(numberToWordsRo(netPay))}</span> <span class="of-fill" style="min-width:110px;">${actNum(netPay, 2)}</span>
       <div class="of-cap">în litere / прописью &nbsp;·&nbsp; în cifre / цифрами</div></div>
 
     <p class="of-just" style="margin-top:8px;">Declarația pe propria răspundere a persoanei fizice care a predat mărfurile: confirm că marfa îmi aparține, este liberă de sarcini și corespunde cantității și calității indicate. / Декларация под собственную ответственность физического лица, передавшего товары.</p>
