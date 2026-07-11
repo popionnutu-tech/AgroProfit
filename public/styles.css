@@ -816,6 +816,15 @@ button {
 .combobox > input[type="text"] {
   width: 100%;
 }
+/* Autocomplete peste un <select> nativ: ascundem selectul (ramane sursa valorii),
+   afisam campul de tastare. */
+.combobox-native {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  pointer-events: none;
+}
 .combobox-list {
   list-style: none;
   margin: 4px 0 0;

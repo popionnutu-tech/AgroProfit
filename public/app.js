@@ -8255,4 +8255,136 @@ async function bootstrap() {
   }
 }
 
+// ============================================================================
+// Autocomplete peste liste native: „imbraca" un <select> cu un camp de tastare.
+// Selectul ramane SURSA valorii (nu schimbam cum se completeaza/citeste) — la alegere
+// setam select.value + declansam „change", deci toate handler-ele existente merg neatinse.
+// ============================================================================
+function enhanceSelectWithSearch(select, opts = {}) {
+  if (!select || select.dataset.searchEnhanced === "1") return;
+  select.dataset.searchEnhanced = "1";
+
+  const wrap = document.createElement("div");
+  wrap.className = "combobox combobox-select";
+  select.parentNode.insertBefore(wrap, select);
+  wrap.appendChild(select);
+  select.classList.add("combobox-native");
+  // Validarea „required" o mutam pe fluxul de submit (selectul ascuns nu poate primi focus).
+  if (select.hasAttribute("required")) {
+    select.dataset.wasRequired = "1";
+    select.removeAttribute("required");
+  }
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "combobox-input";
+  input.setAttribute("autocomplete", "off");
+  input.setAttribute("role", "combobox");
+  input.setAttribute("aria-expanded", "false");
+  input.placeholder = opts.placeholder || "Caută (tastează primele litere)…";
+  wrap.appendChild(input);
+
+  const list = document.createElement("ul");
+  list.className = "combobox-list";
+  list.setAttribute("role", "listbox");
+  list.hidden = true;
+  wrap.appendChild(list);
+
+  let activeIndex = -1;
+  let filtered = [];
+  const MAX_RESULTS = 50; // liste mari: afisam primele 50, restul se ingusteaza tastand
+
+  const readOptions = () =>
+    Array.from(select.options)
+      .filter((o) => !o.disabled) // exclude placeholderele „Selectează…" (disabled); „Toți" ramane (nu e disabled)
+      .map((o) => ({ value: o.value, text: (o.textContent || "").trim() }))
+      .filter((o) => o.text !== "");
+
+  const syncInputFromSelect = () => {
+    const sel = select.options[select.selectedIndex];
+    input.value = sel && sel.value !== "" ? (sel.textContent || "").trim() : "";
+  };
+
+  const render = () => {
+    const q = normalizeComboText(input.value);
+    const all = readOptions().filter((o) => !q || normalizeComboText(o.text).includes(q));
+    filtered = all.slice(0, MAX_RESULTS); // afisam + navigam doar setul vizibil (consistent cu activeIndex/pick)
+    input.setAttribute("aria-expanded", "true");
+    if (!filtered.length) {
+      list.innerHTML = `<li class="combobox-empty">Niciun rezultat</li>`;
+    } else {
+      const more = all.length - filtered.length;
+      const hint = more > 0
+        ? `<li class="combobox-empty">Încă ${more} ${more === 1 ? "rezultat" : "rezultate"} — continuă să tastezi…</li>`
+        : "";
+      list.innerHTML = filtered
+        .map(
+          (o, i) =>
+            `<li class="combobox-item${i === activeIndex ? " is-active" : ""}" role="option" data-value="${escapeComboHtml(o.value)}">${escapeComboHtml(o.text)}</li>`
+        )
+        .join("") + hint;
+    }
+    list.hidden = false;
+  };
+
+  const close = () => {
+    list.hidden = true;
+    activeIndex = -1;
+    input.setAttribute("aria-expanded", "false");
+  };
+
+  const pick = (value, text) => {
+    select.value = value;
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    input.value = text;
+    close();
+  };
+
+  input.addEventListener("focus", () => { activeIndex = -1; render(); });
+  input.addEventListener("input", () => { activeIndex = -1; render(); });
+  input.addEventListener("blur", () => setTimeout(() => { close(); syncInputFromSelect(); }, 140));
+  input.addEventListener("keydown", (e) => {
+    if (list.hidden && e.key === "ArrowDown") { render(); return; }
+    if (e.key === "ArrowDown") { activeIndex = Math.min(activeIndex + 1, filtered.length - 1); render(); e.preventDefault(); }
+    else if (e.key === "ArrowUp") { activeIndex = Math.max(activeIndex - 1, 0); render(); e.preventDefault(); }
+    else if (e.key === "Enter") { if (activeIndex >= 0 && filtered[activeIndex]) { pick(filtered[activeIndex].value, filtered[activeIndex].text); e.preventDefault(); } }
+    else if (e.key === "Escape") { close(); }
+  });
+  list.addEventListener("mousedown", (e) => {
+    const li = e.target.closest("[data-value]");
+    if (!li) return;
+    e.preventDefault();
+    const found = filtered.find((x) => String(x.value) === li.dataset.value);
+    pick(li.dataset.value, found ? found.text : (li.textContent || "").trim());
+  });
+
+  // Cand selectul e re-populat (innerHTML) sau i se restaureaza valoarea, resincronizam textul afisat.
+  select.addEventListener("change", syncInputFromSelect);
+  new MutationObserver(() => setTimeout(syncInputFromSelect, 0)).observe(select, { childList: true });
+  syncInputFromSelect();
+}
+
+// Aplica autocomplete-ul la toate listele de partener/furnizor/cumparator + referinta financiara.
+(function setupPartnerSearchComboboxes() {
+  const targets = [
+    ["transaction-reference-select", "Caută recepția/livrarea (nume partener)…"],
+    ["delivery-customer-select", "Caută cumpărătorul…"],
+    ["complaint-customer-select", "Caută cumpărătorul…"],
+    ["opening-debt-partner", "Caută partenerul…"],
+    ["statement-partner-select", "Caută partenerul…"],
+    ["print-doc-ref", "Caută…"],
+    ["receipt-supplier-filter", "Caută furnizorul…"],
+    ["transaction-partner-filter", "Caută partenerul…"],
+    ["delivery-customer-filter", "Caută cumpărătorul…"]
+  ];
+  targets.forEach(([id, placeholder]) => {
+    try {
+      const el = document.getElementById(id);
+      if (el) enhanceSelectWithSearch(el, { placeholder });
+    } catch (err) {
+      console.error("Autocomplete init failed for", id, err);
+    }
+  });
+})();
+
 bootstrap();
