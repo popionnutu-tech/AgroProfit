@@ -6332,6 +6332,18 @@ if (sidebarBackdropEl) {
   sidebarBackdropEl.addEventListener("click", closeSidebarDrawer);
 }
 
+// Butonul „✕" din antetul sidebar-ului (vizibil doar in modul drawer, pe ecrane mici).
+const sidebarCloseEl = document.getElementById("sidebar-close");
+if (sidebarCloseEl) {
+  sidebarCloseEl.addEventListener("click", closeSidebarDrawer);
+}
+
+// Butonul „Meniu" din bara de jos (telefon): deschide lista completa (drawer).
+const bottomNavMoreEl = document.getElementById("bottom-nav-more");
+if (bottomNavMoreEl) {
+  bottomNavMoreEl.addEventListener("click", openSidebarDrawer);
+}
+
 productSelect.addEventListener("change", () => {
   humidityInput.value = "";
   impurityInput.value = "";
