@@ -5673,22 +5673,49 @@ function buildSaleContractHtml(partner, company) {
   const p = partner || {};
   const co = company || DEFAULT_COMPANY;
   const fill = (v, min) => `<span class="of-fill" style="min-width:${min || 120}px;">${escapeComboHtml(v || "")}</span>`;
-  const cl = (t) => `<p class="of-just">${t}</p>`;
+  // Fiecare punct al contractului pe rand nou (paragraf propriu, indent atarnat pe numar).
+  const pt = (t) => `<p class="of-just" style="margin:2px 0 2px 16px;text-indent:-16px;">${t}</p>`;
+  const series = String(co.series || co.shortName || "").trim();
   return `
-    <div class="of-title">Contract de cumpărare-vânzare</div>
-    <table style="width:100%;"><tr>
-      <td style="font-size:11px;">Nr. <span class="of-fill">________</span></td>
+    <div class="of-title" style="line-height:1.15;margin-bottom:2px;">CONTRACT<span style="display:block;font-size:12px;font-weight:bold;text-transform:none;">de cumpărare-vânzare</span></div>
+    <table style="width:100%;margin-top:6px;"><tr>
+      <td style="font-size:11px;">Nr. ${escapeComboHtml(series ? series + "-" : "")}<span class="of-fill">________</span></td>
       <td style="font-size:11px;text-align:right;">r. Briceni, <span class="of-fill">______________</span></td>
     </tr></table>
-    <hr class="of-hr">
-    <p class="of-just"><b>1. PĂRȚILE CONTRACTANTE.</b> ${fill(p.name, 240)}, identificat prin IDNO/IDNP ${fill(p.idno, 130)}, cu sediul în ${fill(p.address, 200)}, denumit în continuare <b>vânzător</b>, și <b>${escapeComboHtml(co.name || "")}</b>, identificată prin IDNO ${escapeComboHtml(co.idno || "")}, cu sediul în ${escapeComboHtml(co.address || "")}, reprezentată de administratorul ${escapeComboHtml(co.admin || "")}, denumită în continuare <b>cumpărător</b>, au convenit să încheie prezentul contract cu respectarea clauzelor acestuia.</p>
-    ${cl("<b>2. OBIECTUL CONTRACTULUI ȘI ACHITAREA.</b> 2.1. Obiectul îl reprezintă vânzarea/cumpărarea produsului cerealier; cantitatea și suma totală sunt conform actelor de achiziție emise. 2.2. Achitarea se face după recepția mărfii și prezentarea de către Vânzător a documentelor necesare; prin numerar sau prin transfer, în lei (MDL). 2.3. La achiziția de la persoane fizice, Cumpărătorul reține și transferă la buget impozitul pe venit <b>conform legislației în vigoare</b>, achitând Vânzătorului suma netă. 2.4. Cumpărătorul are dreptul să rețină din prețul mărfii contravaloarea serviciilor prestate (uscare, curățare, depozitare) și impozitul reținut la sursă, achitând Vânzătorului diferența. 2.5. Data achitării este data parvenirii mijloacelor bănești la contul Vânzătorului.")}
-    ${cl("<b>3. CANTITATEA, CALITATEA ȘI PREȚUL.</b> 3.1. Cantitatea și calitatea mărfii (masă, umiditate, impurități, corpuri străine) se determină la cântarul și în laboratorul Cumpărătorului, iar rezultatele acestora sunt <b>definitorii</b> pentru părți. 3.2. Prețul se ajustează conform baremurilor Cumpărătorului pentru abaterile de umiditate și impurități față de normă. 3.3. Marfa se predă la masa utilă fizică, sănătoasă, liberă de boli, dăunători și insecte vii, cu parametri conform standardelor în vigoare: umiditate ________. 3.4. Dreptul de proprietate și riscul pieirii trec la Cumpărător <b>după recepția mărfii la depozit și verificarea calității</b>. 3.5. Vânzătorul asigură încărcarea mărfii; livrarea se face la depozitul Cumpărătorului cu transportul Vânzătorului.")}
-    ${cl("<b>4. OBLIGAȚIILE ȘI GARANȚIILE VÂNZĂTORULUI.</b> 4.1. Vânzătorul <b>garantează</b> că marfa îi aparține, este liberă de gaj și sechestru, dobândită legal, nu conține contaminanți (micotoxine/aflatoxine, reziduuri de pesticide peste limitele admise, metale, corpuri străine) și corespunde normelor sanitare; despăgubește Cumpărătorul pentru orice prejudiciu cauzat de vicii ascunse sau neconformități depistate ulterior. 4.2. Să elibereze toate documentele de însoțire pentru partida livrată. 4.3. Să prezinte documentele necesare: copia buletinului de identitate și IDNP (persoană fizică) sau extrasul (persoană juridică) și declarația de proveniență a mărfii. 4.4. Marfa să corespundă normelor ISCC EU, însoțită de autodeclarația ISCC EU semnată.")}
-    ${cl("<b>5. DREPTURILE ȘI OBLIGAȚIILE CUMPĂRĂTORULUI.</b> 5.1. Să preia și să achite marfa conformă. 5.2. Cumpărătorul are dreptul <b>să refuze sau să returneze, pe cheltuiala Vânzătorului</b> (transport, depozitare), marfa care nu corespunde parametrilor de calitate sau normelor sanitare. 5.3. Să desemneze o persoană responsabilă de recepția mărfii.")}
-    ${cl("<b>6. RECLAMAȚII ȘI NOTIFICĂRI.</b> 6.1. Reclamațiile se notifică în timp de 14 zile după recepția mărfii; cumpărătorul informează vânzătorul despre abaterile cantitativ-calitative determinate de elevatorul gazdă. Orice reclamație ulterioară se consideră nulă.")}
-    ${cl("<b>7. ÎNCETAREA CONTRACTULUI ȘI DISPOZIȚII FINALE.</b> 7.1. Contractul încetează de plin drept la neexecutarea unei obligații esențiale sau la insolvabilitatea uneia dintre părți; poate fi reziliat prin înțelegere scrisă sau unilateral, cu preaviz de 15 zile. 7.2. Contractul <b>nu poate fi cesionat</b> fără acordul scris al Cumpărătorului. 7.3. Părțile sunt exonerate de răspundere în caz de <b>forță majoră</b>, dovedită conform legii.")}
-    ${cl("<b>8. SOLUȚIONAREA LITIGIILOR.</b> Neînțelegerile se rezolvă pe cale amiabilă, iar în caz contrar de instanța competentă, conform legislației Republicii Moldova. Contractul este întocmit în două exemplare, câte unul pentru fiecare parte, cu aceeași valoare juridică.")}
+    <p class="of-just of-b" style="text-align:center;margin-top:10px;">1. PĂRȚILE CONTRACTANTE</p>
+    <p class="of-just">1.1. ${fill(p.name, 240)}, identificat prin IDNO/IDNP ${fill(p.idno, 130)}, cu sediul în ${fill(p.address, 200)}, denumit în continuare <b>vânzător</b>; și</p>
+    <p class="of-just">1.2. <b>${escapeComboHtml(co.name || "")}</b>, identificată prin IDNO ${escapeComboHtml(co.idno || "")}, cu sediul în ${escapeComboHtml(co.address || "")}, reprezentată de administratorul ${escapeComboHtml(co.admin || "")}, denumită în continuare <b>cumpărător</b>, au convenit să încheie prezentul contract de vânzare-cumpărare a mărfurilor cu respectarea clauzelor acestuia.</p>
+    <p class="of-just of-b" style="text-align:center;">2. OBIECTUL CONTRACTULUI ȘI ACHITAREA</p>
+    ${pt("2.1. Obiectul material al contractului îl reprezintă vânzarea/cumpărarea produsului cerealier; cantitatea și suma totală sunt conform actelor de achiziție emise.")}
+    ${pt("2.2. Achitarea se face după recepția mărfii și prezentarea de către Vânzător a documentelor necesare; prin numerar sau prin transfer, în lei (MDL).")}
+    ${pt("2.3. La achiziția de la persoane fizice, Cumpărătorul reține și transferă la buget impozitul pe venit <b>conform legislației în vigoare</b>, achitând Vânzătorului suma netă.")}
+    ${pt("2.4. Cumpărătorul are dreptul să rețină din prețul mărfii contravaloarea serviciilor prestate (uscare, curățare, depozitare) și impozitul reținut la sursă, achitând Vânzătorului diferența.")}
+    ${pt("2.5. Data achitării este data parvenirii mijloacelor bănești la contul Vânzătorului.")}
+    <p class="of-just of-b" style="text-align:center;">3. VALORI CANTITATIV-CALITATIVE, TERMENE ȘI MODALITĂȚI DE FURNIZARE</p>
+    ${pt("3.1. Cantitatea și calitatea mărfii (masă, umiditate, impurități, corpuri străine) se determină la cântarul și în laboratorul Cumpărătorului, iar rezultatele acestora sunt <b>definitorii</b> pentru părți.")}
+    ${pt("3.2. Prețul se ajustează conform baremurilor Cumpărătorului pentru abaterile de umiditate și impurități față de normă.")}
+    ${pt("3.3. Marfa se predă la masa utilă fizică, sănătoasă, liberă de boli, dăunători și insecte vii, cu parametri conform standardelor în vigoare: umiditate ________.")}
+    ${pt("3.4. Dreptul de proprietate și riscul pieirii trec la Cumpărător <b>după recepția mărfii la depozit și verificarea calității</b>.")}
+    ${pt("3.5. Vânzătorul asigură încărcarea mărfii; livrarea se face la depozitul Cumpărătorului cu transportul Vânzătorului.")}
+    <p class="of-just of-b" style="text-align:center;">4. DREPTURILE ȘI OBLIGAȚIUNILE VÂNZĂTORULUI</p>
+    ${pt("4.1. Vânzătorul <b>garantează</b> că marfa îi aparține, este liberă de gaj și sechestru, dobândită legal, nu conține contaminanți (micotoxine/aflatoxine, reziduuri de pesticide peste limitele admise, metale, corpuri străine) și corespunde normelor sanitare; despăgubește Cumpărătorul pentru orice prejudiciu cauzat de vicii ascunse sau neconformități depistate ulterior.")}
+    ${pt("4.2. Să elibereze toate documentele de însoțire pentru partida livrată.")}
+    ${pt("4.3. Să prezinte documentele necesare: copia buletinului de identitate și IDNP (persoană fizică) sau extrasul (persoană juridică) și declarația de proveniență a mărfii.")}
+    ${pt("4.4. Marfa să corespundă normelor ISCC EU, însoțită de autodeclarația ISCC EU semnată de vânzător.")}
+    <p class="of-just of-b" style="text-align:center;">5. DREPTURILE ȘI OBLIGAȚIILE CUMPĂRĂTORULUI</p>
+    ${pt("5.1. Să preia și să achite marfa conformă.")}
+    ${pt("5.2. Cumpărătorul are dreptul <b>să refuze sau să returneze, pe cheltuiala Vânzătorului</b> (transport, depozitare), marfa care nu corespunde parametrilor de calitate sau normelor sanitare.")}
+    ${pt("5.3. Să desemneze o persoană responsabilă de recepția și controlul cantității și calității mărfii primite.")}
+    <p class="of-just of-b" style="text-align:center;">6. RECLAMAȚII ȘI NOTIFICĂRI</p>
+    ${pt("6.1. Reclamațiile se notifică în timp de 14 zile după recepția mărfii; Cumpărătorul informează Vânzătorul despre abaterile cantitativ-calitative determinate de elevatorul gazdă. Orice reclamație ulterioară se consideră nulă.")}
+    <p class="of-just of-b" style="text-align:center;">7. ÎNCETAREA CONTRACTULUI</p>
+    ${pt("7.1. Contractul încetează de plin drept la neexecutarea unei obligații esențiale sau la insolvabilitatea uneia dintre părți; poate fi reziliat prin înțelegere scrisă sau unilateral de către Cumpărător, cu preaviz de 15 zile calendaristice.")}
+    ${pt("7.2. Contractul <b>nu poate fi cesionat</b> fără acordul scris al Cumpărătorului.")}
+    ${pt("7.3. Părțile sunt exonerate de răspundere în caz de <b>forță majoră</b>, dovedită conform legii.")}
+    <p class="of-just of-b" style="text-align:center;">8. SOLUȚIONAREA LITIGIILOR ȘI ALTE CLAUZE FINALE</p>
+    ${pt("8.1. Neînțelegerile se rezolvă pe cale amiabilă, iar în caz contrar de instanța competentă, conform legislației Republicii Moldova.")}
+    ${pt("8.2. Contractul este întocmit în două exemplare, câte unul pentru fiecare parte, cu aceeași valoare juridică.")}
+    ${pt("8.3. Prezentul contract are aceeași valoare juridică pentru orice livrare efectuată de Vânzător, indiferent de actele de întocmire a livrării (anexă la contract, act de primire-predare, factură fiscală, act de verificare etc.).")}
     <table style="width:100%;margin-top:16px;border-collapse:collapse;font-size:11px;"><tr>
       <td style="width:50%;vertical-align:top;padding-right:10px;">
         <div class="of-b">CUMPĂRĂTOR</div>
