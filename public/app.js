@@ -5836,6 +5836,14 @@ async function printAccountingDocument(docType, refId, companyId) {
       const partner = findPartnerById(refId);
       if (!partner) { alert("Selectează un furnizor."); return; }
       openOfficialDocWindow(buildSaleContractHtml(partner, company), `Contract ${partner.name}`);
+    } else if (docType.startsWith("delivery")) {
+      // Formele de livrare folosesc datele livrării (vânzător/cumpărător) — reutilizăm
+      // printDeliveryDocument, care le tipărește deja în fereastra oficială.
+      const map = { deliveryInvoice: "invoice", deliveryCertificate: "certificate", deliveryCmr: "cmr", deliveryImputernicire: "imputernicire" };
+      const dt = map[docType];
+      if (!dt) return;
+      if (!refId) { alert("Selectează livrarea."); return; }
+      printDeliveryDocument(refId, dt);
     }
   } catch (error) {
     alert(error.message || "Nu am putut genera documentul.");
@@ -6896,6 +6904,9 @@ function fillPrintDocRef() {
   const showPeriod = type === "purchaseAct";
   if (fromWrap) fromWrap.hidden = !showPeriod;
   if (toWrap) toWrap.hidden = !showPeriod;
+  // Compania emitentă nu se aplică formelor de livrare (folosesc vânzătorul din livrare) — o ascundem.
+  const companyWrap = document.getElementById("print-doc-company")?.closest("label");
+  if (companyWrap) companyWrap.hidden = type.startsWith("delivery");
   let options = [];
   if (type === "purchaseAct") {
     if (labelEl) labelEl.textContent = "Furnizorul";
@@ -6919,6 +6930,13 @@ function fillPrintDocRef() {
       .slice()
       .sort((a, b) => new Date(b.createdAt || b.transactedAt) - new Date(a.createdAt || a.transactedAt))
       .map((t) => ({ value: t.id, label: `#${t.id} · ${formatDateShort(t.createdAt || t.transactedAt)} · ${t.partner || "-"} · ${moneyRo(t.amount)} lei` }));
+  } else if (type.startsWith("delivery")) {
+    // Formele de livrare (Invoice/Certificat/CMR/Împuternicire): alegi LIVRAREA.
+    if (labelEl) labelEl.textContent = "Livrarea";
+    options = (deliveriesCache || [])
+      .slice()
+      .sort((a, b) => new Date(b.invoiceDate || b.createdAt) - new Date(a.invoiceDate || a.createdAt))
+      .map((d) => ({ value: d.id, label: `#${d.id} · ${formatDateShort(d.invoiceDate || d.createdAt)} · ${d.customer || "-"} · ${d.product || "-"}` }));
   }
   refEl.innerHTML = options.length
     ? options.map((o) => `<option value="${escapeComboHtml(String(o.value))}">${escapeComboHtml(o.label)}</option>`).join("")
