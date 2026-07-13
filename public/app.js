@@ -3581,6 +3581,7 @@ function getEditorSchema(entity) {
         { name: "unit", label: "Unitate", type: "text" },
         { name: "humidityNorm", label: "Norma umiditate", type: "number", step: "0.01" },
         { name: "impurityNorm", label: "Norma impuritati", type: "number", step: "0.01" },
+        { name: "cmrDescription", label: "Descriere CMR (caseta 9)", type: "text" },
         commonActiveField
       ]
     },
@@ -6070,21 +6071,35 @@ function buildCmrHtml(delivery) {
   const dateLoad = formatDateShort(delivery.invoiceDate || delivery.createdAt);
   const sender = [seller?.name || delivery.seller, seller?.address, seller?.idno ? "IDNO " + seller.idno : "", "R. Moldova"].filter(Boolean).map(esc).join("<br>");
   const consignee = [buyer?.name || delivery.customer, buyer?.address, buyer?.idno ? "IDNO " + buyer.idno : ""].filter(Boolean).map(esc).join("<br>");
-  const docs = [delivery.invoiceNumber ? "Invoice № " + esc(delivery.invoiceNumber) : "", "Certificat de calitate"].filter(Boolean).join("<br>");
+  // Caseta 5: „Invoice {nr} din {data}" + (opțional) documente/calitate introduse pe livrare.
+  const invLine = delivery.invoiceNumber ? "Invoice " + esc(delivery.invoiceNumber) + " din " + dateLoad : "";
+  const docs = [invLine, esc(delivery.cmrDocuments)].filter(Boolean).join("<br>");
+  // Caseta 9: descrierea CMR din nomenclatorul produsului (dacă e completată), altfel denumirea.
+  const prod = (currentConfig?.products || []).find(
+    (x) => String(x.name).trim().toLowerCase() === String(delivery.product || "").trim().toLowerCase()
+  );
+  const goodsDesc = esc(prod?.cmrDescription || delivery.product);
+  // Locuri de încărcare/descărcare (per livrare); țara încărcării implicit R. Moldova.
+  const loadPlace = esc(delivery.loadingPlace);
+  const loadCountry = esc(delivery.loadingCountry || (delivery.loadingPlace ? "R. Moldova" : ""));
+  const unloadPlace = esc(delivery.unloadingPlace);
+  const unloadCountry = esc(delivery.unloadingCountry);
   // Un câmp poziționat peste formular: [conținut, left%, top%, width%, font-px, aliniere].
   const f = (html, l, t, w, fs, al) =>
     `<div style="position:absolute;left:${l}%;top:${t}%;width:${w}%;font-size:${fs}px;line-height:1.15;text-align:${al || "left"};color:#000;">${html}</div>`;
   const fields = [
     f(sender, 2.5, 4, 44, 8),
     f(consignee, 2.5, 12.8, 44, 8),
-    f(esc(buyer?.address), 9, 20.8, 38, 8),          // caseta 3 — Место разгрузки
-    f("or. Briceni", 9, 26.9, 38, 8),                // caseta 4 — Место
-    f("R. Moldova", 9, 29.2, 38, 8),                 // caseta 4 — Страна
+    f(unloadPlace, 9, 20.8, 38, 8),                  // caseta 3 — Место разгрузки (loc)
+    f(unloadCountry, 9, 23.1, 38, 8),                // caseta 3 — Страна (țară)
+    f(loadPlace, 9, 26.9, 38, 8),                    // caseta 4 — Место (loc încărcare)
+    f(loadCountry, 9, 29.2, 38, 8),                  // caseta 4 — Страна (țară)
     f(dateLoad, 9, 30.9, 38, 8),                     // caseta 4 — Дата
     f(docs, 2.5, 35.2, 44, 8),                       // caseta 5
-    f(esc(delivery.product), 41, 42.5, 20, 8),       // caseta 9
-    f(actNum(grossKg, 0), 73.5, 42.5, 11, 8, "right"), // caseta 11
-    f("or. Briceni", 10, 67.5, 18, 8),               // caseta 21 — loc
+    f("vrac", 28.5, 43, 11, 8),                      // caseta 8 — ambalaj (în vrac)
+    f(goodsDesc, 41, 42, 30, 7),                     // caseta 9 — descrierea mărfii
+    f(actNum(grossKg, 0), 73.5, 42.5, 11, 8, "right"), // caseta 11 — greutate marfă
+    f(loadPlace, 10, 67.5, 18, 8),                   // caseta 21 — loc (din caseta 4)
     f(dateLoad, 40, 67.5, 15, 8),                    // caseta 21 — dată
     f(esc(delivery.vehicle), 13, 79.7, 25, 7),       // caseta 25 — Тягач
     f(esc(delivery.trailer), 13, 81.7, 25, 7)        // caseta 25 — Полуприцеп
@@ -7696,6 +7711,11 @@ if (deliveryBillingDialog && deliveryBillingForm) {
     f.elements.currency.value = delivery.currency || "MDL";
     f.elements.vehicle.value = delivery.vehicle || "";
     if (f.elements.trailer) f.elements.trailer.value = delivery.trailer || "";
+    if (f.elements.loadingPlace) f.elements.loadingPlace.value = delivery.loadingPlace || "";
+    if (f.elements.loadingCountry) f.elements.loadingCountry.value = delivery.loadingCountry || "";
+    if (f.elements.unloadingPlace) f.elements.unloadingPlace.value = delivery.unloadingPlace || "";
+    if (f.elements.unloadingCountry) f.elements.unloadingCountry.value = delivery.unloadingCountry || "";
+    if (f.elements.cmrDocuments) f.elements.cmrDocuments.value = delivery.cmrDocuments || "";
     f.elements.note.value = delivery.note || "";
     if (f.elements.vatRate) f.elements.vatRate.value = delivery.vatRate !== undefined && delivery.vatRate !== null ? String(delivery.vatRate) : "-";
     billingDelivery = delivery; // memorăm livrarea pentru calculul TVA (cantitate)
@@ -7744,6 +7764,11 @@ if (deliveryBillingDialog && deliveryBillingForm) {
       vatRate: f.elements.vatRate ? f.elements.vatRate.value : "-",
       vehicle: f.elements.vehicle.value,
       trailer: f.elements.trailer ? f.elements.trailer.value : "",
+      loadingPlace: f.elements.loadingPlace ? f.elements.loadingPlace.value : "",
+      loadingCountry: f.elements.loadingCountry ? f.elements.loadingCountry.value : "",
+      unloadingPlace: f.elements.unloadingPlace ? f.elements.unloadingPlace.value : "",
+      unloadingCountry: f.elements.unloadingCountry ? f.elements.unloadingCountry.value : "",
+      cmrDocuments: f.elements.cmrDocuments ? f.elements.cmrDocuments.value : "",
       note: f.elements.note.value,
       changeReason: "Completare date factura",
       changedBy: "dashboard"

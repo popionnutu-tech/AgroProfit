@@ -1397,6 +1397,7 @@ function normalizeEntityPayload(entity, payload) {
         unit: requiredText(payload.unit || "tone", "Unitatea de masura"),
         humidityNorm: sanitizeNumber(payload.humidityNorm),
         impurityNorm: sanitizeNumber(payload.impurityNorm),
+        cmrDescription: String(payload.cmrDescription || "").trim(),
         active: sanitizeBoolean(payload.active ?? true)
       };
     case "storageLocations":
@@ -3070,6 +3071,22 @@ async function updateDelivery(id, payload = {}) {
   }
   if (payload.trailer !== undefined) {
     delivery.trailer = String(payload.trailer || "").trim();
+  }
+  // Câmpuri CMR (per livrare): loc încărcare/descărcare + țară + documente/calitate (caseta 5).
+  if (payload.loadingPlace !== undefined) {
+    delivery.loadingPlace = String(payload.loadingPlace || "").trim();
+  }
+  if (payload.loadingCountry !== undefined) {
+    delivery.loadingCountry = String(payload.loadingCountry || "").trim();
+  }
+  if (payload.unloadingPlace !== undefined) {
+    delivery.unloadingPlace = String(payload.unloadingPlace || "").trim();
+  }
+  if (payload.unloadingCountry !== undefined) {
+    delivery.unloadingCountry = String(payload.unloadingCountry || "").trim();
+  }
+  if (payload.cmrDocuments !== undefined) {
+    delivery.cmrDocuments = String(payload.cmrDocuments || "").trim();
   }
   // Recompute priceLei = preț valută × curs (if both present)
   if (payload.priceForeign !== undefined || payload.exchangeRate !== undefined) {
