@@ -6062,69 +6062,126 @@ function buildCmrHtml(delivery) {
   const buyer = getBuyerPartner(delivery);
   const money = deliveryInvoiceTotals(delivery);
   const grossKg = money.kg || Math.round(deliveryQtyTonnes(delivery) * 1000);
-  const auto = `${delivery.vehicle || ""}${delivery.trailer ? " + " + delivery.trailer : ""}`.trim();
-  const partyText = (partner, nameFallback) => escapeComboHtml(
-    [nameFallback || partner?.name, partner?.address, partner?.idno ? "IDNO " + partner.idno : ""].filter(Boolean).join(", ")
-  );
+  const esc = (v) => escapeComboHtml(v == null ? "" : String(v));
   const dateLoad = formatDateShort(delivery.invoiceDate || delivery.createdAt);
-  const docs = [delivery.invoiceNumber ? "Invoice № " + delivery.invoiceNumber : "", "Certificat de calitate"].filter(Boolean).join(", ");
-  // Casetă CMR: număr + etichetă RU + DE (în stânga sus), conținut dedesubt.
-  const bx = (n, ru, de, val, h) => `<td style="border:1px solid #000;padding:2px 5px;vertical-align:top;font-size:8.5px;${h ? "height:" + h + ";" : ""}">
-      <span style="font-weight:bold;">${n}</span> ${ru}<br><i style="color:#333;">${de}</i>
-      <div style="font-size:10.5px;color:#000;margin-top:2px;">${val || ""}</div></td>`;
+  const sender = [seller?.name || delivery.seller, seller?.address, seller?.idno ? "IDNO " + seller.idno : "", "R. Moldova"].filter(Boolean).map(esc).join("<br>");
+  const consignee = [buyer?.name || delivery.customer, buyer?.address, buyer?.idno ? "IDNO " + buyer.idno : ""].filter(Boolean).map(esc).join("<br>");
+  const docs = [delivery.invoiceNumber ? "Invoice № " + delivery.invoiceNumber : "", "Certificat de calitate"].filter(Boolean).map(esc).join("<br>");
+  const B = "border:1px solid #000;";
+  // Eticheta unei casete: numărul mare + text RU + DE (mic, italic).
+  const lb = (n, ru, de) => `<span style="font-weight:bold;font-size:10px;">${n}</span> <span style="font-size:6.5px;">${ru}${de ? "<br><i>" + de + "</i>" : ""}</span>`;
+  const v = (val) => `<div style="font-size:9.5px;margin-top:2px;">${val || ""}</div>`;
+  const payRows = ["Ставка / Fracht", "Скидки / Ermäßigungen", "Разность / Zwischensumme", "Надбавки / Zuschläge", "Доп. сборы / Nebengebühren", "Прочие / Sonstiges", "Итого / Zu zahlende"]
+    .map((r) => `<tr><td style="${B}padding:2px 3px;">${r}</td><td style="${B}"></td><td style="${B}"></td><td style="${B}"></td></tr>`).join("");
   return `
-    <div class="of-c" style="font-weight:bold;font-size:12px;letter-spacing:2px;margin-bottom:4px;">CMR</div>
-    <table style="width:100%;border-collapse:collapse;">
+    <table style="width:100%;border-collapse:collapse;table-layout:fixed;">
+      <colgroup><col style="width:62%"><col style="width:38%"></colgroup>
       <tr>
-        ${bx(1, "Отправитель (наименование, адрес, страна)", "Absender (Name, Anschrift, Land)", partyText(seller, delivery.seller), "56px")}
-        <td style="border:1px solid #000;padding:3px 5px;vertical-align:top;text-align:center;font-size:8px;line-height:1.3;width:38%;">
-          Международная товарно-транспортная накладная<br><i>Internationaler Frachtbrief</i>
-          <div style="font-weight:bold;font-size:13px;letter-spacing:3px;margin:2px 0;">CMR</div>
-          <div style="font-size:7px;text-align:justify;">Данная перевозка, несмотря ни на какие прочие договоры, осуществляется в соответствии с условиями Конвенции о договоре международной дорожной перевозки грузов (КДПГ). / Diese Beförderung unterliegt den Bestimmungen des Übereinkommens (CMR).</div>
+        <td style="padding:0;vertical-align:top;">
+          <table style="width:100%;border-collapse:collapse;">
+            <tr><td style="${B}height:80px;padding:2px 4px;vertical-align:top;">${lb("1", "Отправитель (наименование, адрес, страна)", "Absender (Name, Anschrift, Land)")}${v(sender)}</td></tr>
+            <tr><td style="${B}height:74px;padding:2px 4px;vertical-align:top;">${lb("2", "Получатель (наименование, адрес, страна)", "Empfänger (Name, Anschrift, Land)")}${v(consignee)}</td></tr>
+            <tr><td style="${B}padding:2px 4px;vertical-align:top;">${lb("3", "Место разгрузки груза", "Auslieferungsort des Gutes")}
+              <div style="font-size:6.5px;border-top:1px solid #000;margin-top:3px;padding-top:1px;">Место / Ort <span style="font-size:9.5px;">${esc(buyer?.address)}</span></div>
+              <div style="font-size:6.5px;border-top:1px solid #000;padding-top:1px;">Страна / Land</div></td></tr>
+            <tr><td style="${B}padding:2px 4px;vertical-align:top;">${lb("4", "Место и дата погрузки груза", "Ort und Tag der Übernahme des Gutes")}
+              <div style="font-size:6.5px;border-top:1px solid #000;margin-top:3px;padding-top:1px;">Место / Ort <span style="font-size:9.5px;">or. Briceni</span></div>
+              <div style="font-size:6.5px;border-top:1px solid #000;padding-top:1px;">Страна / Land <span style="font-size:9.5px;">R. Moldova</span></div>
+              <div style="font-size:6.5px;border-top:1px solid #000;padding-top:1px;">Дата / Datum <span style="font-size:9.5px;">${dateLoad}</span></div></td></tr>
+            <tr><td style="${B}height:50px;padding:2px 4px;vertical-align:top;">${lb("5", "Прилагаемые документы", "Beigefügte Dokumente")}${v(docs)}</td></tr>
+          </table>
+        </td>
+        <td style="padding:0;vertical-align:top;">
+          <table style="width:100%;border-collapse:collapse;">
+            <tr><td style="${B}padding:3px;vertical-align:top;text-align:center;">
+              <div style="font-size:7px;">Международная товарно-транспортная накладная<br><i>Internationaler Frachtbrief</i></div>
+              <div style="font-weight:bold;font-size:17px;letter-spacing:4px;margin:3px 0;">CMR</div>
+              <div style="font-size:6px;text-align:justify;">Данная перевозка, несмотря ни на какие прочие договоры, осуществляется в соответствии с условиями Конвенции КДПГ. / Diese Beförderung unterliegt den Bestimmungen des Übereinkommens (CMR).</div>
+            </td></tr>
+            <tr><td style="${B}height:80px;padding:2px 4px;vertical-align:top;">${lb("16", "Перевозчик (наименование, адрес, страна)", "Frachtführer (Name, Anschrift, Land)")}</td></tr>
+            <tr><td style="${B}height:48px;padding:2px 4px;vertical-align:top;">${lb("17", "Последующий перевозчик", "Nachfolgende Frachtführer")}</td></tr>
+            <tr><td style="${B}height:74px;padding:2px 4px;vertical-align:top;">${lb("18", "Оговорки и замечания перевозчика", "Vorbehalte und Bemerkungen der Frachtführer")}</td></tr>
+          </table>
         </td>
       </tr>
-      <tr>
-        ${bx(2, "Получатель (наименование, адрес, страна)", "Empfänger (Name, Anschrift, Land)", partyText(buyer, delivery.customer), "50px")}
-        ${bx(16, "Перевозчик (наименование, адрес, страна)", "Frachtführer (Name, Anschrift, Land)", "", "50px")}
-      </tr>
-      <tr>
-        ${bx(3, "Место разгрузки груза", "Auslieferungsort des Gutes", escapeComboHtml(buyer?.address || ""), "42px")}
-        ${bx(17, "Последующий перевозчик", "Nachfolgende Frachtführer", "", "42px")}
-      </tr>
-      <tr>
-        ${bx(4, "Место и дата погрузки груза", "Ort und Tag der Übernahme des Gutes", "or. Briceni, R. Moldova &nbsp; " + dateLoad, "42px")}
-        ${bx(18, "Оговорки и замечания перевозчика", "Vorbehalte und Bemerkungen der Frachtführer", "", "42px")}
-      </tr>
-      <tr>${bx(5, "Прилагаемые документы", "Beigefügte Dokumente", escapeComboHtml(docs), "34px").replace("<td ", "<td colspan=\"2\" ")}</tr>
     </table>
-    <table style="width:100%;border-collapse:collapse;border-top:0;">
-      <thead><tr style="font-size:8px;">
-        <th style="border:1px solid #000;padding:2px;">6 Знаки и номера<br><i>Kennzeichen</i></th>
-        <th style="border:1px solid #000;padding:2px;">7 Кол-во мест<br><i>Anzahl</i></th>
-        <th style="border:1px solid #000;padding:2px;">8 Род упаковки<br><i>Verpackung</i></th>
-        <th style="border:1px solid #000;padding:2px;">9 Наименование груза<br><i>Bezeichnung des Gutes</i></th>
-        <th style="border:1px solid #000;padding:2px;">11 Вес брутто, кг<br><i>Bruttogew., kg</i></th>
-        <th style="border:1px solid #000;padding:2px;">12 Объем, м³<br><i>Umfang</i></th>
-      </tr></thead>
-      <tbody><tr style="font-size:10px;height:60px;">
-        <td style="border:1px solid #000;padding:3px;vertical-align:top;"></td>
-        <td style="border:1px solid #000;padding:3px;vertical-align:top;text-align:center;">навалом</td>
-        <td style="border:1px solid #000;padding:3px;vertical-align:top;text-align:center;">В вирак</td>
-        <td style="border:1px solid #000;padding:3px;vertical-align:top;">${escapeComboHtml(delivery.product || "")}</td>
-        <td style="border:1px solid #000;padding:3px;vertical-align:top;text-align:right;">${actNum(grossKg, 0)}</td>
-        <td style="border:1px solid #000;padding:3px;vertical-align:top;"></td>
-      </tr></tbody>
+    <table style="width:100%;border-collapse:collapse;table-layout:fixed;">
+      <tr style="vertical-align:top;">
+        <td style="${B}padding:2px 3px;width:15%;">${lb("6", "Знаки и номера", "Kennzeichen und Nummern")}</td>
+        <td style="${B}padding:2px 3px;width:9%;">${lb("7", "Кол-во мест", "Anzahl der Packstücke")}</td>
+        <td style="${B}padding:2px 3px;width:13%;">${lb("8", "Род упаковки", "Art der Verpackung")}</td>
+        <td style="${B}padding:2px 3px;width:31%;">${lb("9", "Наименование груза", "Bezeichnung des Gutes")}</td>
+        <td style="${B}padding:2px 3px;width:11%;">${lb("10", "Статист. №", "Statistik-Nr.")}</td>
+        <td style="${B}padding:2px 3px;width:12%;">${lb("11", "Вес брутто, кг", "Bruttogew., kg")}</td>
+        <td style="${B}padding:2px 3px;width:9%;">${lb("12", "Объем, м³", "Umfang")}</td>
+      </tr>
+      <tr style="vertical-align:top;height:64px;font-size:9.5px;">
+        <td style="${B}padding:3px;"></td>
+        <td style="${B}padding:3px;text-align:center;">навалом</td>
+        <td style="${B}padding:3px;text-align:center;">насыпью</td>
+        <td style="${B}padding:3px;">${esc(delivery.product)}</td>
+        <td style="${B}padding:3px;"></td>
+        <td style="${B}padding:3px;text-align:right;">${actNum(grossKg, 0)}</td>
+        <td style="${B}padding:3px;"></td>
+      </tr>
+      <tr style="font-size:6.5px;">
+        <td style="${B}padding:1px 3px;">Класс / Klasse</td>
+        <td style="${B}padding:1px 3px;">Цифра / Zifer</td>
+        <td style="${B}padding:1px 3px;">Буква / Buchst.</td>
+        <td style="${B}padding:1px 3px;" colspan="4">ДОПОЛ. / ADR</td>
+      </tr>
     </table>
-    <table style="width:100%;border-collapse:collapse;border-top:0;">
+    <table style="width:100%;border-collapse:collapse;table-layout:fixed;">
+      <colgroup><col style="width:62%"><col style="width:38%"></colgroup>
       <tr>
-        ${bx(13, "Указания отправителя", "Anweisungen des Absenders", "", "40px")}
-        ${bx(21, "Составлен в / Ort und Tag der Ausstellung", "", "or. Briceni &nbsp; " + dateLoad, "40px")}
+        <td style="padding:0;vertical-align:top;">
+          <table style="width:100%;border-collapse:collapse;">
+            <tr><td style="${B}height:56px;padding:2px 4px;vertical-align:top;">${lb("13", "Указания отправителя (таможенная и прочая обработка)", "Anweisungen des Absenders")}</td></tr>
+            <tr><td style="${B}padding:2px 4px;vertical-align:top;font-size:6.5px;">Объявленная стоимость груза / Adgabe des Wertes des Gutes</td></tr>
+            <tr><td style="${B}padding:2px 4px;vertical-align:top;">${lb("14", "Возврат", "Rückerstattung")}</td></tr>
+            <tr><td style="${B}padding:2px 4px;vertical-align:top;">${lb("15", "Условия оплаты", "Frachtzahlungsanweisungen")}
+              <div style="font-size:6.5px;margin-top:2px;">франко / Frei &nbsp;&nbsp;·&nbsp;&nbsp; нефранко / Unfrei</div></td></tr>
+          </table>
+        </td>
+        <td style="padding:0;vertical-align:top;">
+          <table style="width:100%;border-collapse:collapse;font-size:6px;">
+            <tr style="text-align:center;">
+              <td style="${B}padding:1px 2px;">${lb("19", "Подлежит оплате", "Zu zahlen vom")}</td>
+              <td style="${B}padding:1px 2px;">Отправитель<br>Absender</td>
+              <td style="${B}padding:1px 2px;">Валюта<br>Währung</td>
+              <td style="${B}padding:1px 2px;">Получатель<br>Empfänger</td>
+            </tr>
+            ${payRows}
+          </table>
+          <table style="width:100%;border-collapse:collapse;">
+            <tr><td style="${B}height:34px;padding:2px 4px;vertical-align:top;">${lb("20", "Особые согласованные условия", "Besondere Vereinbarungen")}</td></tr>
+          </table>
+        </td>
       </tr>
-      <tr>
-        ${bx(22, "Подпись и штамп отправителя", "Unterschrift und Stempel des Absenders", "", "56px")}
-        ${bx(23, "Подпись и штамп перевозчика", "Unterschrift und Stempel des Frachtführers", "", "56px")}
+    </table>
+    <table style="width:100%;border-collapse:collapse;table-layout:fixed;">
+      <colgroup><col style="width:62%"><col style="width:38%"></colgroup>
+      <tr style="vertical-align:top;">
+        <td style="${B}padding:2px 4px;">${lb("21", "Составлена в", "Ausgefertigt in")} <span style="font-size:9.5px;">or. Briceni</span> &nbsp; <span style="font-size:6.5px;">Дата / am</span> <span style="font-size:9.5px;">${dateLoad}</span></td>
+        <td style="${B}padding:2px 4px;">${lb("24", "Груз получен", "Gut empfangen")} <span style="font-size:6.5px;">Дата / Datum</span></td>
       </tr>
-      <tr>${bx(24, "Груз получен / Gut empfangen — дата, подпись и штамп получателя", "", "", "48px").replace("<td ", "<td colspan=\"2\" ")}</tr>
+    </table>
+    <table style="width:100%;border-collapse:collapse;table-layout:fixed;">
+      <tr style="vertical-align:top;height:46px;">
+        <td style="${B}padding:2px 4px;width:33.3%;font-size:6.5px;"><span style="font-weight:bold;font-size:10px;">22</span> Подпись и штамп отправителя<br><i>Unterschrift und Stempel des Absenders</i></td>
+        <td style="${B}padding:2px 4px;width:33.3%;font-size:6.5px;"><span style="font-weight:bold;font-size:10px;">23</span> Подпись и штамп перевозчика<br><i>Unterschrift und Stempel des Frachtführers</i></td>
+        <td style="${B}padding:2px 4px;width:33.4%;font-size:6.5px;">Подпись и штамп получателя<br><i>Unterschrift und Stempel des Empfängers</i></td>
+      </tr>
+    </table>
+    <table style="width:100%;border-collapse:collapse;table-layout:fixed;">
+      <tr style="vertical-align:top;font-size:6.5px;">
+        <td style="${B}padding:2px 4px;width:40%;">${lb("25", "Регистрац. номер", "Amtl. Kennzeichen")}
+          <div style="margin-top:2px;">Тягач / Kfz <span style="font-size:9.5px;">${esc(delivery.vehicle)}</span></div>
+          <div>Полуприцеп / Anhänger <span style="font-size:9.5px;">${esc(delivery.trailer)}</span></div></td>
+        <td style="${B}padding:2px 4px;width:30%;">${lb("26", "Марка / Тур", "")}
+          <div style="margin-top:2px;">Тягач / Kfz</div><div>Полуприцеп / Anhänger</div></td>
+        <td style="${B}padding:2px 4px;width:30%;">${lb("27", "Тариф", "Tarif")} — расстояние, коэфф., доплаты, сумма</td>
+      </tr>
     </table>`;
 }
 
