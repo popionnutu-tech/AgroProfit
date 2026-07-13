@@ -3555,6 +3555,12 @@ function getEditorSchema(entity) {
         { name: "product", label: "Produs", type: "text" },
         { name: "originCountry", label: "Țara de origine", type: "text" },
         { name: "harvestYear", label: "An recoltă", type: "text" },
+        { name: "grainType", label: "Tipul", type: "text" },
+        { name: "subtype", label: "Subtipul", type: "text" },
+        { name: "grainClass", label: "Clasa", type: "text" },
+        { name: "quality", label: "Calitatea", type: "text" },
+        { name: "color", label: "Culoare", type: "text" },
+        { name: "smell", label: "Miros", type: "text" },
         { name: "humidity", label: "Umiditate %", type: "number", step: "0.01" },
         { name: "aflatoxinB1", label: "Aflatoxina B1", type: "text" },
         { name: "impuritiesTotal", label: "Impurități totale %", type: "number", step: "0.01" },
@@ -5861,49 +5867,54 @@ function buildInvoicePrintHtml(delivery) {
   const buyer = getBuyerPartner(delivery);
   const money = deliveryInvoiceTotals(delivery);
   const cur = money.cur;
-  // Pe factură: MDL → kg × lei/kg;  valută → tone × preț/tonă (cum se scrie în contractul de export)
-  const qtyDisplay = money.isForeign ? money.tonnes : money.kg;
-  const qtyUnit = money.isForeign ? "tone" : "kg";
-  const priceUnit = money.isForeign ? "tonă" : "kg";
-  const unitPrice = money.isForeign ? money.unitForeign : money.unitLei;
-  const total = money.isForeign ? money.totalForeign : money.totalLei;
+  // Pe factură (ca în modelul de export): greutate în tone, preț/tonă și sumă în valuta facturii.
   const totalLei = money.totalLei;
-  const code = getProductCode(delivery.product);
-  return `${docHeader()}
-    <div class="doc-title">Invoice / Factură</div>
-    <div class="doc-subtitle">Nr. ${delivery.invoiceNumber || "—"} · ${formatDateShort(delivery.invoiceDate || delivery.createdAt)}${delivery.contractNumber ? " · Contract " + delivery.contractNumber : ""}</div>
-    <div class="doc-parties">
-      <div class="doc-party"><h4>Exportator (vânzător)</h4><div><b>${delivery.seller || seller?.name || "-"}</b></div>${seller?.idno ? `<div>IDNO: ${seller.idno}</div>` : ""}${seller?.address ? `<div>${seller.address}</div>` : ""}${seller?.iban ? `<div>IBAN: ${seller.iban}</div>` : ""}</div>
-      <div class="doc-party"><h4>Destinatar (cumpărător)</h4><div><b>${delivery.customer || buyer?.name || "-"}</b></div>${buyer?.idno ? `<div>IDNO: ${buyer.idno}</div>` : ""}${buyer?.address ? `<div>${buyer.address}</div>` : ""}</div>
-    </div>
-    <div class="doc-grid"><div><b>AUTO (mașină):</b> ${delivery.vehicle || "-"}${delivery.trailer ? " + remorcă " + delivery.trailer : ""}</div><div><b>Valuta:</b> ${cur}</div></div>
-    <table class="doc-table">
-      <thead><tr><th>Denumirea mărfii</th><th>Greutate (${qtyUnit})</th><th>Preț/${priceUnit} în ${cur}</th><th>Sumă în ${cur}</th></tr></thead>
-      <tbody><tr><td>${code ? code + " - " : ""}${delivery.product}</td><td>${formatNumber(qtyDisplay)}</td><td>${moneyRo(unitPrice)}</td><td>${moneyRo(total)}</td></tr></tbody>
-      <tfoot><tr><td colspan="3">TOTAL pe invoice</td><td>${moneyRo(total)} ${cur}</td></tr></tfoot>
-    </table>
-    ${buildInvoiceVatBlock(delivery, totalLei)}
-    ${money.isForeign ? `<div style="font-size:12px;text-align:right;">Echivalent în lei (curs ${moneyRo(delivery.exchangeRate || 0)}): <b>${moneyRo(totalLei)} lei</b></div>` : ""}
-    <div class="doc-sign"><div>Vânzător</div><div>Cumpărător</div></div>`;
-}
+  const tnQty = money.tonnes;
+  const unitPerTn = money.isForeign ? money.unitForeign : (tnQty > 0 ? totalLei / tnQty : 0);
+  const sumCur = money.isForeign ? money.totalForeign : totalLei;
+  const party = (partner, nameFallback) => {
+    if (!partner && !nameFallback) return `<span class="of-fill" style="min-width:320px;"></span>`;
+    const bits = [
+      `<b>${escapeComboHtml(nameFallback || partner?.name || "")}</b>`,
+      partner?.idno ? `IDNO ${escapeComboHtml(partner.idno)}` : "",
+      partner?.address ? escapeComboHtml(partner.address) : ""
+    ].filter(Boolean);
+    return bits.join(", ");
+  };
+  const auto = `${delivery.vehicle || ""}${delivery.trailer ? " + " + delivery.trailer : ""}`.trim();
+  return `
+    <div class="of-title" style="margin-bottom:4px;">Invoice P № ${escapeComboHtml(delivery.invoiceNumber || "____")}</div>
+    <div class="of-row">Data: <span class="of-fill">${formatDateShort(delivery.invoiceDate || delivery.createdAt)}</span></div>
+    <div class="of-row">Contract Nr. <span class="of-fill">${escapeComboHtml(delivery.contractNumber || "____")}</span> din <span class="of-fill">${delivery.contractDate ? formatDateShort(delivery.contractDate) : "________"}</span></div>
 
-// Bloc TVA pe factură (FACT): valoare fără TVA / sumă TVA / total, în lei.
-function buildInvoiceVatBlock(delivery, totalLei) {
-  const vatRaw = delivery.vatRate;
-  if (vatRaw === undefined || vatRaw === null || vatRaw === "-") {
-    return `<div style="font-size:13px;text-align:right;margin-top:8px;">Total factură: <b>${moneyRo(totalLei)} lei</b> (fără TVA)</div>`;
-  }
-  const cota = Number(vatRaw);
-  if (cota === 0) {
-    return `<div style="font-size:13px;text-align:right;margin-top:8px;">Valoare fără TVA: <b>${moneyRo(totalLei)} lei</b> · TVA 0%: 0,00 lei · Total: <b>${moneyRo(totalLei)} lei</b></div>`;
-  }
-  const baza = totalLei / (1 + cota / 100);
-  const tva = totalLei - baza;
-  return `<div style="font-size:13px;text-align:right;margin-top:8px;line-height:1.6;">
-    Valoare totală fără TVA: <b>${moneyRo(baza)} lei</b><br>
-    Suma totală TVA (${cota}%): <b>${moneyRo(tva)} lei</b><br>
-    Total factură: <b>${moneyRo(totalLei)} lei</b>
-  </div>`;
+    <div class="of-row"><span class="of-b">VÂNZĂTOR:</span> ${party(seller, delivery.seller)}</div>
+    <div class="of-row"><span class="of-b">CUMPĂRĂTOR:</span> ${party(buyer, delivery.customer)}</div>
+    <div class="of-row"><span class="of-b">EXPORTATOR:</span> ${party(seller, delivery.seller)}</div>
+    <div class="of-row"><span class="of-b">DESTINATAR:</span> ${party(buyer, delivery.customer)}</div>
+    <div class="of-row">Condiții de livrare: <span class="of-fill" style="min-width:260px;"></span></div>
+    <div class="of-row">AUTO: <span class="of-fill" style="min-width:280px;">${escapeComboHtml(auto)}</span></div>
+
+    <table class="of-tbl">
+      <thead><tr>
+        <th>Denumirea mărfii</th><th>Ambalajul</th><th>Greutatea, tn</th><th>Prețul în ${escapeComboHtml(cur)}</th><th>Suma în ${escapeComboHtml(cur)}</th>
+      </tr></thead>
+      <tbody><tr>
+        <td>${escapeComboHtml(delivery.product || "")}</td>
+        <td class="of-c">În vrac</td>
+        <td class="of-r">${actNum(tnQty, 3)}</td>
+        <td class="of-r">${actNum(unitPerTn, 2)}</td>
+        <td class="of-r">${actNum(sumCur, 2)}</td>
+      </tr></tbody>
+      <tfoot><tr><td class="of-b" colspan="4">Total:</td><td class="of-r of-b">${actNum(sumCur, 2)} ${escapeComboHtml(cur)}</td></tr></tfoot>
+    </table>
+    ${money.isForeign ? `<div class="of-row of-r" style="font-size:10px;">Echivalent în lei (curs ${actNum(delivery.exchangeRate || 0, 4)}): ${actNum(totalLei, 2)} lei</div>` : ""}
+
+    <p class="of-just" style="margin-top:10px;font-size:10px;">„Exportatorul produselor ce fac obiectul acestui document declară că, exceptând cazul în care în mod expres este indicat altfel, aceste produse sunt de origine preferenţială Republica Moldova."</p>
+    <div class="of-row">Or. Briceni, Republica Moldova</div>
+    <div class="of-sign" style="margin-top:22px;">
+      <div class="col">Administrator<div class="ln of-cap">semnătura</div></div>
+      <div class="col"></div>
+    </div>`;
 }
 
 function buildPurchaseActPrintHtml(delivery) {
@@ -5949,35 +5960,52 @@ function buildPurchaseActPrintHtml(delivery) {
 }
 
 function buildCertificatePrintHtml(delivery) {
-  // Find the most relevant lab report for the product
+  // Cel mai recent raport de laborator care se POTRIVEȘTE la produsul livrat. Fără fallback pe alt
+  // produs: dacă produsul (ex. porumb) nu are raport, certificatul rămâne cu câmpurile goale + notă.
   const lab = (currentConfig?.labReports || [])
     .filter((l) => l.active !== false && String(l.product).trim().toLowerCase() === String(delivery.product).trim().toLowerCase())
-    .sort((a, b) => new Date(b.reportDate || 0) - new Date(a.reportDate || 0))[0]
-    || (currentConfig?.labReports || [])[0];
-  if (!lab) {
-    return `${docHeader()}<div class="doc-title">Certificat de calitate</div>
-      <p style="text-align:center;color:#b00;">Nu există date de laborator pentru produsul „${delivery.product}". Adaugă-le în Nomenclator → Date laborator.</p>`;
-  }
-  const rows = [
-    ["Denumirea produsului", lab.product],
-    ["Țara de origine", lab.originCountry],
-    ["Anul recoltei", lab.harvestYear],
-    ["Umiditate, %", lab.humidity],
-    ["Aflatoxina B1", lab.aflatoxinB1],
-    ["Impurități totale, %", lab.impuritiesTotal],
-    ["Impurități diverse, %", lab.impuritiesDiverse],
-    ["Boabe sparte, %", lab.brokenGrains],
-    ["Boabe încolțite, %", lab.sproutedGrains],
-    ["Boabe defecte, %", lab.defectiveGrains],
-    ["Destinația produsului", lab.destination]
-  ].filter(([, v]) => v !== "" && v !== undefined && v !== null)
-   .map(([k, v]) => `<div><b>${k}:</b> ${v}</div>`).join("");
-  return `${docHeader()}
-    <div class="doc-title">Certificat de calitate</div>
-    <div class="doc-subtitle">Raport de încercări nr. ${lab.reportNumber || "—"}${lab.reportDate ? " din " + formatDateShort(lab.reportDate) : ""}</div>
-    <div class="doc-grid">${rows}</div>
-    ${lab.issuedBy ? `<div style="margin-top:14px;font-size:12px;">Eliberat de: <b>${lab.issuedBy}</b>${lab.contactPhone ? " · tel: " + lab.contactPhone : ""}</div>` : ""}
-    <div class="doc-sign"><div>Laborator</div><div>AgroProfit+</div></div>`;
+    .sort((a, b) => new Date(b.reportDate || 0) - new Date(a.reportDate || 0))[0];
+  const seller = getSellerPartner(delivery);
+  const buyer = getBuyerPartner(delivery);
+  const L = lab || {};
+  const money = deliveryInvoiceTotals(delivery);
+  const kg = money.kg || Math.round(deliveryQtyTonnes(delivery) * 1000);
+  const fl = (v, min) => `<span class="of-fill" style="min-width:${min || 90}px;">${escapeComboHtml(v === 0 || v ? String(v) : "")}</span>`;
+  const auto = `${delivery.vehicle || ""}${delivery.trailer ? " + " + delivery.trailer : ""}`.trim();
+  const afla = L.aflatoxinB1 ? escapeComboHtml(L.aflatoxinB1) : "nu s-a depistat";
+  return `
+    <table style="width:100%;border-collapse:collapse;font-size:11px;"><tr>
+      <td style="width:58%;vertical-align:top;">
+        <div class="of-row">Cod Fiscal: ${fl(seller?.idno, 200)}</div>
+        <div class="of-row">Denumirea companiei: ${fl(delivery.seller || seller?.name, 240)}</div>
+      </td>
+      <td style="vertical-align:top;text-align:center;font-size:10px;line-height:1.4;">
+        Aprobat<br>Ministerul Economiei, Comerțului și<br>Agriculturii Moldovei<br>05 Aprilie 2021 nr. 72s<br>Forma tipică Nr. 42
+      </td>
+    </tr></table>
+    <div class="of-title" style="margin-top:10px;">CERTIFICAT<small style="text-transform:none;font-weight:400;">Despre calitatea cerealelor</small></div>
+    <div class="of-row of-c">Nr. ${fl(L.reportNumber, 120)} &nbsp; din ${fl(L.reportDate ? formatDateShort(L.reportDate) : "", 120)}</div>
+
+    <div class="of-row">Denumirea produsului: ${fl(L.product || delivery.product, 260)}</div>
+    <div class="of-row">Țara de Origine: R. Moldova</div>
+    <div class="of-row">Anul recoltei ${fl(L.harvestYear, 80)} &nbsp; Tipul ${fl(L.grainType, 110)} &nbsp; Subtipul ${fl(L.subtype, 120)}</div>
+    <div class="of-row">Clasa ${fl(L.grainClass, 120)} &nbsp; Umiditatea ${fl(L.humidity, 60)} % &nbsp; Calitatea ${fl(L.quality, 120)}</div>
+    <div class="of-row">Culoare ${fl(L.color, 120)} &nbsp; Miros ${fl(L.smell, 120)} &nbsp; Aflatoxina B1 ${afla}</div>
+    <div class="of-row">Impurități totale ${fl(L.impuritiesTotal, 60)} % &nbsp; impurități diverse ${fl(L.impuritiesDiverse, 60)} %</div>
+    <div class="of-row">Boabe sparte ${fl(L.brokenGrains, 60)} % &nbsp; boabe încolțite ${fl(L.sproutedGrains, 60)} %</div>
+    <div class="of-row">Boabe defecte ${fl(L.defectiveGrains, 60)} %</div>
+    <div class="of-row">RAPORT DE ÎNCERCĂRI NR. ${fl(L.reportNumber, 160)}</div>
+    <div class="of-row">Destinația Produsului: ${fl(L.destination, 320)}</div>
+    <div class="of-row">Exportator: ${fl(delivery.seller || seller?.name, 280)}</div>
+    <div class="of-row">Importator: ${fl(delivery.customer || buyer?.name, 280)}</div>
+    <div class="of-row">Cantitate ${fl(kg ? formatNumber(kg) : "", 140)} kg</div>
+    <div class="of-row">Auto: ${fl(auto, 240)}</div>
+    <div class="of-row">Factura nr. ${fl(delivery.invoiceNumber, 130)} din ${fl(delivery.invoiceDate ? formatDateShort(delivery.invoiceDate) : "", 120)}</div>
+    ${!lab ? `<div class="of-row of-cap" style="text-align:left;font-size:9px;">* Nu există date de laborator pentru „${escapeComboHtml(delivery.product || "")}" — câmpurile de calitate rămân goale (completează în Nomenclator → Date laborator).</div>` : ""}
+    <div class="of-sign" style="margin-top:26px;">
+      <div class="col">Director<div class="ln of-cap">semnătura</div></div>
+      <div class="col"></div>
+    </div>`;
 }
 
 // Helpers for delivery print docs (Modul E)
@@ -5994,10 +6022,6 @@ function getBuyerPartner(delivery) {
     if (byId) return byId;
   }
   return findPartnerByName(delivery.customer);
-}
-function getProductCode(productName) {
-  const p = (currentConfig?.products || []).find((x) => String(x.name).trim().toLowerCase() === String(productName || "").trim().toLowerCase());
-  return p?.code || "";
 }
 function deliveryQtyTonnes(delivery) {
   return Number(delivery.netWeight > 0 ? delivery.netWeight : delivery.deliveredQuantity || delivery.plannedQuantity || 0);
@@ -6028,41 +6052,88 @@ function buildBonCantarHtml(delivery) {
 function buildCmrHtml(delivery) {
   const seller = getSellerPartner(delivery);
   const buyer = getBuyerPartner(delivery);
-  const qty = deliveryQtyTonnes(delivery);
-  return `${docHeader()}
-    <div class="doc-title">CMR — Scrisoare de transport</div>
-    <div class="doc-subtitle">Nr. ${delivery.invoiceNumber || delivery.id} · ${formatDateShort(delivery.invoiceDate || delivery.createdAt)}</div>
-    <div class="doc-parties">
-      <div class="doc-party"><h4>Expeditor (vânzător)</h4><div><b>${delivery.seller || seller?.name || "-"}</b></div>${seller?.address ? `<div>${seller.address}</div>` : ""}</div>
-      <div class="doc-party"><h4>Destinatar (cumpărător)</h4><div><b>${delivery.customer || buyer?.name || "-"}</b></div>${buyer?.address ? `<div>${buyer.address}</div>` : ""}</div>
-    </div>
-    <div class="doc-grid">
-      <div><b>Marfă:</b> ${getProductCode(delivery.product) ? getProductCode(delivery.product) + " - " : ""}${delivery.product}</div>
-      <div><b>Greutate netă:</b> ${formatNumber(qty)} t</div>
-      <div><b>Autovehicul:</b> ${delivery.vehicle || "-"}${delivery.trailer ? " + remorcă " + delivery.trailer : ""}</div>
-      <div><b>Contract:</b> ${delivery.contractNumber || "-"}</div>
-    </div>
-    <div class="doc-sign"><div>Expeditor</div><div>Transportator</div></div>
-    <div class="doc-sign" style="margin-top:20px;"><div>Destinatar</div><div></div></div>`;
+  const money = deliveryInvoiceTotals(delivery);
+  const grossKg = money.kg || Math.round(deliveryQtyTonnes(delivery) * 1000);
+  const auto = `${delivery.vehicle || ""}${delivery.trailer ? " + " + delivery.trailer : ""}`.trim();
+  const partyText = (partner, nameFallback) => escapeComboHtml(
+    [nameFallback || partner?.name, partner?.address, partner?.idno ? "IDNO " + partner.idno : ""].filter(Boolean).join(", ")
+  );
+  const dateLoad = formatDateShort(delivery.invoiceDate || delivery.createdAt);
+  const docs = [delivery.invoiceNumber ? "Invoice № " + delivery.invoiceNumber : "", "Certificat de calitate"].filter(Boolean).join(", ");
+  // Casetă CMR: număr + etichetă RU + DE (în stânga sus), conținut dedesubt.
+  const bx = (n, ru, de, val, h) => `<td style="border:1px solid #000;padding:2px 5px;vertical-align:top;font-size:8.5px;${h ? "height:" + h + ";" : ""}">
+      <span style="font-weight:bold;">${n}</span> ${ru}<br><i style="color:#333;">${de}</i>
+      <div style="font-size:10.5px;color:#000;margin-top:2px;">${val || ""}</div></td>`;
+  return `
+    <div class="of-c" style="font-weight:bold;font-size:12px;letter-spacing:2px;margin-bottom:4px;">CMR</div>
+    <table style="width:100%;border-collapse:collapse;">
+      <tr>
+        ${bx(1, "Отправитель (наименование, адрес, страна)", "Absender (Name, Anschrift, Land)", partyText(seller, delivery.seller), "56px")}
+        <td style="border:1px solid #000;padding:3px 5px;vertical-align:top;text-align:center;font-size:8px;line-height:1.3;width:38%;">
+          Международная товарно-транспортная накладная<br><i>Internationaler Frachtbrief</i>
+          <div style="font-weight:bold;font-size:13px;letter-spacing:3px;margin:2px 0;">CMR</div>
+          <div style="font-size:7px;text-align:justify;">Данная перевозка, несмотря ни на какие прочие договоры, осуществляется в соответствии с условиями Конвенции о договоре международной дорожной перевозки грузов (КДПГ). / Diese Beförderung unterliegt den Bestimmungen des Übereinkommens (CMR).</div>
+        </td>
+      </tr>
+      <tr>
+        ${bx(2, "Получатель (наименование, адрес, страна)", "Empfänger (Name, Anschrift, Land)", partyText(buyer, delivery.customer), "50px")}
+        ${bx(16, "Перевозчик (наименование, адрес, страна)", "Frachtführer (Name, Anschrift, Land)", "", "50px")}
+      </tr>
+      <tr>
+        ${bx(3, "Место разгрузки груза", "Auslieferungsort des Gutes", escapeComboHtml(buyer?.address || ""), "42px")}
+        ${bx(17, "Последующий перевозчик", "Nachfolgende Frachtführer", "", "42px")}
+      </tr>
+      <tr>
+        ${bx(4, "Место и дата погрузки груза", "Ort und Tag der Übernahme des Gutes", "or. Briceni, R. Moldova &nbsp; " + dateLoad, "42px")}
+        ${bx(18, "Оговорки и замечания перевозчика", "Vorbehalte und Bemerkungen der Frachtführer", "", "42px")}
+      </tr>
+      <tr>${bx(5, "Прилагаемые документы", "Beigefügte Dokumente", escapeComboHtml(docs), "34px").replace("<td ", "<td colspan=\"2\" ")}</tr>
+    </table>
+    <table style="width:100%;border-collapse:collapse;border-top:0;">
+      <thead><tr style="font-size:8px;">
+        <th style="border:1px solid #000;padding:2px;">6 Знаки и номера<br><i>Kennzeichen</i></th>
+        <th style="border:1px solid #000;padding:2px;">7 Кол-во мест<br><i>Anzahl</i></th>
+        <th style="border:1px solid #000;padding:2px;">8 Род упаковки<br><i>Verpackung</i></th>
+        <th style="border:1px solid #000;padding:2px;">9 Наименование груза<br><i>Bezeichnung des Gutes</i></th>
+        <th style="border:1px solid #000;padding:2px;">11 Вес брутто, кг<br><i>Bruttogew., kg</i></th>
+        <th style="border:1px solid #000;padding:2px;">12 Объем, м³<br><i>Umfang</i></th>
+      </tr></thead>
+      <tbody><tr style="font-size:10px;height:60px;">
+        <td style="border:1px solid #000;padding:3px;vertical-align:top;"></td>
+        <td style="border:1px solid #000;padding:3px;vertical-align:top;text-align:center;">навалом</td>
+        <td style="border:1px solid #000;padding:3px;vertical-align:top;text-align:center;">В вирак</td>
+        <td style="border:1px solid #000;padding:3px;vertical-align:top;">${escapeComboHtml(delivery.product || "")}</td>
+        <td style="border:1px solid #000;padding:3px;vertical-align:top;text-align:right;">${actNum(grossKg, 0)}</td>
+        <td style="border:1px solid #000;padding:3px;vertical-align:top;"></td>
+      </tr></tbody>
+    </table>
+    <table style="width:100%;border-collapse:collapse;border-top:0;">
+      <tr>
+        ${bx(13, "Указания отправителя", "Anweisungen des Absenders", "", "40px")}
+        ${bx(21, "Составлен в / Ort und Tag der Ausstellung", "", "or. Briceni &nbsp; " + dateLoad, "40px")}
+      </tr>
+      <tr>
+        ${bx(22, "Подпись и штамп отправителя", "Unterschrift und Stempel des Absenders", "", "56px")}
+        ${bx(23, "Подпись и штамп перевозчика", "Unterschrift und Stempel des Frachtführers", "", "56px")}
+      </tr>
+      <tr>${bx(24, "Груз получен / Gut empfangen — дата, подпись и штамп получателя", "", "", "48px").replace("<td ", "<td colspan=\"2\" ")}</tr>
+    </table>`;
 }
 
 function buildImputernicireHtml(delivery) {
   const seller = getSellerPartner(delivery);
   const buyer = getBuyerPartner(delivery);
   const qty = deliveryQtyTonnes(delivery);
-  return `${docHeader()}
-    <div class="doc-title">Împuternicire</div>
-    <div class="doc-subtitle">${formatDateShort(delivery.invoiceDate || delivery.createdAt)}</div>
-    <p style="font-size:13px;line-height:1.7;margin:16px 0;">
-      Subscrisa <b>${delivery.seller || seller?.name || "________________"}</b>${seller?.idno ? ` (IDNO ${seller.idno})` : ""},
-      reprezentată prin administrator <b>________________________</b>,
-      împuternicește societatea <b>${delivery.customer || buyer?.name || "________________"}</b>${buyer?.idno ? ` (IDNO ${buyer.idno})` : ""},
-      reprezentată prin administrator <b>________________________</b>,
-      pentru transportul mărfii conform unității de transport <b>${delivery.vehicle || "____________"}${delivery.trailer ? " + remorcă " + delivery.trailer : ""}</b>,
-      în cantitate de <b>${formatNumber(qty)} tone</b> de <b>${delivery.product}</b>,
-      conform datelor din invoice nr. ${delivery.invoiceNumber || "______"} din ${formatDateShort(delivery.invoiceDate || delivery.createdAt)}.
-    </p>
-    <div class="doc-sign"><div>Administrator vânzător</div><div>Administrator cumpărător</div></div>`;
+  const auto = `${delivery.vehicle || ""}${delivery.trailer ? " + " + delivery.trailer : ""}`.trim();
+  const fill = (v, min) => `<span class="of-fill" style="min-width:${min || 160}px;">${escapeComboHtml(v || "")}</span>`;
+  return `
+    <div class="of-title" style="margin-bottom:16px;">ÎMPUTERNICIRE</div>
+    <p class="of-just" style="line-height:1.9;">Subscrisa, ${fill(delivery.seller || seller?.name, 300)}, reprezentată, în calitate de administrator, declară că împuternicește societatea ${fill(delivery.customer || buyer?.name, 300)}, reprezentată de ${fill("", 200)}, în calitate de administrator, să reprezinte pe teritoriul Uniunii Europene în vederea comercializării cerealelor, pentru unitatea de transport ${fill(auto, 180)} — cantitate ${fill(qty ? formatNumber(qty) : "", 90)} tn. Origine Republica Moldova.</p>
+    <div class="of-row" style="margin-top:26px;">Data ${fill("", 180)}</div>
+    <div class="of-sign" style="margin-top:26px;">
+      <div class="col">Administrator<div class="ln of-cap">semnătura</div></div>
+      <div class="col"></div>
+    </div>`;
 }
 
 function buildDeclaratieHtml(delivery) {
@@ -6072,9 +6143,9 @@ function buildDeclaratieHtml(delivery) {
     <div class="doc-title">Declarație</div>
     <div class="doc-subtitle">${formatDateShort(delivery.invoiceDate || delivery.createdAt)}</div>
     <p style="font-size:13px;line-height:1.7;margin:16px 0;">
-      Subscrisa <b>${delivery.seller || seller?.name || "________________"}</b>${seller?.idno ? ` (IDNO ${seller.idno})` : ""}${seller?.address ? `, cu sediul în ${seller.address}` : ""},
-      declară că marfa <b>${delivery.product}</b> livrată conform contractului nr. <b>${delivery.contractNumber || "______"}</b>
-      către <b>${delivery.customer || buyer?.name || "________________"}</b>${buyer?.idno ? ` (IDNO ${buyer.idno})` : ""}
+      Subscrisa <b>${escapeComboHtml(delivery.seller || seller?.name || "________________")}</b>${seller?.idno ? ` (IDNO ${escapeComboHtml(seller.idno)})` : ""}${seller?.address ? `, cu sediul în ${escapeComboHtml(seller.address)}` : ""},
+      declară că marfa <b>${escapeComboHtml(delivery.product || "")}</b> livrată conform contractului nr. <b>${escapeComboHtml(delivery.contractNumber || "______")}</b>
+      către <b>${escapeComboHtml(delivery.customer || buyer?.name || "________________")}</b>${buyer?.idno ? ` (IDNO ${escapeComboHtml(buyer.idno)})` : ""}
       corespunde condițiilor de calitate și provine din surse legale.
     </p>
     <div class="doc-sign"><div>Vânzător</div><div></div></div>`;
@@ -6100,7 +6171,12 @@ function printDeliveryDocument(deliveryId, docType) {
   else if (docType === "cmr") { html = buildCmrHtml(delivery); title = `CMR ${delivery.id}`; }
   else if (docType === "imputernicire") { html = buildImputernicireHtml(delivery); title = `Imputernicire ${delivery.id}`; }
   else if (docType === "declaratie") { html = buildDeclaratieHtml(delivery); title = `Declaratie ${delivery.id}`; }
-  if (html) openPrintWindow(html, title);
+  // Formele refăcute fidel modelelor originale se tipăresc alb-negru, fără antet AgroProfit.
+  const officialDocs = ["invoice", "certificate", "cmr", "imputernicire"];
+  if (html) {
+    if (officialDocs.includes(docType)) openOfficialDocWindow(html, title);
+    else openPrintWindow(html, title);
+  }
   // Close the print dropdown after choosing
   document.querySelectorAll(".print-menu[open]").forEach((d) => d.removeAttribute("open"));
 }
