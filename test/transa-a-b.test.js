@@ -1033,3 +1033,44 @@ test("DOC: allocateDocumentNumber e crescator per tip si idempotent per document
     assert.throws(() => storage.allocateDocumentNumber("purchaseAct", 999999, 1, "contabil"));
   });
 });
+
+test("Redenumire cilindru migreaza referintele -> stocul se muta cu numele nou", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const loc = await storage.createConfigEntry("storageLocations", {
+      name: "Cilindru marfa 1",
+      type: "cilindru",
+      capacity: 2000000,
+      changeReason: "test locatie",
+      changedBy: "admin"
+    });
+    await seedReceipt(storage, { location: "Cilindru marfa 1" });
+
+    let stock = await storage.getStockSummary();
+    assert.ok(
+      stock.byLocation.some((i) => i.location === "Cilindru marfa 1"),
+      "stoc initial la numele vechi"
+    );
+
+    await storage.updateConfigEntry("storageLocations", loc.id, {
+      name: "Cilindru 5",
+      changeReason: "redenumire cilindru",
+      changedBy: "admin"
+    });
+
+    stock = await storage.getStockSummary();
+    assert.ok(
+      stock.byLocation.some((i) => i.location === "Cilindru 5"),
+      "stocul a migrat la numele nou"
+    );
+    assert.ok(
+      !stock.byLocation.some((i) => i.location === "Cilindru marfa 1"),
+      "nimic ramas orfan sub numele vechi"
+    );
+    const receipts = await storage.listReceipts();
+    assert.ok(
+      receipts.every((r) => r.location !== "Cilindru marfa 1"),
+      "referintele receptiilor au fost migrate la numele nou"
+    );
+  });
+});
