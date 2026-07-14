@@ -1116,39 +1116,31 @@ function renderStockByProduct(data) {
   const el = document.getElementById("stock-by-product");
   if (!el) return;
 
-  const byProduct = new Map();
-  let grandTotal = 0;
-  for (const item of data.byLocation || []) {
-    const product = String(item.product || "").trim();
-    if (!product) continue;
-    const qty = Number(item.quantity || 0);
-    grandTotal += qty;
-    const existing = byProduct.get(product) || { qty: 0, locations: new Set() };
-    existing.qty += qty;
-    // Numai locatiile cu stoc real (qty>0) — ca lista sa coincida cu silozurile de sus.
-    if (item.location && qty > 0) existing.locations.add(item.location);
-    byProduct.set(product, existing);
-  }
+  // O linie per LOCAȚIE (produs + locație + cantitate), nu agregat pe produs.
+  const items = (data.byLocation || [])
+    .filter((i) => Number(i.quantity || 0) > 0 && String(i.product || "").trim())
+    .sort((a, b) => {
+      const locCmp = String(a.location || "").localeCompare(String(b.location || ""), "ro", { numeric: true });
+      return locCmp !== 0 ? locCmp : Number(b.quantity || 0) - Number(a.quantity || 0);
+    });
+  const grandTotal = items.reduce((sum, i) => sum + Number(i.quantity || 0), 0);
 
-  if (!byProduct.size) {
+  if (!items.length) {
     el.innerHTML = "";
     return;
   }
 
-  const rows = Array.from(byProduct.entries())
-    .sort((a, b) => b[1].qty - a[1].qty)
-    .map(([product, info]) => {
+  const rows = items
+    .map((i) => {
+      const product = String(i.product || "").trim();
       const palette = getProductPalette(product);
-      const locNames = Array.from(info.locations).sort((a, b) =>
-        String(a).localeCompare(String(b), "ro", { numeric: true })
-      );
-      const locLabel = locNames.length ? locNames.join(", ") : "—";
+      const qty = Number(i.quantity || 0);
       return `
         <tr>
-          <td><span class="sbp-dot" style="background:${palette.fill};border-color:${palette.edge};"></span>${product}</td>
-          <td>${formatNumber(info.qty)} t</td>
-          <td>${formatNumber(info.qty * 1000)} kg</td>
-          <td title="${locNames.length} ${locNames.length === 1 ? "cilindru" : "cilindri"}">${locLabel}</td>
+          <td>${escapeComboHtml(i.location || "—")}</td>
+          <td><span class="sbp-dot" style="background:${palette.fill};border-color:${palette.edge};"></span>${escapeComboHtml(product)}</td>
+          <td>${formatNumber(qty)} t</td>
+          <td>${formatNumber(qty * 1000)} kg</td>
         </tr>
       `;
     })
@@ -1156,13 +1148,13 @@ function renderStockByProduct(data) {
 
   el.innerHTML = `
     <div class="sbp-head">
-      <h3>Stoc total pe produs</h3>
+      <h3>Stoc pe locație</h3>
       <span class="sbp-total">Total: <b>${formatNumber(grandTotal)} t</b> · ${formatNumber(grandTotal * 1000)} kg</span>
     </div>
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>Produs</th><th>Cantitate (t)</th><th>Cantitate (kg)</th><th>Locatii</th></tr>
+          <tr><th>Locație</th><th>Produs</th><th>Cantitate (t)</th><th>Cantitate (kg)</th></tr>
         </thead>
         <tbody>${rows}</tbody>
       </table>
