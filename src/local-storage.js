@@ -3156,6 +3156,10 @@ async function updateDelivery(id, payload = {}) {
   if (payload.cmrDocuments !== undefined) {
     delivery.cmrDocuments = String(payload.cmrDocuments || "").trim();
   }
+  // Umiditatea la livrare (introdusă de operator) — pt. calculul apei față de umiditatea depozitată.
+  if (payload.deliveryHumidity !== undefined) {
+    delivery.deliveryHumidity = sanitizeNumber(payload.deliveryHumidity);
+  }
   // Recompute priceLei = preț valută × curs (if both present)
   if (payload.priceForeign !== undefined || payload.exchangeRate !== undefined) {
     const pf = Number(delivery.priceForeign || 0);
