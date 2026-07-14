@@ -2464,11 +2464,24 @@ dialog.details-dialog { width: min(680px, 94vw); max-height: 88vh; overflow-y: a
 .dot-crit { background: var(--danger); }
 
 .silos-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-  gap: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
   position: relative;
   z-index: 1;
+}
+.silo-row {
+  display: grid;
+  grid-template-columns: repeat(var(--cols, 7), minmax(0, 1fr));
+  gap: 14px;
+}
+.silo-row-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: -10px;
 }
 
 /* Stock totals per product (Etapa 3) */
@@ -2510,10 +2523,10 @@ dialog.details-dialog { width: min(680px, 94vw); max-height: 88vh; overflow-y: a
 }
 
 @media (max-width: 980px) {
-  .silos-grid { grid-template-columns: repeat(2, 1fr); }
+  .silo-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 @media (max-width: 540px) {
-  .silos-grid { grid-template-columns: 1fr; }
+  .silo-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 .silo-card {
@@ -2534,15 +2547,27 @@ dialog.details-dialog { width: min(680px, 94vw); max-height: 88vh; overflow-y: a
 }
 .silo-card-head {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
 }
 .silo-name {
   font-family: var(--font-display);
   font-weight: 700;
-  font-size: 16px;
+  font-size: 15px;
   letter-spacing: -0.02em;
   color: var(--ink);
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.silo-card-head .silo-product {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .silo-pct {
   font-family: var(--font-display);
@@ -2571,9 +2596,13 @@ dialog.details-dialog { width: min(680px, 94vw); max-height: 88vh; overflow-y: a
 .silo-stored-qty {
   font-family: var(--font-display);
   font-weight: 800;
-  font-size: 20px;
+  font-size: 16px;
   letter-spacing: -0.03em;
   color: var(--accent-deep);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .silo-stored-kg {
   font-family: var(--font-mono);
@@ -2614,13 +2643,13 @@ dialog.details-dialog { width: min(680px, 94vw); max-height: 88vh; overflow-y: a
 }
 
 @media (max-width: 980px) {
-  .silos-grid {
-    grid-template-columns: repeat(2, 1fr);
+  .silo-row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 @media (max-width: 540px) {
-  .silos-grid {
-    grid-template-columns: 1fr;
+  .silo-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

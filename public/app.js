@@ -994,9 +994,12 @@ function renderSilosGrid(summary) {
   if (summary) lastStockSummary = summary;
   const data = summary || lastStockSummary || { byLocation: [] };
 
-  const cylinders = (currentConfig?.storageLocations || [])
-    .filter((loc) => loc.active !== false && String(loc.type || "").toLowerCase() === "cilindru")
+  const activeLocs = (currentConfig?.storageLocations || [])
+    .filter((loc) => loc.active !== false)
     .sort((a, b) => Number(a.id) - Number(b.id));
+  const cylinders = activeLocs.filter((loc) => String(loc.type || "").toLowerCase() === "cilindru");
+  // Rândul 2: restul locațiilor active (gropi de primire etc.).
+  const pits = activeLocs.filter((loc) => String(loc.type || "").toLowerCase() !== "cilindru");
 
   // Header dinamic (reflectă numărul real de cilindri + capacitatea totală)
   const titleEl = document.getElementById("silos-title");
@@ -1023,15 +1026,14 @@ function renderSilosGrid(summary) {
     byLocation.set(key, existing);
   }
 
-  silosGridEl.innerHTML = cylinders
-    .map((cyl) => {
+  const siloCard = (cyl) => {
       const state = byLocation.get(cyl.name) || { items: [], total: 0 };
       const productList = state.items
         .filter((i) => Number(i.quantity || 0) > 0)
         .sort((a, b) => Number(b.quantity || 0) - Number(a.quantity || 0));
       const dominantProduct = (productList[0] || {}).product || "";
-      const productsLabel = productList.map((i) => i.product).join(", ");
-      const productsTooltip = productList.map((i) => `${i.product}: ${formatNumber(i.quantity)}t`).join(" · ");
+      const productsLabel = productList.map((i) => escapeComboHtml(i.product)).join(", ");
+      const productsTooltip = productList.map((i) => `${escapeComboHtml(i.product)}: ${formatNumber(i.quantity)}t`).join(" · ");
       const capacity = getLocationCapacity(cyl, dominantProduct);
       const filled = Math.max(0, state.total);
       const pct = capacity > 0 ? Math.min(100, (filled / capacity) * 100) : 0;
@@ -1051,9 +1053,9 @@ function renderSilosGrid(summary) {
         : '<span class="silo-product silo-product-empty">gol</span>';
 
       return `
-        <article class="silo-card${ringClass}" data-id="${cyl.id}" title="${cyl.name} · ${formatNumber(filled)}/${formatNumber(capacity)} t · ${productsTooltip || 'gol'}">
+        <article class="silo-card${ringClass}" data-id="${escapeComboHtml(String(cyl.id))}" title="${escapeComboHtml(cyl.name)} · ${formatNumber(filled)}/${formatNumber(capacity)} t · ${productsTooltip || 'gol'}">
           <div class="silo-card-head">
-            <span class="silo-name">${cyl.name}</span>
+            <span class="silo-name">${escapeComboHtml(cyl.name)}</span>
             ${productHead}
           </div>
           <div class="silo-visual">
@@ -1097,8 +1099,14 @@ function renderSilosGrid(summary) {
           </div>
         </article>
       `;
-    })
-    .join("");
+  };
+  // Randăm două grupuri: rândul 1 = cilindri, rândul 2 = gropi de primire (fiecare pe rândul lui).
+  const group = (locs, label) => {
+    if (!locs.length) return "";
+    const head = label ? `<div class="silo-row-label">${label}</div>` : "";
+    return `${head}<div class="silo-row" style="--cols:${Math.min(8, Math.max(1, locs.length))}">${locs.map(siloCard).join("")}</div>`;
+  };
+  silosGridEl.innerHTML = group(cylinders, pits.length ? "Cilindri" : "") + group(pits, "Gropi de primire");
 
   // Aggregate stock per product across all cylinders (Etapa 3)
   renderStockByProduct(data);
