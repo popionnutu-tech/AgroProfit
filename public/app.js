@@ -2237,6 +2237,47 @@ function deliveryInvoiceTotals(item) {
   return { cur, isForeign, tonnes, kg, unitForeign: 0, unitLei, totalForeign: 0, totalLei: kg * unitLei };
 }
 
+// Indici pentru umiditatea de depozitare (construiți O(recepții) O DATĂ per randare, ca să nu
+// scanăm receiptsCache per rând de livrare — altfel O(livrări × recepții)).
+const normLocKey = (s) => String(s || "").trim().toLowerCase();
+function buildReceiptHumidityIndex() {
+  const receiptById = new Map();
+  const humAgg = new Map(); // "produs|locatie" -> { totQty, totHumQty }
+  for (const r of (receiptsCache || [])) {
+    if (r && r.id != null) receiptById.set(Number(r.id), r);
+    if (!r || r.status === "Anulat" || !(Number(r.humidity) > 0)) continue;
+    const key = r.product + "|" + normLocKey(r.location);
+    const q = Number(r.provisionalNetQuantity || r.quantity || 0) || 1;
+    const acc = humAgg.get(key) || { totQty: 0, totHumQty: 0 };
+    acc.totQty += q;
+    acc.totHumQty += q * Number(r.humidity || 0);
+    humAgg.set(key, acc);
+  }
+  return { receiptById, humAgg };
+}
+
+// Umiditatea „de depozitare" a unei livrări: din recepția-sursă (dacă e legată), altfel media
+// ponderată (pe cantitate) a recepțiilor active cu același produs + locație — ce e în cilindru.
+// `idx` (opțional) = indecșii de mai sus; dacă lipsește, se construiesc pe loc (apel unic).
+function deliveryStorageHumidity(item, idx) {
+  const index = idx || buildReceiptHumidityIndex();
+  if (item.receiptId) {
+    const r = index.receiptById.get(Number(item.receiptId));
+    if (r && Number(r.humidity) > 0) return Number(r.humidity);
+  }
+  const acc = index.humAgg.get(item.product + "|" + normLocKey(item.location));
+  return acc && acc.totQty > 0 ? acc.totHumQty / acc.totQty : 0;
+}
+
+// Apa (kg, cu semn) la livrare = cantitate livrată × (umid. depozitare − umid. livrare)/100.
+// Pozitiv = apă pierdută (s-a uscat); negativ = livrat mai umed. null dacă lipsesc datele.
+function deliveryWaterKg(item, idx) {
+  const dh = Number(item.deliveryHumidity || 0);
+  const sh = deliveryStorageHumidity(item, idx);
+  if (!(dh > 0) || !(sh > 0)) return null;
+  return Math.round((deliveryDisplayQuantity(item) * 1000) * ((sh - dh) / 100));
+}
+
 function renderDeliveries(deliveries) {
   // Livrarea e „Livrat" (confirmata) din momentul crearii → schimbarea statutului
   // (Inchis/Redeschis) e rezervata manager+admin. Anularea (admin) e separat, in docActionsCell.
@@ -2272,6 +2313,7 @@ function renderDeliveries(deliveries) {
     if (!canViewCanceled(item)) return false;
     return true;
   });
+  const waterIdx = buildReceiptHumidityIndex(); // construit o dată, folosit de toate rândurile
   deliveriesBodyEl.innerHTML = filtered
     .map((item) => {
       const status = item.status || "Proiect";
@@ -2305,6 +2347,7 @@ function renderDeliveries(deliveries) {
           <td class="col-fin">${item.seller || "-"}</td>
           <td>${item.product}${photosMini(item.photos)}</td>
           <td>${formatQtyByEntry(qty, item)}</td>
+          <td title="Apă = cantitate × (umid. depozitare − umid. livrare)/100. Pozitiv = pierdută (uscat); negativ = livrat mai umed.">${(() => { const w = deliveryWaterKg(item, waterIdx); return w === null ? "—" : (w >= 0 ? formatNumber(w) : "−" + formatNumber(Math.abs(w))) + " kg"; })()}</td>
           <td>${escapeComboHtml(item.vehicle || "-")}${item.trailer ? ` <span class="trailer-badge">+ ${escapeComboHtml(item.trailer)}</span>` : ""}</td>
           <td class="col-fin">${priceLabel}</td>
           <td class="col-fin">${totalFactura > 0 ? currency.format(totalFactura) : "-"}</td>
@@ -2382,7 +2425,7 @@ function renderDeliveryTotals(rows) {
     : "";
   deliveriesFootEl.innerHTML = `
     <tr class="totals-row">
-      <td colspan="12">TOTAL (${rows.length} livrări) &nbsp;·&nbsp; Cantitate: <b>${formatNumber(totalQty)} t</b>${finPart}<br>${perProduct}</td>
+      <td colspan="13">TOTAL (${rows.length} livrări) &nbsp;·&nbsp; Cantitate: <b>${formatNumber(totalQty)} t</b>${finPart}<br>${perProduct}</td>
     </tr>
   `;
 }
@@ -7822,9 +7865,12 @@ if (deliveryBillingDialog && deliveryBillingForm) {
     if (f.elements.unloadingPlace) f.elements.unloadingPlace.value = delivery.unloadingPlace || "";
     if (f.elements.unloadingCountry) f.elements.unloadingCountry.value = delivery.unloadingCountry || "";
     if (f.elements.cmrDocuments) f.elements.cmrDocuments.value = delivery.cmrDocuments || "";
+    if (f.elements.deliveryHumidity) f.elements.deliveryHumidity.value = delivery.deliveryHumidity || "";
     f.elements.note.value = delivery.note || "";
     if (f.elements.vatRate) f.elements.vatRate.value = delivery.vatRate !== undefined && delivery.vatRate !== null ? String(delivery.vatRate) : "-";
     billingDelivery = delivery; // memorăm livrarea pentru calculul TVA (cantitate)
+    billingWaterIdx = buildReceiptHumidityIndex(); // o dată la deschidere, refolosit la fiecare tastă
+    updateBillingWaterHint(); // după ce billingDelivery + billingWaterIdx sunt setate
     updateBillingPriceLei();
     const idLabel = document.getElementById("billing-delivery-id");
     if (idLabel) idLabel.textContent = `#${delivery.id}`;
@@ -7842,6 +7888,7 @@ if (deliveryBillingDialog && deliveryBillingForm) {
   billingExchangeRate?.addEventListener("input", updateBillingPriceLei);
   billingCurrencySelect?.addEventListener("change", updateBillingPriceLei);
   billingVatSelect?.addEventListener("change", updateBillingPriceLei);
+  deliveryBillingForm?.elements?.deliveryHumidity?.addEventListener("input", updateBillingWaterHint);
 
   const billingCancelBtn = document.getElementById("billing-cancel-btn");
   if (billingCancelBtn) {
@@ -7875,6 +7922,7 @@ if (deliveryBillingDialog && deliveryBillingForm) {
       unloadingPlace: f.elements.unloadingPlace ? f.elements.unloadingPlace.value : "",
       unloadingCountry: f.elements.unloadingCountry ? f.elements.unloadingCountry.value : "",
       cmrDocuments: f.elements.cmrDocuments ? f.elements.cmrDocuments.value : "",
+      deliveryHumidity: f.elements.deliveryHumidity ? f.elements.deliveryHumidity.value : "",
       note: f.elements.note.value,
       changeReason: "Completare date factura",
       changedBy: "dashboard"
@@ -7896,6 +7944,7 @@ if (deliveryBillingDialog && deliveryBillingForm) {
 }
 
 let billingDelivery = null;
+let billingWaterIdx = null; // index umiditate construit o dată la deschiderea dialogului de facturare
 
 // Parsează un număr cu separator zecimal românesc (virgulă): "4,09" -> 4.09.
 // Backend-ul (sanitizeNumber) face la fel; aici e pentru calculul live din dialog.
@@ -7905,6 +7954,26 @@ function parseDecimal(value) {
   if (s.includes(",") && !s.includes(".")) s = s.replace(",", ".");
   const n = Number(s);
   return Number.isFinite(n) ? n : 0;
+}
+
+// Arată în dialogul de facturare umiditatea de depozitare (auto) și apa calculată la livrare.
+function updateBillingWaterHint() {
+  const hintEl = document.getElementById("billing-water-hint");
+  if (!hintEl) return;
+  if (!billingDelivery) { hintEl.textContent = ""; return; }
+  const sh = deliveryStorageHumidity(billingDelivery, billingWaterIdx);
+  if (!(sh > 0)) {
+    hintEl.textContent = "Umiditate depozitare: necunoscută (nu există recepții cu umiditate pentru acest produs/locație).";
+    return;
+  }
+  const input = deliveryBillingForm && deliveryBillingForm.elements.deliveryHumidity;
+  const dh = parseDecimal(input ? input.value : "");
+  const parts = [`Umiditate depozitare (auto): ${formatNumber(sh)}%`];
+  if (dh > 0) {
+    const kg = Math.round((deliveryDisplayQuantity(billingDelivery) * 1000) * ((sh - dh) / 100));
+    parts.push(kg >= 0 ? `→ apă pierdută ${formatNumber(kg)} kg` : `→ apă adăugată ${formatNumber(Math.abs(kg))} kg`);
+  }
+  hintEl.textContent = parts.join(" · ");
 }
 
 function updateBillingPriceLei() {

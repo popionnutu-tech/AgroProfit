@@ -1346,6 +1346,7 @@
                     <th class="col-fin">Vanzator</th>
                     <th>Produs</th>
                     <th>Cantitate</th>
+                    <th>Apă (kg)</th>
                     <th>Masina</th>
                     <th class="col-fin">Pret</th>
                     <th class="col-fin">Sumă factură</th>
@@ -1410,6 +1411,8 @@
             </div>
             <label>Mașină (nr.)<input name="vehicle" list="vehicles-datalist" placeholder="Ex: AG-102" /></label>
             <label>Remorcă (nr.)<input name="trailer" list="vehicles-datalist" placeholder="Ex: AG-103" /></label>
+            <label>Umiditate la livrare (%)<input name="deliveryHumidity" type="text" inputmode="decimal" placeholder="Ex: 12,5" /></label>
+            <p class="field-hint" id="billing-water-hint" style="margin-top:2px;"></p>
             <p class="field-hint" style="margin-top:6px;">Date pentru CMR (caseta 3, 4, 5, 21):</p>
             <div class="split">
               <label>Loc încărcare (caseta 4/21)<input name="loadingPlace" placeholder="Ex: Ungheni" /></label>
