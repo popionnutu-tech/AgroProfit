@@ -4371,6 +4371,36 @@ async function createConfigEntry(entity, payload) {
   return entity === "users" ? sanitizeUserForClient(entry) : entry;
 }
 
+// La REDENUMIREA unei locatii (cilindru) in nomenclator, stocul se calculeaza dupa NUMELE
+// locatiei pe inregistrari — deci trebuie sa migram toate referintele din numele vechi in cel nou,
+// altfel stocul ramane "orfan" sub numele vechi si nu mai apare pe cilindrul redenumit.
+function renameLocationInRecords(state, oldName, newName) {
+  const norm = (s) => String(s || "").trim().toLowerCase();
+  const oldNorm = norm(oldName);
+  if (!oldNorm || !String(newName || "").trim() || norm(newName) === oldNorm) return 0;
+  let count = 0;
+  const swap = (obj, field) => {
+    if (obj && norm(obj[field]) === oldNorm) {
+      obj[field] = newName;
+      count += 1;
+    }
+  };
+  (state.receipts || []).forEach((r) => swap(r, "location"));
+  (state.deliveries || []).forEach((d) => swap(d, "location"));
+  (state.transfers || []).forEach((t) => {
+    swap(t, "fromLocation");
+    swap(t, "toLocation");
+  });
+  (state.processings || []).forEach((p) => {
+    swap(p, "sourceLocation");
+    swap(p, "destLocation");
+  });
+  (state.openingDocuments || []).forEach((doc) =>
+    (doc.stockItems || []).forEach((it) => swap(it, "location"))
+  );
+  return count;
+}
+
 async function updateConfigEntry(entity, id, payload) {
   assertEntity(entity);
   if (entity === "roles") {
@@ -4395,6 +4425,18 @@ async function updateConfigEntry(entity, id, payload) {
     state.products.some((item) => item.id !== Number(id) && item.code === normalized.code)
   ) {
     throw new Error("Exista deja un produs cu acest cod.");
+  }
+
+  // Nume locatie unic: redenumirea intr-un nume existent ar contopi stocul (nume = cheie de stoc).
+  if (
+    entity === "storageLocations" &&
+    state.storageLocations.some(
+      (item) =>
+        item.id !== Number(id) &&
+        String(item.name || "").trim().toLowerCase() === String(normalized.name || "").trim().toLowerCase()
+    )
+  ) {
+    throw new Error("Exista deja o locatie (cilindru) cu acest nume. Alege alt nume.");
   }
 
   if (
@@ -4445,6 +4487,11 @@ async function updateConfigEntry(entity, id, payload) {
 
   writeConfigState(state);
   const receiptsState = readReceiptsState();
+  // Redenumire locatie -> migram numele pe toate inregistrarile ca stocul sa se mute cu cilindrul.
+  let renamedRefs = 0;
+  if (entity === "storageLocations") {
+    renamedRefs = renameLocationInRecords(receiptsState, oldValue.name, normalized.name);
+  }
   createAuditEntry(receiptsState, {
     entityType: entity,
     entityId: existing.id,
@@ -4452,7 +4499,9 @@ async function updateConfigEntry(entity, id, payload) {
     reason,
     user,
     oldValue,
-    newValue: entity === "users" ? sanitizeUserForClient(existing) : { ...existing }
+    newValue: entity === "users"
+      ? sanitizeUserForClient(existing)
+      : { ...existing, ...(renamedRefs ? { _migratedRecords: renamedRefs } : {}) }
   });
   writeReceiptsState(receiptsState);
   return entity === "users" ? sanitizeUserForClient(existing) : existing;
