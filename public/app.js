@@ -1521,6 +1521,7 @@ function renderReceipts(receipts) {
           </td>
           <td>${item.product}${photosMini(item.photos)}</td>
           <td>${qtyCell}</td>
+          <td title="Apă eliminată la recepție (din umiditatea în exces)">${isPendingWeighing || !(Number(item.estimatedWaterLoss) > 0) ? "—" : formatNumber(Math.round(Number(item.estimatedWaterLoss) * 1000)) + " kg"}</td>
           <td>${item.grossWeight > 0 ? formatNumber(Number(item.grossWeight)) + " kg" : "—"}</td>
           <td>${item.tareWeight > 0 ? formatNumber(Number(item.tareWeight)) + " kg" : "—"}</td>
           <td>${item.location || "-"}</td>
@@ -1838,7 +1839,7 @@ function renderReceiptTotals(rows) {
     : "";
   receiptsFootEl.innerHTML = `
     <tr class="totals-row">
-      <td colspan="16">TOTAL (${rows.length} recepții) &nbsp;·&nbsp; Net: <b>${formatNumber(totalNet)} t (${formatNumber(totalNet * 1000)} kg)</b>${finPart}<br>${perProduct}</td>
+      <td colspan="17">TOTAL (${rows.length} recepții) &nbsp;·&nbsp; Net: <b>${formatNumber(totalNet)} t (${formatNumber(totalNet * 1000)} kg)</b>${finPart}<br>${perProduct}</td>
     </tr>
   `;
 }
@@ -6626,6 +6627,7 @@ function openReceiptDetails(id) {
       ${rdRow("Tara", kg(item.tareWeight))}
       ${rdRow("Masă netă", kg(item.netWeight))}
       ${rdRow("Cantitate", Number(net) > 0 ? formatNumber(Number(net)) + " t" : "—")}
+      ${rdRow("Apă eliminată (recepție)", Number(item.estimatedWaterLoss) > 0 ? formatNumber(Math.round(Number(item.estimatedWaterLoss) * 1000)) + " kg" : "—")}
     </div>
     <div class="rd-section">
       <h4>Calitate</h4>
