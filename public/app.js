@@ -1949,6 +1949,7 @@ function renderProcessings(processings) {
                   }).join("")}
                 </select>`}
           </td>
+          <td><button type="button" class="cell-btn cell-btn-details" data-action="processing-details" data-id="${item.id}">Detalii</button></td>
         </tr>
       `
     )
@@ -6700,6 +6701,109 @@ complaintsBodyEl?.addEventListener("click", (e) => {
 });
 document.getElementById("complaint-details-close")?.addEventListener("click", () => complaintDetailsDialog?.close());
 document.getElementById("complaint-details-close-2")?.addEventListener("click", () => complaintDetailsDialog?.close());
+
+// ----- Detalii procesare (+ corectare pentru administrator) -----
+const processingDetailsDialog = document.getElementById("processing-details-dialog");
+function openProcessingDetails(id) {
+  if (!processingDetailsDialog) return;
+  const item = (processingsCache || []).find((p) => String(p.id) === String(id));
+  if (!item) { window.alert("Procesarea nu a fost găsită."); return; }
+  const isAdmin = currentSessionUser?.roleCode === "admin";
+  const titleEl = document.getElementById("processing-details-title");
+  if (titleEl) titleEl.textContent = `Procesare #${item.id} — ${item.product || ""}`.trim();
+  const t = (v) => (Number(v) > 0 ? formatNumber(Number(v)) + " t" : "—");
+  const pct = (v) => (v != null && v !== "" && Number(v) > 0 ? Number(v) + " %" : "—");
+  const view = `
+    <div class="rd-section"><h4>General</h4>
+      ${rdRow("Status", escapeComboHtml(item.status || "—"))}
+      ${rdRow("Data", formatDateShort(item.createdAt || item.processedAt))}
+      ${rdRow("Produs", escapeComboHtml(item.product || "—"))}
+      ${rdRow("Tip procesare", escapeComboHtml(item.processingType || "—"))}
+      ${rdRow("Locație sursă", escapeComboHtml(item.sourceLocation || "—"))}
+      ${rdRow("Locație destinație", escapeComboHtml(item.destLocation || item.sourceLocation || "—"))}
+      ${rdRow("Operator", escapeComboHtml(item.operator || "—"))}
+    </div>
+    <div class="rd-section"><h4>Cantități</h4>
+      ${rdRow("Cantitate procesată", t(item.processedQuantity))}
+      ${rdRow("Deșeu", t(item.confirmedWaste))}
+      ${rdRow("Apă eliminată", t(item.waterRemoved))}
+      ${rdRow("Net final (output)", t(item.outputQuantity ?? item.finalNetQuantity))}
+    </div>
+    <div class="rd-section"><h4>Umiditate</h4>
+      ${rdRow("Umiditate inițială", pct(item.initialHumidity))}
+      ${rdRow("Umiditate finală", pct(item.finalHumidity))}
+    </div>
+    <div class="rd-section"><h4>Observații</h4>
+      ${item.note ? `<p class="rd-note">${escapeComboHtml(item.note)}</p>` : `<p class="rd-empty">Fără observații.</p>`}
+    </div>`;
+  // Corectare — DOAR administrator, și doar pentru procesări finalizate (nu „In lucru").
+  let editHtml = "";
+  if (isAdmin && item.status !== "In lucru") {
+    const num = (v) => ((Number(v) || 0) === 0 ? "" : String(Number(v)));
+    editHtml = `
+      <div class="rd-section" id="proc-correct">
+        <h4>Corectare (administrator)</h4>
+        <p class="field-hint">Corectează valorile greșite. Stocul se recalculează automat.</p>
+        <label>Produs<input id="pc-product" value="${escapeComboHtml(item.product || "")}"></label>
+        <div class="split">
+          <label>Locație sursă<input id="pc-source" value="${escapeComboHtml(item.sourceLocation || "")}"></label>
+          <label>Locație destinație<input id="pc-dest" value="${escapeComboHtml(item.destLocation || "")}"></label>
+        </div>
+        <div class="split">
+          <label>Cantitate procesată (t)<input id="pc-processed" type="text" inputmode="decimal" value="${num(item.processedQuantity)}"></label>
+          <label>Deșeu (t)<input id="pc-waste" type="text" inputmode="decimal" value="${num(item.confirmedWaste)}"></label>
+        </div>
+        <div class="split">
+          <label>Umiditate inițială (%)<input id="pc-hi" type="text" inputmode="decimal" value="${num(item.initialHumidity)}"></label>
+          <label>Umiditate finală (%)<input id="pc-hf" type="text" inputmode="decimal" value="${num(item.finalHumidity)}"></label>
+        </div>
+        <label>Data<input id="pc-date" type="date" value="${escapeComboHtml(String(item.processedAt || item.createdAt || "").slice(0, 10))}"></label>
+        <label>Observații<input id="pc-note" value="${escapeComboHtml(item.note || "")}"></label>
+        <div class="form-actions">
+          <button type="button" id="pc-save" data-id="${item.id}">Salvează corectarea</button>
+        </div>
+      </div>`;
+  }
+  const body = document.getElementById("processing-details-body");
+  body.innerHTML = view + editHtml;
+  const msg = document.getElementById("processing-details-message");
+  if (msg) msg.textContent = "";
+  processingDetailsDialog.showModal();
+}
+processingsBodyEl?.addEventListener("click", (e) => {
+  const trigger = e.target.closest('[data-action="processing-details"]');
+  if (trigger) openProcessingDetails(trigger.dataset.id);
+});
+document.getElementById("processing-details-close")?.addEventListener("click", () => processingDetailsDialog?.close());
+document.getElementById("processing-details-close-2")?.addEventListener("click", () => processingDetailsDialog?.close());
+document.getElementById("processing-details-body")?.addEventListener("click", async (e) => {
+  const btn = e.target.closest("#pc-save");
+  if (!btn) return;
+  const msg = document.getElementById("processing-details-message");
+  const val = (x) => (document.getElementById(x)?.value || "").trim();
+  try {
+    const changeReason = requestChangeReason("Motivul corectării procesării:");
+    if (msg) msg.textContent = "Se salvează...";
+    await updateProcessingEntry(btn.dataset.id, {
+      correction: true,
+      product: val("pc-product"),
+      sourceLocation: val("pc-source"),
+      destLocation: val("pc-dest"),
+      processedQuantity: val("pc-processed"),
+      confirmedWaste: val("pc-waste"),
+      initialHumidity: val("pc-hi"),
+      finalHumidity: val("pc-hf"),
+      processedAt: val("pc-date"),
+      note: val("pc-note"),
+      changeReason,
+      changedBy: "dashboard"
+    });
+    processingDetailsDialog?.close();
+    await Promise.all([loadProcessings(), loadAuditLogs(), loadDailyReport()]);
+  } catch (error) {
+    if (msg) msg.textContent = error.message;
+  }
+});
 
 // ----- Detalii tranzacție financiară -----
 const transactionDetailsDialog = document.getElementById("transaction-details-dialog");

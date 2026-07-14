@@ -915,6 +915,7 @@
                     <th>Procesat</th>
                     <th>Deșeu</th>
                     <th>Net final</th>
+                    <th>Detalii</th>
                   </tr>
                 </thead>
                 <tbody id="processings-body"></tbody>
@@ -1435,6 +1436,18 @@
           <div id="receipt-details-body" class="details-body"></div>
           <div class="form-actions">
             <button type="button" class="ghost-button" id="receipt-details-close-2">Închide</button>
+          </div>
+        </dialog>
+
+        <dialog id="processing-details-dialog" class="billing-dialog details-dialog">
+          <div class="details-head">
+            <h3 id="processing-details-title">Procesare</h3>
+            <button type="button" class="ghost-button details-close" id="processing-details-close" title="Închide">✕</button>
+          </div>
+          <div id="processing-details-body" class="details-body"></div>
+          <p class="form-message" id="processing-details-message"></p>
+          <div class="form-actions">
+            <button type="button" class="ghost-button" id="processing-details-close-2">Închide</button>
           </div>
         </dialog>
 

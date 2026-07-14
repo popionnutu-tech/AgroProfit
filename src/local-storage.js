@@ -2530,19 +2530,87 @@ async function updateProcessing(id, payload = {}) {
     processing.note = String(payload.note || "").trim();
   }
 
+  // CORECTARE (doar admin): editarea valorilor unei procesări greșite. Stocul se recalculează
+  // automat (e derivat din înregistrări), deci actualizăm câmpurile stocate + reconstruim
+  // outputul (deșeu/apă) și validăm consistența, la fel ca la crearea procesării.
+  let correctionAudit = null;
+  if (payload.correction === true) {
+    if (payload.actorRole !== "admin") {
+      const err = new Error("Corectarea procesării este permisă doar administratorului.");
+      err.forbidden = true;
+      throw err;
+    }
+    // Snapshot ÎNAINTE de modificări — pentru trasabilitate completă în audit (ce număr → ce număr).
+    const snapshotProcessing = (p) => ({
+      product: p.product,
+      sourceLocation: p.sourceLocation,
+      destLocation: p.destLocation,
+      processingType: p.processingType,
+      processedAt: p.processedAt,
+      processedQuantity: p.processedQuantity,
+      confirmedWaste: p.confirmedWaste,
+      initialHumidity: p.initialHumidity,
+      finalHumidity: p.finalHumidity,
+      waterRemoved: p.waterRemoved,
+      outputQuantity: p.outputQuantity
+    });
+    const correctionOld = snapshotProcessing(processing);
+    const cfg = readConfigState();
+    if (payload.product !== undefined) processing.product = requiredText(payload.product, "Produs");
+    if (payload.sourceLocation !== undefined) processing.sourceLocation = requiredText(payload.sourceLocation, "Locația sursă");
+    if (payload.destLocation !== undefined) processing.destLocation = String(payload.destLocation || "").trim() || processing.sourceLocation;
+    if (payload.processingType !== undefined) processing.processingType = String(payload.processingType || "").trim();
+    if (payload.processedAt !== undefined) processing.processedAt = String(payload.processedAt || "").trim();
+    if (payload.processedQuantity !== undefined) processing.processedQuantity = sanitizeNumber(payload.processedQuantity);
+    const lossMethod = resolveLossMethod(
+      cfg.processingTypes.find((t) => t.name === processing.processingType) || { name: processing.processingType }
+    );
+    processing.lossMethod = lossMethod;
+    const usesHumidity = lossMethod === "umiditate";
+    // Deșeul se aplică DOAR la tipurile „deșeu"; pentru orice alt tip îl zeroam necondiționat
+    // (chiar dacă payload nu-l trimite), ca la schimbarea tipului să nu rămână deșeu vechi.
+    if (lossMethod === "deseu") {
+      if (payload.confirmedWaste !== undefined) processing.confirmedWaste = sanitizeNumber(payload.confirmedWaste);
+    } else {
+      processing.confirmedWaste = 0;
+    }
+    if (!usesHumidity) {
+      processing.initialHumidity = 0;
+      processing.finalHumidity = 0;
+    } else {
+      if (payload.initialHumidity !== undefined) processing.initialHumidity = sanitizeNumber(payload.initialHumidity);
+      if (payload.finalHumidity !== undefined) processing.finalHumidity = sanitizeNumber(payload.finalHumidity);
+      if (processing.initialHumidity > 0 && processing.finalHumidity > processing.initialHumidity) {
+        throw new Error("Umiditatea finală nu poate fi mai mare decât cea inițială la uscare.");
+      }
+    }
+    const drop = Math.max((processing.initialHumidity || 0) - (processing.finalHumidity || 0), 0);
+    processing.waterRemoved = usesHumidity && processing.initialHumidity > 0 && processing.finalHumidity > 0
+      ? Number(((processing.processedQuantity * drop) / 100).toFixed(3))
+      : 0;
+    if (!(processing.processedQuantity > 0)) {
+      throw new Error("Cantitatea procesată trebuie să fie mai mare ca zero.");
+    }
+    if ((processing.confirmedWaste || 0) + (processing.waterRemoved || 0) >= processing.processedQuantity) {
+      throw new Error("Deșeul + apa depășesc cantitatea procesată. Verifică valorile.");
+    }
+    processing.outputQuantity = Math.max(processing.processedQuantity - (processing.confirmedWaste || 0) - (processing.waterRemoved || 0), 0);
+    processing.finalNetQuantity = processing.outputQuantity;
+    correctionAudit = { old: correctionOld, new: snapshotProcessing(processing) };
+  }
+
   processing.updatedAt = new Date().toISOString();
 
   createAuditEntry(state, {
     entityType: "processing",
     entityId: processing.id,
-    action: "update",
+    action: correctionAudit ? "correction" : "update",
     reason,
     user: payload.changedBy || "dashboard",
-    oldValue,
-    newValue: {
-      status: processing.status,
-      note: processing.note
-    }
+    oldValue: correctionAudit ? { ...oldValue, correction: correctionAudit.old } : oldValue,
+    newValue: correctionAudit
+      ? { status: processing.status, note: processing.note, correction: correctionAudit.new }
+      : { status: processing.status, note: processing.note }
   });
 
   writeReceiptsState(state);
