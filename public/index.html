@@ -1877,6 +1877,40 @@
           </div>
         </section>
 
+        <section class="panel reports-panel" data-access="reports" data-view="rapoarte">
+          <div class="panel-head">
+            <h2>Pierderi cantitative</h2>
+            <p>Fluxul cantității pe produs: primit → procesare → livrat, cu diferența necontabilizată</p>
+          </div>
+          <form class="mini-form report-filter-form" id="losses-report-form">
+            <div class="split">
+              <label>De la<input type="date" id="losses-from" /></label>
+              <label>Pana la<input type="date" id="losses-to" /></label>
+              <label>Produs<select id="losses-product"><option value="">Toate produsele</option></select></label>
+              <div class="report-actions"><button type="submit">Actualizează</button></div>
+            </div>
+          </form>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Produs</th>
+                  <th>Primit net (t)</th>
+                  <th>Apă recepție (t)</th>
+                  <th>Deșeu curățare (t)</th>
+                  <th>Apă uscare (t)</th>
+                  <th>Livrat (t)</th>
+                  <th>Apă livrare (t)</th>
+                  <th>Diferență (t)</th>
+                </tr>
+              </thead>
+              <tbody id="losses-report-body"></tbody>
+              <tfoot id="losses-report-foot"></tfoot>
+            </table>
+          </div>
+          <p class="field-hint">Diferență = Primit − Deșeu − Apă uscare − Livrat (necontabilizat). „Apă recepție/livrare" sunt informative (apa e deja exclusă din net la recepție).</p>
+        </section>
+
         <section class="stats config-stats" id="config-summary" data-view="nom-parteneri,nom-produse,nom-locatii,nom-tarife,nom-masini,nom-laborator,nom-companii,nom-utilizatori,nom-setari,nom-automatizare,nom-alerte,nom-securitate"></section>
 
         <section class="setup-grid" data-view="nom-parteneri,nom-produse,nom-locatii,nom-tarife,nom-masini,nom-laborator,nom-companii,nom-utilizatori,nom-setari,nom-automatizare,nom-alerte,nom-securitate" data-access="nomenclator-read">

@@ -1221,6 +1221,96 @@ function renderTransferStockTable(summary) {
 }
 
 // Modul F: mișcarea stocului pe perioadă (stoc inițial / recepții / livrări / stoc final)
+// Populează filtrul de produs al raportului de pierderi (o dată la încărcarea nomenclatorului).
+function populateLossesProductFilter() {
+  const el = document.getElementById("losses-product");
+  if (!el) return;
+  const prev = el.value;
+  const prods = (currentConfig?.products || []).map((p) => p.name).filter(Boolean);
+  el.innerHTML = '<option value="">Toate produsele</option>' +
+    prods.map((p) => `<option value="${escapeComboHtml(p)}">${escapeComboHtml(p)}</option>`).join("");
+  if (prev) el.value = prev;
+}
+
+// Raport „pierderi cantitative" pe produs: primit → procesare → livrat, cu diferența necontabilizată.
+// Doar afișare (agregă recepții/procesări/livrări existente); nu atinge stocul/financiarul.
+function renderLossesReport() {
+  const body = document.getElementById("losses-report-body");
+  const foot = document.getElementById("losses-report-foot");
+  if (!body) return;
+  const from = (document.getElementById("losses-from") || {}).value || "";
+  const to = (document.getElementById("losses-to") || {}).value || "";
+  const prodFilter = (document.getElementById("losses-product") || {}).value || "";
+  const inRange = (iso) => printDocInRange(iso, from, to);
+
+  const byProduct = new Map();
+  const bucket = (p) => {
+    const key = p || "—";
+    if (!byProduct.has(key)) byProduct.set(key, { received: 0, waterRecv: 0, waste: 0, waterDry: 0, delivered: 0, waterDeliv: 0 });
+    return byProduct.get(key);
+  };
+
+  // Câmpul de dată prioritar = `createdAt` (ca ecranele Recepții/Procesări/Livrări), ca raportul
+  // să se reconcilieze cu ele; fallback pe data reală a operației.
+  (receiptsCache || []).forEach((r) => {
+    if (r.status === "Anulat" || (prodFilter && r.product !== prodFilter) || !inRange(r.createdAt || r.receivedAt)) return;
+    const g = bucket(r.product);
+    g.received += Number(r.provisionalNetQuantity || r.quantity || 0);
+    g.waterRecv += Number(r.estimatedWaterLoss || 0);
+  });
+  (processingsCache || []).forEach((p) => {
+    if (p.status === "Anulat" || (prodFilter && p.product !== prodFilter) || !inRange(p.createdAt || p.processedAt)) return;
+    const g = bucket(p.product);
+    g.waste += Number(p.confirmedWaste || 0);
+    g.waterDry += Number(p.waterRemoved || 0);
+  });
+  const humIdx = buildReceiptHumidityIndex();
+  (deliveriesCache || []).forEach((d) => {
+    if (d.status === "Anulat" || (prodFilter && d.product !== prodFilter) || !inRange(d.createdAt || d.deliveredAt)) return;
+    const g = bucket(d.product);
+    g.delivered += deliveryDisplayQuantity(d);
+    const w = deliveryWaterKg(d, humIdx);
+    if (w !== null) g.waterDeliv += w / 1000; // kg -> tone
+  });
+
+  const rows = Array.from(byProduct.entries()).sort((a, b) => String(a[0]).localeCompare(String(b[0]), "ro"));
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="8" class="empty-state">Fără date pentru filtrul ales.</td></tr>';
+    if (foot) foot.innerHTML = "";
+    return;
+  }
+  const tot = { received: 0, waterRecv: 0, waste: 0, waterDry: 0, delivered: 0, waterDeliv: 0, diff: 0 };
+  body.innerHTML = rows
+    .map(([prod, g]) => {
+      const diff = g.received - g.waste - g.waterDry - g.delivered;
+      tot.received += g.received; tot.waterRecv += g.waterRecv; tot.waste += g.waste;
+      tot.waterDry += g.waterDry; tot.delivered += g.delivered; tot.waterDeliv += g.waterDeliv; tot.diff += diff;
+      return `<tr>
+        <td>${escapeComboHtml(prod)}</td>
+        <td>${formatNumber(g.received)}</td>
+        <td>${formatNumber(g.waterRecv)}</td>
+        <td>${formatNumber(g.waste)}</td>
+        <td>${formatNumber(g.waterDry)}</td>
+        <td>${formatNumber(g.delivered)}</td>
+        <td>${formatNumber(g.waterDeliv)}</td>
+        <td><b>${formatNumber(diff)}</b></td>
+      </tr>`;
+    })
+    .join("");
+  if (foot) {
+    foot.innerHTML = `<tr class="totals-row">
+      <td>TOTAL</td>
+      <td>${formatNumber(tot.received)}</td>
+      <td>${formatNumber(tot.waterRecv)}</td>
+      <td>${formatNumber(tot.waste)}</td>
+      <td>${formatNumber(tot.waterDry)}</td>
+      <td>${formatNumber(tot.delivered)}</td>
+      <td>${formatNumber(tot.waterDeliv)}</td>
+      <td><b>${formatNumber(tot.diff)}</b></td>
+    </tr>`;
+  }
+}
+
 function renderStockPeriod() {
   const body = document.getElementById("stock-period-body");
   if (!body) return;
@@ -6399,6 +6489,11 @@ async function refreshViewData(view) {
     } else if (view === "stoc") {
       await Promise.all([loadStocks(), loadReceipts(), loadDeliveries()]);
       renderStockPeriod();
+    } else if (view === "rapoarte") {
+      // Ecranul Rapoarte conține și raportul zilnic (panoul lui) — îl reîmprospătăm la deschidere.
+      await Promise.all([loadReceipts(), loadProcessings(), loadDeliveries(), loadDailyReport()]);
+      populateLossesProductFilter();
+      renderLossesReport();
     } else if (view === "acasa") {
       await Promise.all([loadDailyReport(), loadAuditLogs()]);
     } else if (view === "audit") {
@@ -7109,6 +7204,8 @@ function fillPrintDocPanel() {
 document.getElementById("stock-period-from")?.addEventListener("change", renderStockPeriod);
 document.getElementById("stock-period-to")?.addEventListener("change", renderStockPeriod);
 document.getElementById("stock-period-product")?.addEventListener("change", renderStockPeriod);
+document.getElementById("losses-report-form")?.addEventListener("submit", (e) => { e.preventDefault(); renderLossesReport(); });
+["losses-from", "losses-to", "losses-product"].forEach((id) => document.getElementById(id)?.addEventListener("change", renderLossesReport));
 processingTypeFilterEl.addEventListener("change", () => renderProcessings(processingsCache));
 processingProductFilterEl?.addEventListener("change", () => renderProcessings(processingsCache));
 processingDateFromEl?.addEventListener("change", () => renderProcessings(processingsCache));
