@@ -630,6 +630,11 @@ h2 {
   grid-template-columns: 1.35fr 1fr;
 }
 
+/* Livrări pe verticală: butonul + formularul de livrare SUS (pe toată lățimea foii), tabelul jos. */
+.delivery-grid {
+  grid-template-columns: 1fr;
+}
+
 /* Financiar pe verticală: formularul „Plata / incasare" sus, „Tranzactii recente" jos. */
 .finance-grid {
   grid-template-columns: 1fr;
