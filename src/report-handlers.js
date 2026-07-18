@@ -1,5 +1,5 @@
 const { getDailyReport, getPeriodReport } = require("./storage");
-const { filterCanceledForRole } = require("./permissions");
+const { filterCanceledForRole, filterCanceledTransactionsForRole } = require("./permissions");
 
 // Filtreaza documentele anulate din raport dupa rol (admin toate / manager pe ale lui / restul niciuna).
 function filterReportForRole(report, roleCode) {
@@ -9,6 +9,12 @@ function filterReportForRole(report, roleCode) {
   }
   if (Array.isArray(report.deliveries)) {
     report.deliveries = filterCanceledForRole(report.deliveries, roleCode);
+  }
+  // Tranzactiile ANULATE (storno) le vad in raport DOAR admin + contabil-sef; celelalte roluri
+  // nu trebuie sa le primeasca nici macar in payload. Totalurile de plati/incasari sunt deja
+  // calculate pe tranzactii active in local-storage, deci filtrarea de aici nu le atinge.
+  if (Array.isArray(report.transactions)) {
+    report.transactions = filterCanceledTransactionsForRole(report.transactions, roleCode);
   }
   return report;
 }

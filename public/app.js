@@ -200,6 +200,8 @@ const dailyReportReceiptsFootEl = document.getElementById("daily-report-receipts
 const dailyReportDeliveriesFootEl = document.getElementById("daily-report-deliveries-foot");
 const dailyReportTransactionsFootEl = document.getElementById("daily-report-transactions-foot");
 const dailyReportComplaintsEl = document.getElementById("daily-report-complaints");
+const dailyReportCanceledEl = document.getElementById("daily-report-canceled");
+const dailyReportCanceledCountEl = document.getElementById("daily-report-canceled-count");
 const receiptSaveNewButton = document.getElementById("receipt-save-new-button");
 const transactionSaveNewButton = document.getElementById("transaction-save-new-button");
 const deliverySaveNewButton = document.getElementById("delivery-save-new-button");
@@ -2745,7 +2747,10 @@ function renderDailyReport(report) {
     .join("");
 
   const receiptValueOf = (r) => Number(r.amountToPay ?? r.preliminaryPayableAmount ?? 0);
-  dailyReportReceiptsEl.innerHTML = report.receipts
+  // Tabelele principale arata doar operatiunile REALE (ne-anulate); cele anulate merg in
+  // tabelul dedicat „Operatiuni anulate" de mai jos, ca sa nu se amestece cu cele reale.
+  const activeReceipts = report.receipts.filter((r) => r.status !== "Anulat");
+  dailyReportReceiptsEl.innerHTML = activeReceipts
     .map(
       (item) => `
         <tr>
@@ -2762,8 +2767,8 @@ function renderDailyReport(report) {
     )
     .join("");
   setReportFoot(dailyReportReceiptsFootEl, [
-    { colspan: 6, value: `TOTAL (${report.receipts.length})` },
-    { value: currency.format(report.receipts.reduce((s, r) => s + receiptValueOf(r), 0)) },
+    { colspan: 6, value: `TOTAL (${activeReceipts.length})` },
+    { value: currency.format(activeReceipts.reduce((s, r) => s + receiptValueOf(r), 0)) },
     { value: "" }
   ]);
 
@@ -2782,7 +2787,8 @@ function renderDailyReport(report) {
     )
     .join("");
 
-  dailyReportTransactionsEl.innerHTML = report.transactions
+  const activeTransactions = report.transactions.filter((t) => t.status !== "Anulat");
+  dailyReportTransactionsEl.innerHTML = activeTransactions
     .map(
       (item) => `
         <tr>
@@ -2797,15 +2803,16 @@ function renderDailyReport(report) {
     )
     .join("");
   {
-    const inc = report.transactions.filter((t) => t.direction === "collection").reduce((s, t) => s + Number(t.amount || 0), 0);
-    const pla = report.transactions.filter((t) => t.direction !== "collection").reduce((s, t) => s + Number(t.amount || 0), 0);
+    const inc = activeTransactions.filter((t) => t.direction === "collection").reduce((s, t) => s + Number(t.amount || 0), 0);
+    const pla = activeTransactions.filter((t) => t.direction !== "collection").reduce((s, t) => s + Number(t.amount || 0), 0);
     setReportFoot(dailyReportTransactionsFootEl, [
-      { colspan: 5, value: `TOTAL (${report.transactions.length}) · Plăți: ${currency.format(pla)} · Încasări: ${currency.format(inc)}` },
+      { colspan: 5, value: `TOTAL (${activeTransactions.length}) · Plăți: ${currency.format(pla)} · Încasări: ${currency.format(inc)}` },
       { value: currency.format(inc + pla) }
     ]);
   }
 
-  const deliveries = report.deliveries || [];
+  const allDeliveries = report.deliveries || [];
+  const deliveries = allDeliveries.filter((d) => d.status !== "Anulat");
   dailyReportDeliveriesEl.innerHTML = deliveries
     .map(
       (item) => `
@@ -2842,6 +2849,78 @@ function renderDailyReport(report) {
       `
     )
     .join("");
+
+  // --- Operatiuni anulate (tabel dedicat, ca sa nu se amestece cu cele reale) ---
+  // Recepțiile/livrările anulate vin deja filtrate pe SERVER după rol (filterCanceledForRole).
+  // Tranzacțiile anulate vin filtrate pe server (doar admin/contabil-șef le primesc); gătuim
+  // și aici la afișare ca a doua linie de apărare.
+  const role = currentSessionUser?.roleCode;
+  const canSeeCanceledTx = role === "admin" || role === "accountant-sef";
+  const canceledRows = [
+    ...report.receipts
+      .filter((r) => r.status === "Anulat")
+      .map((r) => ({
+        tip: "Recepție",
+        id: r.id,
+        date: r.canceledAt || r.createdAt,
+        partner: r.supplier,
+        product: r.product,
+        qty: Number(r.grossQuantity || r.quantity || 0),
+        by: r.canceledBy,
+        reason: r.cancelReason
+      })),
+    ...allDeliveries
+      .filter((d) => d.status === "Anulat")
+      .map((d) => ({
+        tip: "Livrare",
+        id: d.id,
+        date: d.canceledAt || d.createdAt,
+        partner: d.customer,
+        product: d.product,
+        qty: Number(d.deliveredQuantity || 0),
+        by: d.canceledBy,
+        reason: d.cancelReason
+      })),
+    ...(canSeeCanceledTx
+      ? report.transactions
+          .filter((t) => t.status === "Anulat")
+          .map((t) => ({
+            tip: t.direction === "collection" ? "Încasare" : "Plată",
+            id: t.id,
+            date: t.canceledAt || t.createdAt,
+            partner: t.partner,
+            product: "—",
+            qty: null,
+            amount: Number(t.amount || 0),
+            by: t.canceledBy,
+            reason: t.cancelReason || t.changeReason
+          }))
+      : [])
+  ].sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+
+  if (dailyReportCanceledEl) {
+    dailyReportCanceledEl.innerHTML = canceledRows.length
+      ? canceledRows
+          .map(
+            (row) => `
+        <tr>
+          <td>${escapeComboHtml(row.tip)}</td>
+          <td>#${escapeComboHtml(String(row.id))}</td>
+          <td>${formatDateShort(row.date)}</td>
+          <td>${escapeComboHtml(row.partner || "—")}</td>
+          <td>${escapeComboHtml(row.product || "—")}</td>
+          <td>${row.qty == null ? currency.format(row.amount || 0) : formatNumber(row.qty)}</td>
+          <td>${escapeComboHtml(row.by || "—")}</td>
+          <td>${escapeComboHtml(row.reason || "—")}</td>
+        </tr>
+      `
+          )
+          .join("")
+      : `<tr><td colspan="8" style="text-align:center;color:#94a3b8">Nicio operațiune anulată în perioadă.</td></tr>`;
+  }
+  if (dailyReportCanceledCountEl) {
+    dailyReportCanceledCountEl.textContent = canceledRows.length ? `(${canceledRows.length})` : "";
+  }
 }
 
 function renderSelectOptions(select, items, mapLabel, placeholder, mapValue = (item) => item.id || item.code) {

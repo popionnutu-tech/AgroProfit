@@ -1292,6 +1292,8 @@ function createDailyReport(dateValue, receipts, processings, transactions, stock
   const dailyTransactions = filterByDate(transactions, dateValue);
   // Sumarul cantitativ exclude receptiile anulate (lista le pastreaza pentru afisare).
   const activeDailyReceipts = dailyReceipts.filter((item) => item.status !== "Anulat");
+  // Plata/incasare anulata = storno: NU intra in totalurile de plati/incasari.
+  const activeDailyTransactions = dailyTransactions.filter((item) => item.status !== "Anulat");
 
   return {
     date: dateValue,
@@ -1310,10 +1312,10 @@ function createDailyReport(dateValue, receipts, processings, transactions, stock
         (sum, item) => sum + Number(item.confirmedWaste || 0),
         0
       ),
-      paymentsTotal: dailyTransactions
+      paymentsTotal: activeDailyTransactions
         .filter((item) => item.direction === "payment")
         .reduce((sum, item) => sum + Number(item.amount || 0), 0),
-      collectionsTotal: dailyTransactions
+      collectionsTotal: activeDailyTransactions
         .filter((item) => item.direction === "collection")
         .reduce((sum, item) => sum + Number(item.amount || 0), 0),
       stockTotal: stockSummary.totals.totalQuantity
@@ -4239,6 +4241,8 @@ async function getPeriodReport(from, to) {
   const periodComplaints = filterByDateRange(complaints, from, to);
   // Sumarul cantitativ exclude receptiile anulate.
   const activePeriodReceipts = periodReceipts.filter((item) => item.status !== "Anulat");
+  // Plata/incasare anulata = storno: NU intra in totalurile de plati/incasari.
+  const activePeriodTransactions = periodTransactions.filter((item) => item.status !== "Anulat");
 
   return {
     from: String(from || "").slice(0, 10),
@@ -4252,10 +4256,10 @@ async function getPeriodReport(from, to) {
       ),
       processedQuantity: periodProcessings.reduce((sum, item) => sum + Number(item.processedQuantity || 0), 0),
       confirmedWaste: periodProcessings.reduce((sum, item) => sum + Number(item.confirmedWaste || 0), 0),
-      paymentsTotal: periodTransactions
+      paymentsTotal: activePeriodTransactions
         .filter((item) => item.direction === "payment")
         .reduce((sum, item) => sum + Number(item.amount || 0), 0),
-      collectionsTotal: periodTransactions
+      collectionsTotal: activePeriodTransactions
         .filter((item) => item.direction === "collection")
         .reduce((sum, item) => sum + Number(item.amount || 0), 0),
       deliveredQuantity: periodDeliveries.reduce((sum, item) => sum + (item.status === "Anulat" ? 0 : Number(item.deliveredQuantity || 0)), 0),
