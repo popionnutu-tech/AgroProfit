@@ -6272,8 +6272,9 @@ function buildBonCantarHtml(delivery) {
     <div class="doc-sign"><div>Cântăritor</div><div>Șofer</div></div>`;
 }
 
-// CMR — suprapunere peste formularul oficial (imaginea /cmr-form.png), completat din livrare.
-// Coordonatele câmpurilor sunt în % din formularul decupat (calibrate vizual pe formularul dat).
+// CMR — formular DESENAT (nu suprapus peste scanare): fiecare casetă are numărul + eticheta
+// (RO / RU / EN, ca pe formularul oficial), iar datele noastre stau CLAR în interiorul casetei
+// corecte. Reprodus după modelul dat (formular „Statistica", 29 casete).
 function buildCmrHtml(delivery) {
   const seller = getSellerPartner(delivery);
   const buyer = getBuyerPartner(delivery);
@@ -6283,46 +6284,172 @@ function buildCmrHtml(delivery) {
   const grossKg = money.kg || Math.round(deliveryQtyTonnes(delivery) * 1000);
   const esc = (val) => escapeComboHtml(val == null ? "" : String(val));
   const dateLoad = formatDateShort(delivery.invoiceDate || delivery.createdAt);
-  const sender = [seller?.name || delivery.seller, seller?.address, seller?.idno ? "IDNO " + seller.idno : "", "R. Moldova"].filter(Boolean).map(esc).join("<br>");
-  const consignee = [buyer?.name || delivery.customer, buyer?.address, buyer?.idno ? "IDNO " + buyer.idno : ""].filter(Boolean).map(esc).join("<br>");
-  // Caseta 5: „Invoice {nr} din {data}" + (opțional) documente/calitate introduse pe livrare.
-  const invLine = delivery.invoiceNumber ? "Invoice " + esc(delivery.invoiceNumber) + " din " + dateLoad : "";
-  const docs = [invLine, esc(delivery.cmrDocuments)].filter(Boolean).join("<br>");
-  // Caseta 9: descrierea CMR din nomenclatorul produsului (dacă e completată), altfel denumirea.
+  // Caseta 1 — Expeditor (vânzătorul din livrare).
+  const senderVal = [seller?.name || delivery.seller, seller?.address, seller?.idno ? "IDNO " + seller.idno : "", "R. MOLDOVA"]
+    .filter(Boolean).map(esc).join("<br>");
+  // Caseta 2 — Destinatar (cumpărătorul).
+  const consigneeVal = [buyer?.name || delivery.customer, buyer?.address, buyer?.idno ? "IDNO " + buyer.idno : ""]
+    .filter(Boolean).map(esc).join("<br>");
+  // Caseta 5 — „Invoice {nr} din {data}" + (opțional) documente/calitate introduse pe livrare.
+  const invLine = delivery.invoiceNumber ? "INVOICE: " + esc(delivery.invoiceNumber) + " din " + dateLoad : "";
+  const docsVal = [invLine, esc(delivery.cmrDocuments)].filter(Boolean).join("<br>");
+  // Caseta 9 — descrierea CMR din nomenclatorul produsului (dacă e completată), altfel denumirea.
   const prod = (currentConfig?.products || []).find(
     (x) => String(x.name).trim().toLowerCase() === String(delivery.product || "").trim().toLowerCase()
   );
-  const goodsDesc = esc(prod?.cmrDescription || delivery.product);
+  const goodsVal = esc(prod?.cmrDescription || delivery.product).replace(/\n/g, "<br>");
   // Locuri de încărcare/descărcare (per livrare); țara încărcării implicit R. Moldova.
   const loadPlace = esc(delivery.loadingPlace);
-  const loadCountry = esc(delivery.loadingCountry || (delivery.loadingPlace ? "R. Moldova" : ""));
+  const loadCountry = esc(delivery.loadingCountry || (delivery.loadingPlace ? "R. MOLDOVA" : ""));
   const unloadPlace = esc(delivery.unloadingPlace);
   const unloadCountry = esc(delivery.unloadingCountry);
-  // Un câmp poziționat peste formular: [conținut, left%, top%, width%, font-px, aliniere].
-  const f = (html, l, t, w, fs, al) =>
-    `<div style="position:absolute;left:${l}%;top:${t}%;width:${w}%;font-size:${fs}px;line-height:1.15;text-align:${al || "left"};color:#000;">${html}</div>`;
-  const fields = [
-    f(sender, 2.5, 4, 44, 8),
-    f(consignee, 2.5, 12.8, 44, 8),
-    f(unloadPlace, 9, 20.8, 38, 8),                  // caseta 3 — Место разгрузки (loc)
-    f(unloadCountry, 9, 23.1, 38, 8),                // caseta 3 — Страна (țară)
-    f(loadPlace, 9, 26.9, 38, 8),                    // caseta 4 — Место (loc încărcare)
-    f(loadCountry, 9, 29.2, 38, 8),                  // caseta 4 — Страна (țară)
-    f(dateLoad, 9, 30.9, 38, 8),                     // caseta 4 — Дата
-    f(docs, 2.5, 35.2, 44, 8),                       // caseta 5
-    f("vrac", 28.5, 43, 11, 8),                      // caseta 8 — ambalaj (în vrac)
-    f(goodsDesc, 41, 42, 30, 7),                     // caseta 9 — descrierea mărfii
-    f(actNum(grossKg, 0), 73.5, 42.5, 11, 8, "right"), // caseta 11 — greutate marfă
-    f(loadPlace, 10, 67.5, 18, 8),                   // caseta 21 — loc (din caseta 4)
-    f(dateLoad, 40, 67.5, 15, 8),                    // caseta 21 — dată
-    f(esc(delivery.vehicle), 13, 79.7, 25, 7),       // caseta 25 — Тягач
-    f(esc(delivery.trailer), 13, 81.7, 25, 7)        // caseta 25 — Полуприцеп
-  ].join("");
-  return `
-    <div style="position:relative;width:100%;font-family:Arial,Helvetica,sans-serif;">
-      <img src="/cmr-form.png" alt="CMR" style="width:100%;display:block;">
-      ${fields}
+  const vehicle = esc(delivery.vehicle);
+  const trailer = esc(delivery.trailer);
+
+  // Helper: o casetă cu număr + etichetă trilingvă + valoarea noastră (dacă există).
+  // n=nr casetă, ro/ru/en = etichete, val=continut, o={h:inaltime minima, vStyle:stil valoare}
+  const box = (n, ro, ru, en, val, o = {}) => `
+    <div class="cx-box" style="${o.h ? "min-height:" + o.h + "px;" : ""}${o.style || ""}">
+      <div class="cx-hd">${n ? `<span class="cx-n">${n}</span>` : ""}<span class="cx-l">${ro}${ru ? `<br><i>${ru}</i>` : ""}${en ? `<br><span class="cx-en">${en}</span>` : ""}</span></div>
+      ${val ? `<div class="cx-v" style="${o.vStyle || ""}">${val}</div>` : ""}
     </div>`;
+
+  // Sub-rând pentru casetele 3 și 4 (Localitate / Țară / Dată) — etichetă mică + valoare.
+  const subRow = (ro, ru, en, val) => `
+    <div class="cx-sub"><span class="cx-subl">${ro} / <i>${ru}</i> / ${en}</span><span class="cx-subv">${val || ""}</span></div>`;
+
+  return `
+  <style>
+    .cmrx { width:100%; font-family:Arial,Helvetica,sans-serif; color:#000; font-size:9px; }
+    .cmrx * { box-sizing:border-box; }
+    .cmrx .cx-outer { border:1.4px solid #000; }
+    .cmrx table { width:100%; border-collapse:collapse; table-layout:fixed; }
+    .cmrx td { border:1px solid #000; padding:0; vertical-align:top; }
+    .cmrx .cx-box { padding:2px 4px 3px; min-height:34px; }
+    .cmrx .cx-hd { display:flex; gap:4px; align-items:flex-start; }
+    .cmrx .cx-n { font-weight:bold; font-size:11px; min-width:14px; }
+    .cmrx .cx-l { font-size:7px; line-height:1.12; color:#111; }
+    .cmrx .cx-l i { font-style:italic; }
+    .cmrx .cx-en { color:#333; }
+    .cmrx .cx-v { margin-top:3px; font-size:10px; font-weight:bold; line-height:1.28; white-space:normal; }
+    .cmrx .cx-sub { display:flex; justify-content:space-between; gap:6px; border-top:1px solid #000; padding:1px 4px; min-height:15px; }
+    .cmrx .cx-subl { font-size:6.5px; color:#111; line-height:1.1; padding-top:1px; }
+    .cmrx .cx-subv { font-size:10px; font-weight:bold; text-align:right; }
+    .cmrx .cx-title { text-align:center; font-size:8px; line-height:1.2; padding:3px 2px; }
+    .cmrx .cx-title b { font-size:9px; }
+    .cmrx .cx-cmr { text-align:center; font-weight:bold; font-size:15px; letter-spacing:1px; }
+    .cmrx .cx-goods td { padding:2px 3px; font-size:6.5px; line-height:1.1; }
+    .cmrx .cx-gnum { font-weight:bold; font-size:10px; }
+    .cmrx .cx-gval { font-size:10px; font-weight:bold; }
+    .cmrx .cx-empty { min-height:26px; }
+  </style>
+  <div class="cmrx">
+    <div class="cx-outer">
+      <!-- ANTET: stânga casete 1–5, dreapta titlu + casete 16–18 -->
+      <table>
+        <tr>
+          <td style="width:60%;padding:0;">
+            ${box("1", "Expeditor (nume, adresă, țara)", "Отправитель (наименование, адрес, страна)", "Sender (name, address, country)", senderVal, { h: 78 })}
+            ${box("2", "Destinatar (nume, adresă, țara)", "Получатель (наименование, адрес, страна)", "Consignee (name, address, country)", consigneeVal, { h: 78 })}
+            <div class="cx-box" style="min-height:70px;">
+              <div class="cx-hd"><span class="cx-n">3</span><span class="cx-l">Locul prevăzut pentru livrarea mărfii<br><i>Место разгрузки груза</i><br><span class="cx-en">Place of delivery of the goods</span></span></div>
+              ${subRow("Localitatea", "Место", "Place", unloadPlace)}
+              ${subRow("Țara", "Страна", "Country", unloadCountry)}
+              ${subRow("Data", "Дата", "Date", "")}
+            </div>
+            <div class="cx-box" style="min-height:66px;">
+              <div class="cx-hd"><span class="cx-n">4</span><span class="cx-l">Locul și data încărcării mărfii<br><i>Место и дата погрузки груза</i><br><span class="cx-en">Place and date of loading of the goods</span></span></div>
+              ${subRow("Localitatea", "Место", "Place", loadPlace)}
+              ${subRow("Țara", "Страна", "Country", loadCountry)}
+              ${subRow("Data", "Дата", "Date", dateLoad)}
+            </div>
+            ${box("5", "Documente anexate", "Прилагаемые документы", "Documents attached", docsVal, { h: 50 })}
+          </td>
+          <td style="width:40%;padding:0;">
+            <div class="cx-title">
+              <b>SCRISOARE DE TRANSPORT INTERNAȚIONAL</b><br>
+              <i>МЕЖДУНАРОДНАЯ ТОВАРОТРАНСПОРТНАЯ НАКЛАДНАЯ</i><br>
+              INTERNATIONAL CONSIGNMENT NOTE
+              <div class="cx-cmr" style="margin-top:2px;">CMR</div>
+            </div>
+            ${box("16", "Transportator (nume, adresă, țara)", "Перевозчик (наименование, адрес, страна)", "Carrier (name, address, country)", "", { h: 96 })}
+            ${box("17", "Transportatori succesivi (nume, adresă, țara)", "Последующий перевозчик", "Successive carriers", "", { h: 74 })}
+            ${box("18", "Rezerve și observații ale transportatorilor", "Оговорки и замечания перевозчика", "Carrier's reservations and observations", "", { h: 62 })}
+          </td>
+        </tr>
+      </table>
+
+      <!-- CASETELE MĂRFII 6–12 -->
+      <table class="cx-goods">
+        <tr>
+          <td style="width:12%"><span class="cx-gnum">6</span> Mărci și numere<br><i>Знаки и номера</i><br>Marks and Nos</td>
+          <td style="width:10%"><span class="cx-gnum">7</span> Nr. de colete<br><i>Количество мест</i><br>Number of packages</td>
+          <td style="width:12%"><span class="cx-gnum">8</span> Mod de ambalare<br><i>Род упаковки</i><br>Method of packing</td>
+          <td style="width:32%"><span class="cx-gnum">9</span> Natura mărfii<br><i>Наименование груза</i><br>Nature of the goods</td>
+          <td style="width:12%"><span class="cx-gnum">10</span> Nr. statistic<br><i>Статист. №</i><br>Statistical number</td>
+          <td style="width:12%"><span class="cx-gnum">11</span> Greutate brută, kg<br><i>Вес брутто, кг</i><br>Gross weight in kg</td>
+          <td style="width:10%"><span class="cx-gnum">12</span> Cubaj, m³<br><i>Объем, м³</i><br>Volume in m³</td>
+        </tr>
+        <tr>
+          <td style="height:96px"></td>
+          <td></td>
+          <td class="cx-gval" style="text-align:center;">${delivery.product ? "în vrac" : ""}</td>
+          <td class="cx-gval">${goodsVal}</td>
+          <td></td>
+          <td class="cx-gval" style="text-align:right;">${actNum(grossKg, 0)}</td>
+          <td></td>
+        </tr>
+        <tr>
+          <td style="font-size:6px">Clasa / <i>Класс</i> / Class</td>
+          <td style="font-size:6px">Cifra / <i>Цифра</i> / Number</td>
+          <td style="font-size:6px">Litera / <i>Буква</i> / Letter</td>
+          <td style="font-size:6px" colspan="4">(ADR*) / ДОПОГ</td>
+        </tr>
+      </table>
+
+      <!-- 13 + 19 (instrucțiuni / plată) -->
+      <table>
+        <tr>
+          <td style="width:60%">${box("13", "Instrucțiunile expeditorului (formalități vamale și oficiale)", "Указания отправителя", "Sender's instructions", "", { h: 64 })}</td>
+          <td style="width:40%">${box("19", "De plată / Подлежит оплате / To be paid by", "", "", "", { h: 64 })}</td>
+        </tr>
+        <tr>
+          <td>${box("14 / 15", "Prescripții de francare · Rambursare", "Указания оплаты фрахта · Возврат", "Carriage paid / forward · Cash on delivery", "", { h: 34 })}</td>
+          <td>${box("20", "Convenții speciale", "Особые согласованные условия", "Special agreements", "", { h: 34 })}</td>
+        </tr>
+      </table>
+
+      <!-- 21 (încheiat) + 24 (recepția) -->
+      <table>
+        <tr>
+          <td style="width:50%">
+            <div class="cx-box" style="min-height:46px;">
+              <div class="cx-hd"><span class="cx-n">21</span><span class="cx-l">Încheiat în<br><i>Составлена в</i><br>Established in</span></div>
+              ${subRow("Localitatea", "Место", "Place", loadPlace)}
+              ${subRow("Data", "Дата", "Date", dateLoad)}
+            </div>
+          </td>
+          <td style="width:50%">${box("24", "Recepția mărfii", "Груз получен", "Goods received (loc, data / место, дата)", "", { h: 46 })}</td>
+        </tr>
+        <tr>
+          <td>${box("", "Semnătura și ștampila expeditorului", "Подпись и штамп отправителя", "Signature and stamp of the consignor", "", { h: 40 })}</td>
+          <td>${box("", "Semnătura și ștampila beneficiarului", "Подпись и штамп получателя", "Signature and stamp of the consignee", "", { h: 40 })}</td>
+        </tr>
+      </table>
+
+      <!-- 25 — numere de înmatriculare (tractor / semiremorcă) -->
+      <table>
+        <tr>
+          <td>
+            <div class="cx-box" style="min-height:40px;">
+              <div class="cx-hd"><span class="cx-n">25</span><span class="cx-l">Registrац. номер / Registered number — Tractor (Тягач) / Semiremorcă (Полуприцеп)</span></div>
+              <div class="cx-v" style="font-size:12px;letter-spacing:0.5px;">${[vehicle, trailer].filter(Boolean).join(" / ")}</div>
+            </div>
+          </td>
+        </tr>
+      </table>
+    </div>
+  </div>`;
 }
 
 function buildImputernicireHtml(delivery) {
