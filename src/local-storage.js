@@ -1292,8 +1292,10 @@ function createDailyReport(dateValue, receipts, processings, transactions, stock
   const dailyTransactions = filterByDate(transactions, dateValue);
   // Sumarul cantitativ exclude receptiile anulate (lista le pastreaza pentru afisare).
   const activeDailyReceipts = dailyReceipts.filter((item) => item.status !== "Anulat");
-  // Plata/incasare anulata = storno: NU intra in totalurile de plati/incasari.
-  const activeDailyTransactions = dailyTransactions.filter((item) => item.status !== "Anulat");
+  // Plata/incasare anulata sau stornata = storno: NU intra in totalurile de plati/incasari.
+  // Folosim ACELASI predicat ca extrasul de cont/decontari (isActiveTransaction), ca totalurile
+  // din raport sa nu se departeze niciodata de Financiar.
+  const activeDailyTransactions = dailyTransactions.filter((item) => isActiveTransaction(item));
 
   return {
     date: dateValue,
@@ -2695,10 +2697,13 @@ async function updateTransaction(id, payload = {}) {
       if (role && role !== "admin" && role !== "accountant-sef") {
         throw forbiddenError("Doar administratorul sau contabilul-șef pot schimba statutul plății.");
       }
-      // Marcăm anularea ca să o putem face vizibilă doar contabilului-șef + admin.
+      // Marcăm anularea ca să o putem face vizibilă doar contabilului-șef + admin
+      // și ca să apară „Anulat de" + „Motiv" în raportul de operațiuni anulate.
       if (newStatus === "Anulat") {
         transaction.canceledByRole = role || transaction.canceledByRole || null;
         transaction.canceledAt = new Date().toISOString();
+        transaction.canceledBy = payload.changedBy || transaction.canceledBy || null;
+        transaction.cancelReason = reason;
       }
     }
     transaction.status = newStatus;
@@ -4241,8 +4246,9 @@ async function getPeriodReport(from, to) {
   const periodComplaints = filterByDateRange(complaints, from, to);
   // Sumarul cantitativ exclude receptiile anulate.
   const activePeriodReceipts = periodReceipts.filter((item) => item.status !== "Anulat");
-  // Plata/incasare anulata = storno: NU intra in totalurile de plati/incasari.
-  const activePeriodTransactions = periodTransactions.filter((item) => item.status !== "Anulat");
+  // Plata/incasare anulata sau stornata = storno: NU intra in totalurile de plati/incasari
+  // (acelasi predicat ca extrasul de cont/decontari, ca sa nu se departeze de Financiar).
+  const activePeriodTransactions = periodTransactions.filter((item) => isActiveTransaction(item));
 
   return {
     from: String(from || "").slice(0, 10),

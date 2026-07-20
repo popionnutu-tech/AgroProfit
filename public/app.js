@@ -2909,7 +2909,7 @@ function renderDailyReport(report) {
           <td>${formatDateShort(row.date)}</td>
           <td>${escapeComboHtml(row.partner || "—")}</td>
           <td>${escapeComboHtml(row.product || "—")}</td>
-          <td>${row.qty == null ? currency.format(row.amount || 0) : formatNumber(row.qty)}</td>
+          <td>${row.qty == null ? currency.format(row.amount || 0) : formatNumber(row.qty) + " t"}</td>
           <td>${escapeComboHtml(row.by || "—")}</td>
           <td>${escapeComboHtml(row.reason || "—")}</td>
         </tr>
@@ -6437,15 +6437,53 @@ function buildCmrHtml(delivery) {
         </tr>
       </table>
 
-      <!-- 25 — numere de înmatriculare (tractor / semiremorcă) -->
+      <!-- 25 / 26 / 27 — numere de înmatriculare, marca, tarif -->
       <table>
         <tr>
-          <td>
-            <div class="cx-box" style="min-height:40px;">
-              <div class="cx-hd"><span class="cx-n">25</span><span class="cx-l">Registrац. номер / Registered number — Tractor (Тягач) / Semiremorcă (Полуприцеп)</span></div>
-              <div class="cx-v" style="font-size:12px;letter-spacing:0.5px;">${[vehicle, trailer].filter(Boolean).join(" / ")}</div>
+          <td style="width:28%;padding:2px 4px 3px;">
+            <div class="cx-hd"><span class="cx-n">25</span><span class="cx-l">Nr. înmatriculare / <i>Регистрац. номер</i> / Registered number</span></div>
+            <div style="display:flex;margin-top:2px;">
+              <div style="flex:1;border:1px solid #000;padding:1px 3px;"><div style="font-size:6px;color:#111;">Tractor / <i>Тягач</i></div><div class="cx-v">${vehicle}</div></div>
+              <div style="flex:1;border:1px solid #000;border-left:0;padding:1px 3px;"><div style="font-size:6px;color:#111;">Semirem. / <i>Полуприцеп</i></div><div class="cx-v">${trailer}</div></div>
             </div>
           </td>
+          <td style="width:22%;padding:2px 4px 3px;">
+            <div class="cx-hd"><span class="cx-n">26</span><span class="cx-l">Marca / <i>Марка</i> / Mark</span></div>
+            <div style="display:flex;margin-top:2px;">
+              <div style="flex:1;border:1px solid #000;padding:1px 3px;min-height:20px;font-size:6px;color:#111;">Tractor / <i>Тягач</i></div>
+              <div style="flex:1;border:1px solid #000;border-left:0;padding:1px 3px;min-height:20px;font-size:6px;color:#111;">Semirem. / <i>Полуприцеп</i></div>
+            </div>
+          </td>
+          <td style="width:50%;padding:2px 4px 3px;">
+            <div class="cx-hd"><span class="cx-n">27</span><span class="cx-l">Tarif I / <i>Тариф I за 1 км</i> · Distanța tarifară / <i>Тарифное расстояние</i> · % utilizare / <i>Поясной коэфф.</i> · Alte suplimente / <i>Прочие доплаты</i> · Sumă / <i>Сумма</i></span></div>
+          </td>
+        </tr>
+      </table>
+
+      <!-- 28 / 29 — grila tarifară (se completează de transportator) -->
+      <table class="cx-goods">
+        <tr>
+          <td style="width:6%"><span class="cx-gnum">28</span></td>
+          <td>Distanța / <i>Тарифное расстояние, км</i></td>
+          <td>Схема</td>
+          <td>Тарифный вес, т</td>
+          <td>Тариф за 1 т</td>
+          <td>Надбавки</td>
+          <td>Скидки</td>
+          <td>Прочие доплаты</td>
+          <td>К оплате</td>
+          <td style="width:16%">Отчисления</td>
+        </tr>
+        <tr>
+          <td style="height:18px">Тариф II</td>
+          <td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>
+          <td>Оплачено заказчиком</td>
+        </tr>
+        <tr>
+          <td style="height:18px"><span class="cx-gnum">29</span> Тариф III</td>
+          <td></td><td></td><td></td><td></td><td></td><td></td><td></td>
+          <td>К оплате</td>
+          <td>Валюта / Код плательщика</td>
         </tr>
       </table>
     </div>
