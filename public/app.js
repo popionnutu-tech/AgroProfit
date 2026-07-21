@@ -6307,9 +6307,9 @@ function buildCmrHtml(delivery) {
   const trailer = esc(delivery.trailer);
 
   // Helper: o casetă cu număr + etichetă trilingvă + valoarea noastră (dacă există).
-  // n=nr casetă, ro/ru/en = etichete, val=continut, o={h:inaltime minima, vStyle:stil valoare}
+  // n=nr casetă, ro/ru/en = etichete, val=continut, o={grow:umple spatiul, rule:linii orizontale}
   const box = (n, ro, ru, en, val, o = {}) => `
-    <div class="cx-box" style="${o.h ? "min-height:" + o.h + "px;" : ""}${o.style || ""}">
+    <div class="cx-box${o.grow ? " cx-grow" : ""}${o.rule ? " cx-rule" : ""}" style="${o.style || ""}">
       <div class="cx-hd">${n ? `<span class="cx-n">${n}</span>` : ""}<span class="cx-l">${ro}${ru ? `<br><i>${ru}</i>` : ""}${en ? `<br><span class="cx-en">${en}</span>` : ""}</span></div>
       ${val ? `<div class="cx-v" style="${o.vStyle || ""}">${val}</div>` : ""}
     </div>`;
@@ -6318,30 +6318,40 @@ function buildCmrHtml(delivery) {
   const subRow = (ro, ru, en, val) => `
     <div class="cx-sub"><span class="cx-subl">${ro} / <i>${ru}</i> / ${en}</span><span class="cx-subv">${val || ""}</span></div>`;
 
+  // Înălțimea utilă a paginii A4 = 297mm − marginile fizice date de padding-ul body-ului
+  // (12mm sus+jos în openOfficialDocWindow). Formularul umple EXACT această înălțime.
   return `
   <style>
-    .cmrx { width:100%; font-family:Arial,Helvetica,sans-serif; color:#000; font-size:9px; }
+    .cmrx { width:100%; font-family:Arial,Helvetica,sans-serif; color:#000; font-size:9.5px; }
     .cmrx * { box-sizing:border-box; }
-    .cmrx .cx-outer { border:1.4px solid #000; }
+    /* Formularul umple exact pagina A4: coloană flexibilă pe toată înălțimea utilă, fără gol jos. */
+    .cmrx .cx-outer { border:1.5px solid #000; height:272mm; display:flex; flex-direction:column; overflow:hidden; }
+    .cmrx .cx-outer > table { flex:0 0 auto; }
+    .cmrx .cx-outer > table.cx-fill { flex:1 1 auto; height:100%; }
     .cmrx table { width:100%; border-collapse:collapse; table-layout:fixed; }
     .cmrx td { border:1px solid #000; padding:0; vertical-align:top; }
-    .cmrx .cx-box { padding:2px 4px 3px; min-height:34px; }
+    /* Coloanele antetului (1–5 stânga / 16–18 dreapta) se întind pe toată înălțimea blocului. */
+    .cmrx .cx-col { display:flex; flex-direction:column; height:100%; }
+    .cmrx .cx-box { padding:2px 5px 3px; display:flex; flex-direction:column; }
+    .cmrx .cx-box + .cx-box { border-top:1px solid #000; }
+    .cmrx .cx-grow { flex:1 1 auto; }
+    /* Linii orizontale (rânduri de completat) în casetele goale — ca pe formularul oficial. */
+    .cmrx .cx-rule { background-image:repeating-linear-gradient(to bottom, transparent 0, transparent 15px, #cfcfcf 15px, #cfcfcf 16px); background-position:0 22px; }
     .cmrx .cx-hd { display:flex; gap:4px; align-items:flex-start; }
-    .cmrx .cx-n { font-weight:bold; font-size:11px; min-width:14px; }
-    .cmrx .cx-l { font-size:7px; line-height:1.12; color:#111; }
+    .cmrx .cx-n { font-weight:bold; font-size:12px; min-width:15px; }
+    .cmrx .cx-l { font-size:7px; line-height:1.14; color:#111; }
     .cmrx .cx-l i { font-style:italic; }
     .cmrx .cx-en { color:#333; }
-    .cmrx .cx-v { margin-top:3px; font-size:10px; font-weight:bold; line-height:1.28; white-space:normal; }
-    .cmrx .cx-sub { display:flex; justify-content:space-between; gap:6px; border-top:1px solid #000; padding:1px 4px; min-height:15px; }
+    .cmrx .cx-v { margin-top:3px; font-size:10.5px; font-weight:bold; line-height:1.3; white-space:normal; }
+    .cmrx .cx-sub { display:flex; justify-content:space-between; gap:6px; border-top:1px solid #000; padding:2px 5px; min-height:16px; }
     .cmrx .cx-subl { font-size:6.5px; color:#111; line-height:1.1; padding-top:1px; }
-    .cmrx .cx-subv { font-size:10px; font-weight:bold; text-align:right; }
-    .cmrx .cx-title { text-align:center; font-size:8px; line-height:1.2; padding:3px 2px; }
+    .cmrx .cx-subv { font-size:10.5px; font-weight:bold; text-align:right; }
+    .cmrx .cx-title { text-align:center; font-size:8px; line-height:1.25; padding:4px 3px; border-bottom:1px solid #000; }
     .cmrx .cx-title b { font-size:9px; }
-    .cmrx .cx-cmr { text-align:center; font-weight:bold; font-size:15px; letter-spacing:1px; }
-    .cmrx .cx-goods td { padding:2px 3px; font-size:6.5px; line-height:1.1; }
+    .cmrx .cx-cmr { text-align:center; font-weight:bold; font-size:17px; letter-spacing:1px; margin-top:3px; }
+    .cmrx .cx-goods td { padding:2px 3px; font-size:6.5px; line-height:1.12; }
     .cmrx .cx-gnum { font-weight:bold; font-size:10px; }
-    .cmrx .cx-gval { font-size:10px; font-weight:bold; }
-    .cmrx .cx-empty { min-height:26px; }
+    .cmrx .cx-gval { font-size:10.5px; font-weight:bold; }
   </style>
   <div class="cmrx">
     <div class="cx-outer">
@@ -6349,38 +6359,42 @@ function buildCmrHtml(delivery) {
       <table>
         <tr>
           <td style="width:60%;padding:0;">
-            ${box("1", "Expeditor (nume, adresă, țara)", "Отправитель (наименование, адрес, страна)", "Sender (name, address, country)", senderVal, { h: 78 })}
-            ${box("2", "Destinatar (nume, adresă, țara)", "Получатель (наименование, адрес, страна)", "Consignee (name, address, country)", consigneeVal, { h: 78 })}
-            <div class="cx-box" style="min-height:70px;">
-              <div class="cx-hd"><span class="cx-n">3</span><span class="cx-l">Locul prevăzut pentru livrarea mărfii<br><i>Место разгрузки груза</i><br><span class="cx-en">Place of delivery of the goods</span></span></div>
-              ${subRow("Localitatea", "Место", "Place", unloadPlace)}
-              ${subRow("Țara", "Страна", "Country", unloadCountry)}
-              ${subRow("Data", "Дата", "Date", "")}
+            <div class="cx-col">
+              ${box("1", "Expeditor (nume, adresă, țara)", "Отправитель (наименование, адрес, страна)", "Sender (name, address, country)", senderVal, { grow: true, rule: true })}
+              ${box("2", "Destinatar (nume, adresă, țara)", "Получатель (наименование, адрес, страна)", "Consignee (name, address, country)", consigneeVal, { grow: true, rule: true })}
+              <div class="cx-box" style="flex:1 1 auto;">
+                <div class="cx-hd"><span class="cx-n">3</span><span class="cx-l">Locul prevăzut pentru livrarea mărfii<br><i>Место разгрузки груза</i><br><span class="cx-en">Place of delivery of the goods</span></span></div>
+                ${subRow("Localitatea", "Место", "Place", unloadPlace)}
+                ${subRow("Țara", "Страна", "Country", unloadCountry)}
+                ${subRow("Data", "Дата", "Date", "")}
+              </div>
+              <div class="cx-box" style="flex:1 1 auto;">
+                <div class="cx-hd"><span class="cx-n">4</span><span class="cx-l">Locul și data încărcării mărfii<br><i>Место и дата погрузки груза</i><br><span class="cx-en">Place and date of loading of the goods</span></span></div>
+                ${subRow("Localitatea", "Место", "Place", loadPlace)}
+                ${subRow("Țara", "Страна", "Country", loadCountry)}
+                ${subRow("Data", "Дата", "Date", dateLoad)}
+              </div>
+              ${box("5", "Documente anexate", "Прилагаемые документы", "Documents attached", docsVal, { grow: true })}
             </div>
-            <div class="cx-box" style="min-height:66px;">
-              <div class="cx-hd"><span class="cx-n">4</span><span class="cx-l">Locul și data încărcării mărfii<br><i>Место и дата погрузки груза</i><br><span class="cx-en">Place and date of loading of the goods</span></span></div>
-              ${subRow("Localitatea", "Место", "Place", loadPlace)}
-              ${subRow("Țara", "Страна", "Country", loadCountry)}
-              ${subRow("Data", "Дата", "Date", dateLoad)}
-            </div>
-            ${box("5", "Documente anexate", "Прилагаемые документы", "Documents attached", docsVal, { h: 50 })}
           </td>
           <td style="width:40%;padding:0;">
-            <div class="cx-title">
-              <b>SCRISOARE DE TRANSPORT INTERNAȚIONAL</b><br>
-              <i>МЕЖДУНАРОДНАЯ ТОВАРОТРАНСПОРТНАЯ НАКЛАДНАЯ</i><br>
-              INTERNATIONAL CONSIGNMENT NOTE
-              <div class="cx-cmr" style="margin-top:2px;">CMR</div>
+            <div class="cx-col">
+              <div class="cx-title">
+                <b>SCRISOARE DE TRANSPORT INTERNAȚIONAL</b><br>
+                <i>МЕЖДУНАРОДНАЯ ТОВАРОТРАНСПОРТНАЯ НАКЛАДНАЯ</i><br>
+                INTERNATIONAL CONSIGNMENT NOTE
+                <div class="cx-cmr">CMR</div>
+              </div>
+              ${box("16", "Transportator (nume, adresă, țara)", "Перевозчик (наименование, адрес, страна)", "Carrier (name, address, country)", "", { grow: true, rule: true })}
+              ${box("17", "Transportatori succesivi (nume, adresă, țara)", "Последующий перевозчик", "Successive carriers", "", { grow: true, rule: true })}
+              ${box("18", "Rezerve și observații ale transportatorilor", "Оговорки и замечания перевозчика", "Carrier's reservations and observations", "", { grow: true, rule: true })}
             </div>
-            ${box("16", "Transportator (nume, adresă, țara)", "Перевозчик (наименование, адрес, страна)", "Carrier (name, address, country)", "", { h: 96 })}
-            ${box("17", "Transportatori succesivi (nume, adresă, țara)", "Последующий перевозчик", "Successive carriers", "", { h: 74 })}
-            ${box("18", "Rezerve și observații ale transportatorilor", "Оговорки и замечания перевозчика", "Carrier's reservations and observations", "", { h: 62 })}
           </td>
         </tr>
       </table>
 
-      <!-- CASETELE MĂRFII 6–12 -->
-      <table class="cx-goods">
+      <!-- CASETELE MĂRFII 6–12 — zona care umple restul paginii (cx-fill) -->
+      <table class="cx-goods cx-fill">
         <tr>
           <td style="width:12%"><span class="cx-gnum">6</span> Mărci și numere<br><i>Знаки и номера</i><br>Marks and Nos</td>
           <td style="width:10%"><span class="cx-gnum">7</span> Nr. de colete<br><i>Количество мест</i><br>Number of packages</td>
@@ -6391,16 +6405,16 @@ function buildCmrHtml(delivery) {
           <td style="width:10%"><span class="cx-gnum">12</span> Cubaj, m³<br><i>Объем, м³</i><br>Volume in m³</td>
         </tr>
         <tr>
-          <td style="height:96px"></td>
-          <td></td>
-          <td class="cx-gval" style="text-align:center;">${delivery.product ? "în vrac" : ""}</td>
-          <td class="cx-gval">${goodsVal}</td>
-          <td></td>
+          <td class="cx-rule"></td>
+          <td class="cx-rule"></td>
+          <td class="cx-gval cx-rule" style="text-align:center;">${delivery.product ? "în vrac" : ""}</td>
+          <td class="cx-gval cx-rule">${goodsVal}</td>
+          <td class="cx-rule"></td>
           <td class="cx-gval" style="text-align:right;">${actNum(grossKg, 0)}</td>
-          <td></td>
+          <td class="cx-rule"></td>
         </tr>
         <tr>
-          <td style="font-size:6px">Clasa / <i>Класс</i> / Class</td>
+          <td style="font-size:6px;height:16px">Clasa / <i>Класс</i> / Class</td>
           <td style="font-size:6px">Cifra / <i>Цифра</i> / Number</td>
           <td style="font-size:6px">Litera / <i>Буква</i> / Letter</td>
           <td style="font-size:6px" colspan="4">(ADR*) / ДОПОГ</td>
@@ -6410,12 +6424,12 @@ function buildCmrHtml(delivery) {
       <!-- 13 + 19 (instrucțiuni / plată) -->
       <table>
         <tr>
-          <td style="width:60%">${box("13", "Instrucțiunile expeditorului (formalități vamale și oficiale)", "Указания отправителя", "Sender's instructions", "", { h: 64 })}</td>
-          <td style="width:40%">${box("19", "De plată / Подлежит оплате / To be paid by", "", "", "", { h: 64 })}</td>
+          <td style="width:60%">${box("13", "Instrucțiunile expeditorului (formalități vamale și oficiale)", "Указания отправителя", "Sender's instructions", "", { style: "min-height:56px", rule: true })}</td>
+          <td style="width:40%">${box("19", "De plată / Подлежит оплате / To be paid by", "", "", "", { style: "min-height:56px", rule: true })}</td>
         </tr>
         <tr>
-          <td>${box("14 / 15", "Prescripții de francare · Rambursare", "Указания оплаты фрахта · Возврат", "Carriage paid / forward · Cash on delivery", "", { h: 34 })}</td>
-          <td>${box("20", "Convenții speciale", "Особые согласованные условия", "Special agreements", "", { h: 34 })}</td>
+          <td>${box("14 / 15", "Prescripții de francare · Rambursare", "Указания оплаты фрахта · Возврат", "Carriage paid / forward · Cash on delivery", "", { style: "min-height:30px" })}</td>
+          <td>${box("20", "Convenții speciale", "Особые согласованные условия", "Special agreements", "", { style: "min-height:30px", rule: true })}</td>
         </tr>
       </table>
 
@@ -6423,38 +6437,38 @@ function buildCmrHtml(delivery) {
       <table>
         <tr>
           <td style="width:50%">
-            <div class="cx-box" style="min-height:46px;">
+            <div class="cx-box" style="min-height:44px;">
               <div class="cx-hd"><span class="cx-n">21</span><span class="cx-l">Încheiat în<br><i>Составлена в</i><br>Established in</span></div>
               ${subRow("Localitatea", "Место", "Place", loadPlace)}
               ${subRow("Data", "Дата", "Date", dateLoad)}
             </div>
           </td>
-          <td style="width:50%">${box("24", "Recepția mărfii", "Груз получен", "Goods received (loc, data / место, дата)", "", { h: 46 })}</td>
+          <td style="width:50%">${box("24", "Recepția mărfii", "Груз получен", "Goods received (loc, data / место, дата)", "", { style: "min-height:44px", rule: true })}</td>
         </tr>
         <tr>
-          <td>${box("", "Semnătura și ștampila expeditorului", "Подпись и штамп отправителя", "Signature and stamp of the consignor", "", { h: 40 })}</td>
-          <td>${box("", "Semnătura și ștampila beneficiarului", "Подпись и штамп получателя", "Signature and stamp of the consignee", "", { h: 40 })}</td>
+          <td>${box("", "Semnătura și ștampila expeditorului", "Подпись и штамп отправителя", "Signature and stamp of the consignor", "", { style: "min-height:38px" })}</td>
+          <td>${box("", "Semnătura și ștampila beneficiarului", "Подпись и штамп получателя", "Signature and stamp of the consignee", "", { style: "min-height:38px" })}</td>
         </tr>
       </table>
 
       <!-- 25 / 26 / 27 — numere de înmatriculare, marca, tarif -->
       <table>
         <tr>
-          <td style="width:28%;padding:2px 4px 3px;">
+          <td style="width:28%;padding:2px 5px 3px;">
             <div class="cx-hd"><span class="cx-n">25</span><span class="cx-l">Nr. înmatriculare / <i>Регистрац. номер</i> / Registered number</span></div>
             <div style="display:flex;margin-top:2px;">
               <div style="flex:1;border:1px solid #000;padding:1px 3px;"><div style="font-size:6px;color:#111;">Tractor / <i>Тягач</i></div><div class="cx-v">${vehicle}</div></div>
               <div style="flex:1;border:1px solid #000;border-left:0;padding:1px 3px;"><div style="font-size:6px;color:#111;">Semirem. / <i>Полуприцеп</i></div><div class="cx-v">${trailer}</div></div>
             </div>
           </td>
-          <td style="width:22%;padding:2px 4px 3px;">
+          <td style="width:22%;padding:2px 5px 3px;">
             <div class="cx-hd"><span class="cx-n">26</span><span class="cx-l">Marca / <i>Марка</i> / Mark</span></div>
             <div style="display:flex;margin-top:2px;">
               <div style="flex:1;border:1px solid #000;padding:1px 3px;min-height:20px;font-size:6px;color:#111;">Tractor / <i>Тягач</i></div>
               <div style="flex:1;border:1px solid #000;border-left:0;padding:1px 3px;min-height:20px;font-size:6px;color:#111;">Semirem. / <i>Полуприцеп</i></div>
             </div>
           </td>
-          <td style="width:50%;padding:2px 4px 3px;">
+          <td style="width:50%;padding:2px 5px 3px;">
             <div class="cx-hd"><span class="cx-n">27</span><span class="cx-l">Tarif I / <i>Тариф I за 1 км</i> · Distanța tarifară / <i>Тарифное расстояние</i> · % utilizare / <i>Поясной коэфф.</i> · Alte suplimente / <i>Прочие доплаты</i> · Sumă / <i>Сумма</i></span></div>
           </td>
         </tr>
@@ -6475,12 +6489,12 @@ function buildCmrHtml(delivery) {
           <td style="width:16%">Отчисления</td>
         </tr>
         <tr>
-          <td style="height:18px">Тариф II</td>
+          <td style="height:16px">Тариф II</td>
           <td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>
           <td>Оплачено заказчиком</td>
         </tr>
         <tr>
-          <td style="height:18px"><span class="cx-gnum">29</span> Тариф III</td>
+          <td style="height:16px"><span class="cx-gnum">29</span> Тариф III</td>
           <td></td><td></td><td></td><td></td><td></td><td></td><td></td>
           <td>К оплате</td>
           <td>Валюта / Код плательщика</td>
