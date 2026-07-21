@@ -6357,8 +6357,10 @@ function buildCmrHtml(delivery) {
   </style>
   <div class="cmrx">
     <div class="cx-outer">
-      <!-- ANTET: stânga casete 1–5, dreapta titlu + casete 16–18 -->
-      <table>
+      <!-- ANTET: stânga casete 1–5, dreapta titlu + casete 16–18.
+           Acest bloc absoarbe spațiul liber al paginii (cx-fill) => casetele 1,2 și
+           16,17,18 sunt MARI (loc pentru ștampile), ca pe formularul original. -->
+      <table class="cx-fill">
         <tr>
           <td style="width:60%;padding:0;">
             <div class="cx-col">
@@ -6395,8 +6397,8 @@ function buildCmrHtml(delivery) {
         </tr>
       </table>
 
-      <!-- CASETELE MĂRFII 6–12 — zona care umple restul paginii (cx-fill) -->
-      <table class="cx-goods cx-fill">
+      <!-- CASETELE MĂRFII 6–12 — înălțime FIXĂ, mai scurtă (nu mai umple pagina) -->
+      <table class="cx-goods">
         <tr class="cx-ghead">
           <td style="width:12%"><span class="cx-gnum">6</span> Mărci și numere<br><i>Знаки и номера</i><br>Marks and Nos</td>
           <td style="width:10%"><span class="cx-gnum">7</span> Nr. de colete<br><i>Количество мест</i><br>Number of packages</td>
@@ -6407,7 +6409,7 @@ function buildCmrHtml(delivery) {
           <td style="width:10%"><span class="cx-gnum">12</span> Cubaj, m³<br><i>Объем, м³</i><br>Volume in m³</td>
         </tr>
         <tr>
-          <td class="cx-rule"></td>
+          <td class="cx-rule" style="height:120px"></td>
           <td class="cx-rule"></td>
           <td class="cx-gval cx-rule" style="text-align:center;">${delivery.product ? "în vrac" : ""}</td>
           <td class="cx-gval cx-rule">${goodsVal}</td>
