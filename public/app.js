@@ -5703,12 +5703,37 @@ function openOfficialDocWindow(bodyHtml, title) {
   .of-sign .ln { border-top:1px solid #000; padding-top:3px; margin-top:18px; }
   .of-just { text-align:justify; margin:4px 0; font-size:11px; }
   .of-hr { border:0; border-top:1px solid #000; margin:8px 0; }
-  @media print { .no-print { display:none; } }
+  /* Editare directă pe foaie (contenteditable): fundal ușor + contur, doar în modul editare. */
+  #of-doc:focus, #of-doc [contenteditable]:focus { outline:none; }
+  #of-doc.editing { outline:2px dashed #1B5E3F; outline-offset:6px; background:#fffdf2; }
+  #of-doc.editing:focus-within :focus { outline:1px dotted #1B5E3F; }
+  @media print {
+    .no-print { display:none; }
+    #of-doc.editing { outline:none !important; background:#fff !important; }
+  }
 </style></head><body>
-${bodyHtml}
+<div id="of-doc">${bodyHtml}</div>
 <div class="no-print" style="text-align:center;margin-top:20px;">
+  <button id="of-edit-btn" type="button" style="padding:9px 22px;font-size:14px;background:#fff;color:#1B5E3F;border:2px solid #1B5E3F;border-radius:6px;cursor:pointer;margin-right:8px;">✏️ Editează text</button>
   <button onclick="window.print()" style="padding:9px 22px;font-size:14px;background:#1B5E3F;color:#fff;border:0;border-radius:6px;cursor:pointer;">Printează</button>
+  <div id="of-edit-hint" style="margin-top:8px;font-size:12px;color:#555;">Apasă „Editează text", apoi dă click oriunde în document și scrie ce ai nevoie. Textul se tipărește, dar nu se salvează în program.</div>
 </div>
+<script>
+  (function () {
+    var doc = document.getElementById("of-doc");
+    var btn = document.getElementById("of-edit-btn");
+    var on = false;
+    btn.addEventListener("click", function () {
+      on = !on;
+      doc.contentEditable = on ? "true" : "false";
+      doc.classList.toggle("editing", on);
+      btn.textContent = on ? "✓ Gata editarea" : "✏️ Editează text";
+      btn.style.background = on ? "#1B5E3F" : "#fff";
+      btn.style.color = on ? "#fff" : "#1B5E3F";
+      if (on) doc.focus();
+    });
+  })();
+</script>
 </body></html>`;
   win.document.write(doc);
   win.document.close();
