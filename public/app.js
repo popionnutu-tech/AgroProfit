@@ -477,39 +477,92 @@ window.fetch = apiFetch;
 // ---- Fotografii (dovada informativa la receptii/livrari) ----
 const photoFields = {};
 
+// Extensii de imagine acceptate (unele telefoane Android nu setează deloc tipul MIME).
+// Se potrivesc cu ce știe serverul să valideze prin sniff (JPEG/PNG/WEBP/HEIC/HEIF).
+const IMG_EXT_RE = /\.(jpe?g|png|webp|heic|heif)$/i;
+
+// Un fisier arata a poza daca: MIME image/*, SAU tip gol (Android nu-l pune, dar input-ul e accept="image/*"),
+// SAU extensia e de imagine. Serverul verifica oricum octetii reali (sniff), deci nu acceptam gunoi.
+function looksLikeImage(f) {
+  if (!f) return false;
+  if (f.type && f.type.startsWith("image/")) return true;
+  if (!f.type) return true;
+  return IMG_EXT_RE.test(f.name || "");
+}
+
+// Deseneaza o sursa (bitmap sau <img>) pe canvas, redimensionata la max 1280px, si o da ca JPEG 0.7.
+function drawToJpeg(source, srcW, srcH) {
+  const maxDim = 1280;
+  let w = srcW;
+  let h = srcH;
+  if (w > maxDim || h > maxDim) {
+    const s = maxDim / Math.max(w, h);
+    w = Math.round(w * s);
+    h = Math.round(h * s);
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  canvas.getContext("2d").drawImage(source, 0, 0, w, h);
+  return new Promise((res) => canvas.toBlob(res, "image/jpeg", 0.7));
+}
+
 // Comprima o imagine la max ~1280px / JPEG 0.7 inainte de upload (rapid pe date mobile).
+// 3 incercari: createImageBitmap -> <img> -> (daca nu se poate, ex. HEIC pe Chrome) urca originalul.
 async function compressImage(file) {
-  if (!file || !file.type || !file.type.startsWith("image/")) return file;
+  if (!file) return file;
+  // 1) rapid, cand formatul e suportat
   try {
     const bitmap = await createImageBitmap(file);
-    const maxDim = 1280;
-    let w = bitmap.width;
-    let h = bitmap.height;
-    if (w > maxDim || h > maxDim) {
-      const s = maxDim / Math.max(w, h);
-      w = Math.round(w * s);
-      h = Math.round(h * s);
+    try {
+      const blob = await drawToJpeg(bitmap, bitmap.width, bitmap.height);
+      if (blob) return blob;
+    } finally {
+      if (bitmap.close) bitmap.close();
     }
-    const canvas = document.createElement("canvas");
-    canvas.width = w;
-    canvas.height = h;
-    canvas.getContext("2d").drawImage(bitmap, 0, 0, w, h);
-    const blob = await new Promise((res) => canvas.toBlob(res, "image/jpeg", 0.7));
-    if (bitmap.close) bitmap.close();
-    return blob || file;
-  } catch (_) {
-    return file;
-  }
+  } catch (_) {}
+  // 2) fallback prin <img> (unele formate pe care createImageBitmap nu le accepta)
+  try {
+    const blob = await new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = async () => {
+        try {
+          const b = await drawToJpeg(img, img.naturalWidth || img.width, img.naturalHeight || img.height);
+          URL.revokeObjectURL(url);
+          resolve(b);
+        } catch (e) {
+          URL.revokeObjectURL(url);
+          reject(e);
+        }
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error("decode"));
+      };
+      img.src = url;
+    });
+    if (blob) return blob;
+  } catch (_) {}
+  // 3) nu am putut converti (ex. HEIC pe Chrome): urcam originalul, serverul il accepta si stocheaza
+  return file;
 }
 
 // Urca imagini -> array de cai stocate.
 async function uploadPhotos(files) {
-  const list = Array.from(files || []).filter((f) => f && f.type && f.type.startsWith("image/"));
-  if (!list.length) return [];
+  const all = Array.from(files || []).filter(Boolean);
+  const list = all.filter(looksLikeImage);
+  if (!list.length) {
+    if (all.length) throw new Error("Fisierul selectat nu pare o poza. Incearca din nou, direct din camera.");
+    return [];
+  }
   const fd = new FormData();
   for (const f of list) {
     const blob = await compressImage(f);
-    fd.append("photos", blob, (f.name || "poza").replace(/\.[^.]+$/, "") + ".jpg");
+    const name = blob && blob.type === "image/jpeg"
+      ? (f.name || "poza").replace(/\.[^.]+$/, "") + ".jpg"
+      : (f.name || "poza.jpg");
+    fd.append("photos", blob, name);
   }
   const res = await fetch("/api/uploads", { method: "POST", body: fd });
   if (!res.ok) {

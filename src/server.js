@@ -130,7 +130,13 @@ app.use("/api", requireAuth);
 const photoUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 8 * 1024 * 1024, files: 8 },
-  fileFilter: (req, file, cb) => cb(null, photoStore.isImageMime(file.mimetype))
+  // Poarta REALA de validare e sniff-ul pe octeti din photoStore.savePhoto (respinge orice nu e imagine).
+  // Aici lasam sa treaca imaginile cunoscute + cazul Android/HEIC (unele telefoane trimit tip gol sau
+  // "application/octet-stream"). Astfel un HEIC valid nu mai e aruncat inainte de sniff.
+  fileFilter: (req, file, cb) => {
+    const mt = String(file.mimetype || "").toLowerCase();
+    cb(null, photoStore.isImageMime(mt) || mt === "" || mt === "application/octet-stream");
+  }
 });
 
 app.post(
