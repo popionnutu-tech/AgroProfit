@@ -4605,11 +4605,32 @@ async function loadConfig() {
   }
 }
 
+// Prima zi a lunii curente, format "YYYY-MM-01" (pentru filtrele de perioadă).
+function firstDayOfCurrentMonthISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+}
+
+// Implicit, tabelele „recente" (recepții, procesări, transferuri, plăți, livrări) arată LUNA
+// CURENTĂ — filtrul „De la" se pune pe 1 ale lunii. Pentru a vedea istoric, utilizatorul schimbă
+// filtrul. Se aplică la fiecare autentificare (loadDashboard); în timpul sesiunii filtrele rămân
+// cum le pune utilizatorul.
+function applyCurrentMonthDefaults() {
+  const from = firstDayOfCurrentMonthISO();
+  ["receipt-date-from", "processing-date-from", "transfer-date-from", "transaction-date-from", "delivery-date-from"]
+    .forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.value = from;
+    });
+}
+
 async function loadDashboard() {
   const reportToday = new Date().toISOString().slice(0, 10);
   if (dailyReportFromEl) dailyReportFromEl.value = reportToday;
   if (dailyReportToEl) dailyReportToEl.value = reportToday;
   openingDocumentDateEl.value = new Date().toISOString().slice(0, 10);
+  // Tabelele „recente" pornesc pe luna curentă (istoricul se vede schimbând filtrul „De la").
+  applyCurrentMonthDefaults();
   // Config first — silos panel and many other widgets depend on storageLocations + products.
   await loadConfig();
   await Promise.all([
