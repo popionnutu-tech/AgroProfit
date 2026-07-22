@@ -775,6 +775,10 @@ function setView(view) {
   if (view === "documente" && typeof fillPrintDocPanel === "function") {
     fillPrintDocPanel();
   }
+  // Selectoarele „Firmă pe documente/antet" (Livrări + Act de verificare) — populate cu companiile curente.
+  if (typeof fillHeaderCompanySelects === "function") {
+    fillHeaderCompanySelects();
+  }
 
   try {
     window.localStorage.setItem("active-view", view);
@@ -5772,30 +5776,88 @@ function openPrintWindow(bodyHtml, title) {
   .doc-sign { display:flex; justify-content:space-between; margin-top:40px; }
   .doc-sign div { width:45%; border-top:1px solid #333; padding-top:6px; font-size:11px; text-align:center; color:#555; }
   .doc-foot { margin-top:30px; font-size:10px; color:#999; text-align:center; border-top:1px solid #eee; padding-top:8px; }
-  @media print { .no-print { display:none; } }
+  #of-doc.editing { outline:2px dashed #1B5E3F; outline-offset:6px; background:#fffdf2; }
+  #of-doc:focus, #of-doc [contenteditable]:focus { outline:none; }
+  @media print { .no-print { display:none; } #of-doc.editing { outline:none !important; background:#fff !important; } }
 </style></head><body>
-${bodyHtml}
+<div id="of-doc">${bodyHtml}</div>
 <div class="no-print" style="text-align:center;margin-top:24px;">
+  <button id="of-edit-btn" type="button" style="padding:10px 22px;font-size:14px;background:#fff;color:#1B5E3F;border:2px solid #1B5E3F;border-radius:6px;cursor:pointer;margin-right:8px;">✏️ Editează text</button>
   <button onclick="window.print()" style="padding:10px 24px;font-size:14px;background:#1B5E3F;color:#fff;border:0;border-radius:6px;cursor:pointer;">Printează</button>
+  <div id="of-edit-hint" style="margin-top:8px;font-size:12px;color:#555;">Apasă „Editează text", apoi dă click oriunde în document și scrie ce ai nevoie. Textul se tipărește, dar nu se salvează în program.</div>
 </div>
 <div class="doc-foot">Generat de AgroProfit+ · ${new Date().toLocaleString("ro-RO")}</div>
+<script>
+  (function () {
+    var doc = document.getElementById("of-doc");
+    var btn = document.getElementById("of-edit-btn");
+    var on = false;
+    btn.addEventListener("click", function () {
+      on = !on;
+      doc.contentEditable = on ? "true" : "false";
+      doc.classList.toggle("editing", on);
+      btn.textContent = on ? "✓ Gata editarea" : "✏️ Editează text";
+      btn.style.background = on ? "#1B5E3F" : "#fff";
+      btn.style.color = on ? "#fff" : "#1B5E3F";
+      if (on) doc.focus();
+    });
+  })();
+</script>
 </body></html>`;
   win.document.write(doc);
   win.document.close();
 }
 
-function docHeader() {
+// Antetul documentelor „interne". Implicit = AgroProfit+ (ca până acum). Dacă se alege una din
+// companiile utilizatorului, antetul afișează firma respectivă (denumire, IDNO, adresă).
+function docHeader(company) {
+  const co = company && (company.name || company.shortName) ? company : null;
+  const dateStr = new Date().toLocaleDateString("ro-RO");
+  if (!co) {
+    return `<div class="doc-head">
+      <div class="doc-brand">AgroProfit+<small>Partenerul tău în agricultură</small></div>
+      <div style="text-align:right;font-size:11px;color:#666;">Data: ${dateStr}</div>
+    </div>`;
+  }
+  const sub = [co.idno ? "IDNO " + co.idno : "", co.vatCode ? "Cod TVA " + co.vatCode : ""].filter(Boolean).join(" · ");
   return `<div class="doc-head">
-    <div class="doc-brand">AgroProfit+<small>Partenerul tău în agricultură</small></div>
-    <div style="text-align:right;font-size:11px;color:#666;">Data: ${new Date().toLocaleDateString("ro-RO")}</div>
+    <div class="doc-brand" style="font-size:17px;">${escapeComboHtml(co.name || co.shortName)}${sub ? `<small>${escapeComboHtml(sub)}</small>` : ""}</div>
+    <div style="text-align:right;font-size:11px;color:#666;">${co.address ? escapeComboHtml(co.address) + "<br>" : ""}Data: ${dateStr}</div>
   </div>`;
+}
+
+// Compania aleasă pentru antetul documentelor de tipar. Gol → null → antetul implicit AgroProfit+.
+// ATENȚIE: NU contopi cu resolveCompany(). Semantica de fallback e intenționat diferită:
+// resolveCompany întoarce mereu o firmă (pt. documentele OFICIALE: contract/ordin de plată),
+// iar aici întoarcem null când nu s-a ales nimic, tocmai ca antetul „intern" să rămână AgroProfit+.
+function printHeaderCompany(companyId) {
+  if (companyId == null || companyId === "") return null;
+  return (currentConfig?.companies || []).find((c) => Number(c.id) === Number(companyId)) || null;
+}
+
+// Opțiunile pentru un selector de companie-antet: prima = „AgroProfit+ (implicit)" (valoare goală).
+function companyHeaderOptionsHtml(selectedId) {
+  const sel = selectedId == null ? "" : String(selectedId);
+  const companies = (currentConfig?.companies || []).filter((c) => c.active !== false);
+  const opts = [`<option value=""${sel === "" ? " selected" : ""}>AgroProfit+ (implicit)</option>`]
+    .concat(companies.map((c) => `<option value="${escapeComboHtml(String(c.id))}"${sel === String(c.id) ? " selected" : ""}>${escapeComboHtml(c.shortName || c.name)}</option>`));
+  return opts.join("");
+}
+
+// Populează toate selectoarele de companie-antet din pagină (Livrări + Act de verificare).
+function fillHeaderCompanySelects() {
+  document.querySelectorAll("select.doc-header-company").forEach((el) => {
+    const prev = el.value;
+    el.innerHTML = companyHeaderOptionsHtml(prev);
+    if (prev) el.value = prev;
+  });
 }
 
 function moneyRo(n) {
   return new Intl.NumberFormat("ro-RO", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(n) || 0);
 }
 
-function buildStatementPrintHtml(data) {
+function buildStatementPrintHtml(data, company) {
   const p = data.partner;
   const t = data.totals;
   const receiptRows = data.receipts.map((r) => `
@@ -5826,7 +5888,7 @@ function buildStatementPrintHtml(data) {
       <tbody>${collectionRows || '<tr><td colspan="5">Nicio încasare</td></tr>'}</tbody>
       <tfoot><tr><td colspan="4">TOTAL ÎNCASAT</td><td>${moneyRo(t.totalCollected || 0)} MDL</td></tr></tfoot>
     </table>` : "";
-  return `${docHeader()}
+  return `${docHeader(company)}
     <div class="doc-title">Act de verificare</div>
     <div class="doc-subtitle">${periodText}</div>
     <div class="doc-party" style="margin-bottom:14px;">
@@ -6394,7 +6456,7 @@ function buildInvoicePrintHtml(delivery) {
   </div>`;
 }
 
-function buildPurchaseActPrintHtml(delivery) {
+function buildPurchaseActPrintHtml(delivery, company) {
   // Act de achizitie is based on the source receipt's supplier
   const receipt = (receiptsCache || []).find((r) => Number(r.id) === Number(delivery.receiptId));
   const supplier = receipt ? findPartnerByName(receipt.supplier) : null;
@@ -6416,7 +6478,7 @@ function buildPurchaseActPrintHtml(delivery) {
   const tax = Math.max(Number((gross - netPay).toFixed(2)), 0);
   // Pretul afisat se derivă din brut, ca „cantitate × preț = Sumă" să iasă exact pe hârtie.
   const price = qty > 0 ? Number((gross / (qty * 1000)).toFixed(4)) : priceRaw;
-  return `${docHeader()}
+  return `${docHeader(company)}
     <div class="doc-title">Act de achiziție</div>
     <div class="doc-subtitle">${formatDateShort(delivery.createdAt)} · Recepție #${escapeComboHtml(String(delivery.receiptId))}</div>
     <div class="doc-party" style="margin-bottom:14px;">
@@ -6504,11 +6566,11 @@ function deliveryQtyTonnes(delivery) {
   return Number(delivery.netWeight > 0 ? delivery.netWeight : delivery.deliveredQuantity || delivery.plannedQuantity || 0);
 }
 
-function buildBonCantarHtml(delivery) {
+function buildBonCantarHtml(delivery, company) {
   const seller = getSellerPartner(delivery);
   const buyer = getBuyerPartner(delivery);
   const qty = deliveryQtyTonnes(delivery);
-  return `${docHeader()}
+  return `${docHeader(company)}
     <div class="doc-title">Bon de cântar</div>
     <div class="doc-subtitle">Nr. ${delivery.id} · ${formatDateShort(delivery.invoiceDate || delivery.createdAt)}</div>
     <div class="doc-parties">
@@ -6807,10 +6869,10 @@ function buildImputernicireHtml(delivery) {
     </div>`;
 }
 
-function buildDeclaratieHtml(delivery) {
+function buildDeclaratieHtml(delivery, company) {
   const seller = getSellerPartner(delivery);
   const buyer = getBuyerPartner(delivery);
-  return `${docHeader()}
+  return `${docHeader(company)}
     <div class="doc-title">Declarație</div>
     <div class="doc-subtitle">${formatDateShort(delivery.invoiceDate || delivery.createdAt)}</div>
     <p style="font-size:13px;line-height:1.7;margin:16px 0;">
@@ -6825,6 +6887,9 @@ function buildDeclaratieHtml(delivery) {
 function printDeliveryDocument(deliveryId, docType) {
   const delivery = (deliveriesCache || []).find((d) => Number(d.id) === Number(deliveryId));
   if (!delivery) return;
+  // Compania de antet aleasă în pagina Livrări (gol → AgroProfit+ implicit). Se aplică documentelor
+  // „interne" cu antet de firmă (Bon, Act de achiziție, Declarație).
+  const headerCompany = printHeaderCompany(document.getElementById("delivery-doc-company")?.value);
   let html = "";
   let title = "";
   if (docType === "invoice") { html = buildInvoicePrintHtml(delivery); title = `Factura ${delivery.invoiceNumber || delivery.id}`; }
@@ -6835,13 +6900,13 @@ function printDeliveryDocument(deliveryId, docType) {
       alert("Actul de achiziție este disponibil doar pentru livrări legate de o recepție (cu furnizor).");
       return;
     }
-    html = buildPurchaseActPrintHtml(delivery); title = `Act achizitie ${delivery.id}`;
+    html = buildPurchaseActPrintHtml(delivery, headerCompany); title = `Act achizitie ${delivery.id}`;
   }
   else if (docType === "certificate") { html = buildCertificatePrintHtml(delivery); title = `Certificat calitate ${delivery.id}`; }
-  else if (docType === "bon") { html = buildBonCantarHtml(delivery); title = `Bon cantar ${delivery.id}`; }
+  else if (docType === "bon") { html = buildBonCantarHtml(delivery, headerCompany); title = `Bon cantar ${delivery.id}`; }
   else if (docType === "cmr") { html = buildCmrHtml(delivery); title = `CMR ${delivery.id}`; }
   else if (docType === "imputernicire") { html = buildImputernicireHtml(delivery); title = `Imputernicire ${delivery.id}`; }
-  else if (docType === "declaratie") { html = buildDeclaratieHtml(delivery); title = `Declaratie ${delivery.id}`; }
+  else if (docType === "declaratie") { html = buildDeclaratieHtml(delivery, headerCompany); title = `Declaratie ${delivery.id}`; }
   // Formele refăcute fidel modelelor originale se tipăresc alb-negru, fără antet AgroProfit.
   const officialDocs = ["invoice", "certificate", "cmr", "imputernicire"];
   if (html) {
@@ -7012,7 +7077,8 @@ function renderSupplierStatement(data) {
 
 function printSupplierStatement() {
   if (!lastStatement) return;
-  const html = buildStatementPrintHtml(lastStatement);
+  const headerCompany = printHeaderCompany(document.getElementById("statement-doc-company")?.value);
+  const html = buildStatementPrintHtml(lastStatement, headerCompany);
   openPrintWindow(html, `Act de verificare - ${lastStatement.partner.name}`);
 }
 
