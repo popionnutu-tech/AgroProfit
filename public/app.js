@@ -1064,8 +1064,11 @@ function renderSilosGrid(summary) {
         ? `<span class="silo-product" style="color:${palette.edge};" title="${productsTooltip}"><span class="silo-product-dot" style="background:${palette.fill};border-color:${palette.edge};"></span>${productsLabel}</span>`
         : '<span class="silo-product silo-product-empty">gol</span>';
 
+      // Gropile de primire (orice locație care nu e cilindru) primesc un aspect distinct:
+      // verzi și mai mici decât cilindrii (clasa silo-card--pit).
+      const isPit = String(cyl.type || "").toLowerCase() !== "cilindru";
       return `
-        <article class="silo-card${ringClass}" data-id="${escapeComboHtml(String(cyl.id))}" title="${escapeComboHtml(cyl.name)} · ${formatNumber(filled)}/${formatNumber(capacity)} t · ${productsTooltip || 'gol'}">
+        <article class="silo-card${ringClass}${isPit ? " silo-card--pit" : ""}" data-id="${escapeComboHtml(String(cyl.id))}" title="${escapeComboHtml(cyl.name)} · ${formatNumber(filled)}/${formatNumber(capacity)} t · ${productsTooltip || 'gol'}">
           <div class="silo-card-head">
             <span class="silo-name">${escapeComboHtml(cyl.name)}</span>
             ${productHead}
@@ -1118,7 +1121,11 @@ function renderSilosGrid(summary) {
     const head = label ? `<div class="silo-row-label">${label}</div>` : "";
     return `${head}<div class="silo-row" style="--cols:${Math.min(8, Math.max(1, locs.length))}">${locs.map(siloCard).join("")}</div>`;
   };
-  silosGridEl.innerHTML = group(cylinders, pits.length ? "Cilindri" : "") + group(pits, "Gropi de primire");
+  // Rândul 2 începe cu Cilindrul 7 (dacă există), apoi gropile de primire. Rândul 1 = ceilalți cilindri.
+  const c7 = cylinders.find((c) => /(^|\D)0*7(\D|$)/.test(String(c.name || "")));
+  const row1 = cylinders.filter((c) => c !== c7);
+  const row2 = [...(c7 ? [c7] : []), ...pits];
+  silosGridEl.innerHTML = group(row1, "Cilindri") + group(row2, "");
 
   // Aggregate stock per product across all cylinders (Etapa 3)
   renderStockByProduct(data);
@@ -2005,37 +2012,39 @@ function renderReceiptTotals(rows) {
     receiptsFootEl.innerHTML = "";
     return;
   }
-  // Totals per product: cantitate / sumă către plată / sumă achitată
-  const byProduct = {};
-  let totalNet = 0;
-  let totalPay = 0;
-  let totalPaid = 0;
+  // Total PE COLOANĂ, aliniat sub fiecare coloană: Cantitate / Apă / Valoare / Achitat / Rest.
+  // (Anulatele nu intră în totaluri.)
+  let totalNet = 0, totalWater = 0, totalPay = 0, totalPaid = 0, totalRest = 0;
   rows.forEach((item) => {
     if (item.status === "Anulat") return;
-    const net = Number(item.provisionalNetQuantity || item.quantity || 0);
-    const pay = Number(item.amountToPay ?? item.preliminaryPayableAmount ?? 0);
-    const paid = Number(item.paidAmount || 0);
-    totalNet += net;
-    totalPay += pay;
-    totalPaid += paid;
-    const key = item.product || "—";
-    if (!byProduct[key]) byProduct[key] = { net: 0, pay: 0, paid: 0 };
-    byProduct[key].net += net;
-    byProduct[key].pay += pay;
-    byProduct[key].paid += paid;
+    const valoare = Number(item.amountToPay ?? item.preliminaryPayableAmount ?? 0);
+    const achitat = Number(item.paidAmount || 0);
+    totalNet += Number(item.provisionalNetQuantity || item.quantity || 0);
+    totalWater += Number(item.estimatedWaterLoss || 0);
+    totalPay += valoare;
+    totalPaid += achitat;
+    totalRest += Number(item.soldRestant ?? Math.max(valoare - achitat, 0));
   });
-  const fin = canAccess("finance");
-  const perProduct = Object.entries(byProduct)
-    .map(([prod, v]) => fin
-      ? `${prod}: ${formatNumber(v.net)} t (${formatNumber(v.net * 1000)} kg) / plată ${currency.format(v.pay)} / achitat ${currency.format(v.paid)}`
-      : `${prod}: ${formatNumber(v.net)} t (${formatNumber(v.net * 1000)} kg)`)
-    .join("<br>");
-  const finPart = fin
-    ? `&nbsp;·&nbsp; Plată: <b>${currency.format(totalPay)}</b> · Achitat: <b>${currency.format(totalPaid)}</b> · Rest: <b>${currency.format(Math.max(totalPay - totalPaid, 0))}</b>`
-    : "";
+  const waterKg = Math.round(totalWater * 1000);
+  const qtyCell = `<b>${formatNumber(totalNet)} t</b><br><small>${formatNumber(totalNet * 1000)} kg</small>`;
+  // 17 coloane: ID,Data,Furnizor,Produs | Cantitate | Apă | Masă brută | Tara | Locatie |
+  //             Valoare | Achitat | Rest | Data plată | Stare | Status | Detalii | Acțiuni
   receiptsFootEl.innerHTML = `
     <tr class="totals-row">
-      <td colspan="17">TOTAL (${rows.length} recepții) &nbsp;·&nbsp; Net: <b>${formatNumber(totalNet)} t (${formatNumber(totalNet * 1000)} kg)</b>${finPart}<br>${perProduct}</td>
+      <td colspan="4">TOTAL · ${rows.length} recepții</td>
+      <td>${qtyCell}</td>
+      <td>${waterKg > 0 ? "<b>" + formatNumber(waterKg) + " kg</b>" : "—"}</td>
+      <td></td>
+      <td></td>
+      <td></td>
+      <td class="col-fin"><b>${currency.format(totalPay)}</b></td>
+      <td class="col-fin">${currency.format(totalPaid)}</td>
+      <td class="col-fin"><b>${currency.format(totalRest)}</b></td>
+      <td class="col-fin"></td>
+      <td class="col-fin"></td>
+      <td></td>
+      <td></td>
+      <td class="col-fin"></td>
     </tr>
   `;
 }
@@ -2585,43 +2594,41 @@ function renderDeliveryTotals(rows) {
     deliveriesFootEl.innerHTML = "";
     return;
   }
-  // Modul B: totaluri cu sumă în valută și în lei, pe produs
-  const byProduct = {};
+  // Totaluri: cantitate (tone), sumă factură (lei + valută pe monedă).
   let totalQty = 0;
   let totalLei = 0;
   const totalForeignByCur = {};
   rows.forEach((item) => {
     if (item.status === "Anulat") return; // livrarea anulată nu intră în totaluri
     const money = deliveryInvoiceTotals(item);
-    const qty = money.tonnes;
-    totalQty += qty;
-    const lei = money.totalLei;
-    const cur = money.cur;
-    const foreign = money.totalForeign;
-    totalLei += lei;
-    if (cur !== "MDL") totalForeignByCur[cur] = (totalForeignByCur[cur] || 0) + foreign;
-    const key = item.product || "—";
-    if (!byProduct[key]) byProduct[key] = { qty: 0, lei: 0, foreign: {} };
-    byProduct[key].qty += qty;
-    byProduct[key].lei += lei;
-    if (cur !== "MDL") byProduct[key].foreign[cur] = (byProduct[key].foreign[cur] || 0) + foreign;
+    totalQty += money.tonnes;
+    totalLei += money.totalLei;
+    if (money.cur !== "MDL") totalForeignByCur[money.cur] = (totalForeignByCur[money.cur] || 0) + money.totalForeign;
   });
-  const fin = canAccess("finance");
+  // Apă totală pe livrări (sumă kg, ignorând valorile necunoscute). Index construit o dată.
+  const waterIdx = buildReceiptHumidityIndex();
+  let totalWaterKg = 0;
+  rows.forEach((item) => {
+    if (item.status === "Anulat") return;
+    const w = deliveryWaterKg(item, waterIdx);
+    if (w !== null) totalWaterKg += w;
+  });
   const foreignStr = Object.entries(totalForeignByCur).map(([c, v]) => `${formatNumber(v)} ${c}`).join(" + ");
-  const perProduct = Object.entries(byProduct)
-    .map(([prod, v]) => {
-      const fStr = Object.entries(v.foreign).map(([c, val]) => `${formatNumber(val)} ${c}`).join(" + ");
-      return fin
-        ? `${prod}: ${formatNumber(v.qty)} t${fStr ? " / " + fStr : ""} / ${currency.format(v.lei)}`
-        : `${prod}: ${formatNumber(v.qty)} t`;
-    })
-    .join("  ·  ");
-  const finPart = fin
-    ? `&nbsp;·&nbsp; ${foreignStr ? "Valută: <b>" + foreignStr + "</b> · " : ""}Lei: <b>${currency.format(totalLei)}</b>`
-    : "";
+  const facturaCell = `<b>${currency.format(totalLei)}</b>${foreignStr ? `<br><small>${foreignStr}</small>` : ""}`;
+  // 13 coloane: ID,Data,Sursă,Cumpărător | Vânzător | Produs | Cantitate | Apă | Mașina |
+  //             Preț | Sumă factură | Achitată | Status
   deliveriesFootEl.innerHTML = `
     <tr class="totals-row">
-      <td colspan="13">TOTAL (${rows.length} livrări) &nbsp;·&nbsp; Cantitate: <b>${formatNumber(totalQty)} t</b>${finPart}<br>${perProduct}</td>
+      <td colspan="4">TOTAL · ${rows.length} livrări</td>
+      <td class="col-fin"></td>
+      <td></td>
+      <td><b>${formatNumber(totalQty)} t</b></td>
+      <td>${totalWaterKg !== 0 ? "<b>" + (totalWaterKg >= 0 ? formatNumber(Math.round(totalWaterKg)) : "−" + formatNumber(Math.abs(Math.round(totalWaterKg)))) + " kg</b>" : "—"}</td>
+      <td></td>
+      <td class="col-fin"></td>
+      <td class="col-fin">${facturaCell}</td>
+      <td class="col-fin"></td>
+      <td></td>
     </tr>
   `;
 }

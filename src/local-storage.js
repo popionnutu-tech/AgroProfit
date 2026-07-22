@@ -1691,10 +1691,11 @@ async function createReceipt(payload) {
     ? receiptConfig.storageLocations.find((l) => Number(l.id) === Number(payload.locationId))
     : receiptConfig.storageLocations.find((l) => l.name === payload.location);
   let mixedProductConfirmed = false;
+  const receiptSummary = await getStockSummary();
   // Regula "un produs / locatie" se aplica oriunde NU e bifat "Permite mai multe produse"
   // (cilindri + groapa de primire etc.); doar Parcare afara (multiProduct) e exceptata.
   if (receiptLocation && receiptLocation.multiProduct !== true) {
-    const conflict = findCylinderConflict(await getStockSummary(), receiptLocation, payload.product || "");
+    const conflict = findCylinderConflict(receiptSummary, receiptLocation, payload.product || "");
     if (conflict) {
       if (!payload.allowMixedProduct) {
         throw new Error(
@@ -1702,6 +1703,24 @@ async function createReceipt(payload) {
         );
       }
       mixedProductConfirmed = true;
+    }
+  }
+
+  // Restrictie de CAPACITATE la receptie (ca la transfer): nu accepta peste limita locatiei.
+  // capacity=0/nesetat -> fara limita (ex. Parcare afara). Cantitatea care intra in stoc = netul provizoriu.
+  if (receiptLocation) {
+    const capacityTn = Number(receiptLocation.capacity || 0) / 1000; // kg -> tone
+    if (capacityTn > 0) {
+      const destCurrent = (receiptSummary.byLocation || [])
+        .filter((it) => sameLocation(it.location, receiptLocation.name) && Number(it.quantity || 0) > 0)
+        .reduce((s, it) => s + Number(it.quantity || 0), 0);
+      const incomingTn = Number(payload.provisionalNetQuantity ?? payload.quantity ?? 0);
+      if (Math.round((destCurrent + incomingTn) * 1000) > Math.round(capacityTn * 1000)) {
+        const liber = Math.max(capacityTn - destCurrent, 0);
+        throw new Error(
+          `Capacitate depășită în ${receiptLocation.name}: maxim ${Math.round(capacityTn * 1000)} kg, ocupat ${Math.round(destCurrent * 1000)} kg, mai încap ${Math.round(liber * 1000)} kg.`
+        );
+      }
     }
   }
 

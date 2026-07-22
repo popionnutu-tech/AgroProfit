@@ -2554,6 +2554,15 @@ dialog.details-dialog { width: min(680px, 94vw); max-height: 88vh; overflow-y: a
   box-shadow: 0 10px 24px rgba(15, 61, 39, 0.12);
   border-color: var(--accent);
 }
+/* Gropile de primire: verzi și mai mici decât cilindrii (aspect distinct). */
+.silo-card--pit {
+  background: linear-gradient(180deg, #EEF6E6 0%, #DBEACB 100%);
+  border-color: #9CBF74;
+  padding: 12px 12px 12px;
+  gap: 6px;
+}
+.silo-card--pit .silo-name { color: #3B6D11; font-size: 14px; }
+.silo-card--pit .silo-visual { height: 128px; }
 .silo-card-head {
   display: flex;
   flex-direction: column;
