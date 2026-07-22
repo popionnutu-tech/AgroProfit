@@ -4054,6 +4054,13 @@ function renderEditorField(field, item) {
     `;
   }
 
+  // La parolă: oprim autocompletarea browserului (altfel umple câmpul cu o parolă salvată,
+  // posibil slabă/scurtă, care apoi pică politica strictă și blochează toată editarea).
+  // Gol = parola NU se schimbă.
+  const passwordAttrs =
+    field.type === "password"
+      ? ' autocomplete="new-password" placeholder="Lasă gol ca să NU schimbi parola"'
+      : "";
   return `
     <label>
       ${field.label}
@@ -4061,6 +4068,7 @@ function renderEditorField(field, item) {
         name="${field.name}"
         type="${field.type || "text"}"
         value="${safeValue.replace(/"/g, "&quot;")}"
+        ${passwordAttrs}
         ${field.step ? `step="${field.step}"` : ""}
       />
     </label>
@@ -5516,7 +5524,10 @@ async function updateConfigEntry(entity, id, payload) {
   });
 
   if (!response.ok) {
-    throw new Error(`Nu am putut actualiza: ${entityLabels[entity] || entity}`);
+    // Arătăm motivul REAL de la server (ex. „Parola trebuie sa aiba minim 10 caractere"),
+    // nu doar un mesaj generic — altfel utilizatorul nu știe de ce a eșuat.
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.error || `Nu am putut actualiza: ${entityLabels[entity] || entity}`);
   }
 }
 
