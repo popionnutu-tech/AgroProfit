@@ -1934,6 +1934,31 @@
           </div>
         </section>
 
+        <section class="panel reports-panel" data-access="security-admin" data-view="rapoarte" id="user-activity-panel" hidden>
+          <div class="report-accordion-list">
+            <details class="report-accordion" id="user-activity-accordion">
+              <summary>Activitate utilizatori <span id="user-activity-count" class="muted-count"></span></summary>
+              <p class="field-hint" style="margin-top:6px">Câți utilizatori sunt și cine are puțină sau nicio mișcare, după jurnalul de audit. „Activitate redusă" = sub 5 acțiuni. Cei fără mișcare apar primii.</p>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Utilizator</th>
+                      <th>Rol</th>
+                      <th>Autentificări</th>
+                      <th>Total acțiuni</th>
+                      <th>Ultima autentificare</th>
+                      <th>Ultima acțiune</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="user-activity-body"></tbody>
+                </table>
+              </div>
+            </details>
+          </div>
+        </section>
+
         <section class="stats config-stats" id="config-summary" data-view="nom-parteneri,nom-produse,nom-locatii,nom-tarife,nom-masini,nom-laborator,nom-companii,nom-utilizatori,nom-setari,nom-automatizare,nom-alerte,nom-securitate"></section>
 
         <section class="setup-grid" data-view="nom-parteneri,nom-produse,nom-locatii,nom-tarife,nom-masini,nom-laborator,nom-companii,nom-utilizatori,nom-setari,nom-automatizare,nom-alerte,nom-securitate" data-access="nomenclator-read">

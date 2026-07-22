@@ -275,6 +275,16 @@ function setCurrentUser(user) {
   if (typeof window.setBilingual === "function") {
     window.setBilingual(currentSessionUser?.roleCode === "operator");
   }
+  // La schimbarea sesiunii (mai ales logout, pe terminal partajat): golește panoul admin-only
+  // „Activitate utilizatori", ca datele randate de un admin anterior să nu rămână în DOM și să
+  // apară următorului utilizator (cu drepturi mai mici) la login. renderUserActivity le re-pune
+  // doar dacă noul utilizator are dreptul.
+  const uaBody = document.getElementById("user-activity-body");
+  const uaCount = document.getElementById("user-activity-count");
+  const uaPanel = document.getElementById("user-activity-panel");
+  if (uaBody) uaBody.innerHTML = "";
+  if (uaCount) uaCount.textContent = "";
+  if (uaPanel) uaPanel.hidden = true;
 }
 
 function canAccess(capability) {
@@ -1232,6 +1242,100 @@ function populateLossesProductFilter() {
   el.innerHTML = '<option value="">Toate produsele</option>' +
     prods.map((p) => `<option value="${escapeComboHtml(p)}">${escapeComboHtml(p)}</option>`).join("");
   if (prev) el.value = prev;
+}
+
+// Raport „Activitate utilizatori" (doar admin): câți utilizatori sunt și cine are puțină/nicio
+// mișcare, pe baza jurnalului de audit (auditLogsCache) + lista de utilizatori (currentConfig.users).
+// Doar afișare/agregare client-side; nu scrie nimic.
+function renderUserActivity() {
+  const panel = document.getElementById("user-activity-panel");
+  const body = document.getElementById("user-activity-body");
+  const countEl = document.getElementById("user-activity-count");
+  if (!panel || !body) return;
+  // Activitatea utilizatorilor e sensibilă → doar admin vede panoul.
+  // Golim ÎNTÂI conținutul (nu doar ascundem panoul): pe un terminal partajat, după logout-ul
+  // adminului, un rol mai mic care intră pe Rapoarte nu trebuie să vadă nici o clipă tabelul vechi.
+  const canSee = canAccess("security-admin");
+  if (!canSee) {
+    body.innerHTML = "";
+    if (countEl) countEl.textContent = "";
+    panel.hidden = true;
+    return;
+  }
+  panel.hidden = false;
+
+  const norm = (s) => String(s || "").trim().toLowerCase();
+  const roleName = (code) =>
+    (currentConfig?.roles || []).find((r) => r.code === code)?.name || code || "";
+  const LOW = 5; // prag pentru „activitate redusă"
+  const users = (currentConfig?.users || []).slice();
+  const logs = Array.isArray(auditLogsCache) ? auditLogsCache : [];
+
+  // Un singur pass peste jurnal: grupăm pe autor (normalizat) → {total, logins, ultimele date}.
+  // Astfel randarea e O(loguri + utilizatori), nu O(utilizatori × loguri).
+  const byAuthor = new Map();
+  for (const e of logs) {
+    const k = norm(e.user);
+    let a = byAuthor.get(k);
+    if (!a) { a = { total: 0, logins: 0, lastLogin: "", lastAction: "" }; byAuthor.set(k, a); }
+    a.total += 1;
+    if (e.createdAt > a.lastAction) a.lastAction = e.createdAt;
+    if (e.action === "login-success") {
+      a.logins += 1;
+      if (e.createdAt > a.lastLogin) a.lastLogin = e.createdAt;
+    }
+  }
+  const rows = users
+    .map((u) => {
+      // Jurnalul stochează autorul ca username (login) SAU ca nume (operații) → însumăm ambele chei.
+      const keys = [norm(u.username), norm(u.name)].filter(Boolean);
+      const seen = new Set();
+      let total = 0, logins = 0, lastLogin = "", lastAction = "";
+      for (const k of keys) {
+        if (seen.has(k)) continue;
+        seen.add(k);
+        const a = byAuthor.get(k);
+        if (!a) continue;
+        total += a.total;
+        logins += a.logins;
+        if (a.lastAction > lastAction) lastAction = a.lastAction;
+        if (a.lastLogin > lastLogin) lastLogin = a.lastLogin;
+      }
+      return {
+        name: u.name || u.username || "-",
+        role: roleName(u.roleCode),
+        active: u.active !== false,
+        logins,
+        total,
+        lastLogin,
+        lastAction
+      };
+    })
+    .sort((a, b) => a.total - b.total || String(a.name).localeCompare(String(b.name), "ro"));
+
+  const noAct = rows.filter((r) => r.total === 0).length;
+  const lowAct = rows.filter((r) => r.total > 0 && r.total < LOW).length;
+  if (countEl) countEl.textContent = `(${rows.length} utilizatori · ${noAct} fără activitate · ${lowAct} activitate redusă)`;
+
+  const fmt = (iso) => (iso ? String(iso).replace("T", " ").slice(0, 16) : "—");
+  body.innerHTML = rows
+    .map((r) => {
+      let badge, style;
+      if (r.total === 0) { badge = "Fără activitate"; style = "color:#b42318;background:#fee4e2"; }
+      else if (r.total < LOW) { badge = "Activitate redusă"; style = "color:#8a6d00;background:#fff6d6"; }
+      else { badge = "Activ"; style = "color:#0a7d33;background:#e6f4ea"; }
+      return `
+        <tr>
+          <td>${escapeComboHtml(r.name)}${r.active ? "" : ' <span style="color:#b42318">(dezactivat)</span>'}</td>
+          <td>${escapeComboHtml(r.role)}</td>
+          <td>${r.logins}</td>
+          <td>${r.total}</td>
+          <td>${fmt(r.lastLogin)}</td>
+          <td>${fmt(r.lastAction)}</td>
+          <td><span style="padding:2px 8px;border-radius:10px;font-size:12px;${style}">${badge}</span></td>
+        </tr>`;
+    })
+    .join("");
 }
 
 // Raport „pierderi cantitative" pe produs: primit → procesare → livrat, cu diferența necontabilizată.
@@ -4515,6 +4619,9 @@ async function loadDashboard() {
     loadCriticalAlertsStatus(),
     loadDailyReport()
   ]);
+  // La bootstrap (jurnalul de audit e deja încărcat mai sus): randează panoul „Activitate
+  // utilizatori" dacă vederea implicită e Rapoarte — pentru admin cu date, pentru restul golit+ascuns.
+  renderUserActivity();
 }
 
 async function createReceipt(formData) {
@@ -6836,10 +6943,18 @@ async function refreshViewData(view) {
       await Promise.all([loadStocks(), loadReceipts(), loadDeliveries()]);
       renderStockPeriod();
     } else if (view === "rapoarte") {
+      // SINCRON, înainte de orice fetch: golește+ascunde panoul de activitate pentru non-admin,
+      // ca setView (care afișează după data-view) să nu lase vizibil nicio clipă tabelul vechi.
+      renderUserActivity();
       // Ecranul Rapoarte conține și raportul zilnic (panoul lui) — îl reîmprospătăm la deschidere.
-      await Promise.all([loadReceipts(), loadProcessings(), loadDeliveries(), loadDailyReport()]);
+      const rapoarteLoads = [loadReceipts(), loadProcessings(), loadDeliveries(), loadDailyReport()];
+      // Jurnalul de audit (posibil mare) se aduce DOAR pentru admin — singurul care vede
+      // panoul „Activitate utilizatori". Celelalte roluri nu-l descarcă degeaba.
+      if (canAccess("security-admin")) rapoarteLoads.push(loadAuditLogs());
+      await Promise.all(rapoarteLoads);
       populateLossesProductFilter();
       renderLossesReport();
+      renderUserActivity();
     } else if (view === "acasa") {
       await Promise.all([loadDailyReport(), loadAuditLogs()]);
     } else if (view === "audit") {
