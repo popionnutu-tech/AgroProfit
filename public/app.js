@@ -6105,39 +6105,69 @@ function buildInvoicePrintHtml(delivery) {
     return bits.join(", ");
   };
   const auto = `${delivery.vehicle || ""}${delivery.trailer ? " + " + delivery.trailer : ""}`.trim();
+  const esc = (v) => escapeComboHtml(v == null ? "" : String(v));
+  const dateInv = formatDateShort(delivery.invoiceDate || delivery.createdAt);
   return `
-    <div class="of-title" style="margin-bottom:4px;">Invoice P № ${escapeComboHtml(delivery.invoiceNumber || "____")}</div>
-    <div class="of-row">Data: <span class="of-fill">${formatDateShort(delivery.invoiceDate || delivery.createdAt)}</span></div>
-    <div class="of-row">Contract Nr. <span class="of-fill">${escapeComboHtml(delivery.contractNumber || "____")}</span> din <span class="of-fill">${delivery.contractDate ? formatDateShort(delivery.contractDate) : "________"}</span></div>
-
-    <div class="of-row"><span class="of-b">VÂNZĂTOR:</span> ${party(seller, delivery.seller)}</div>
-    <div class="of-row"><span class="of-b">CUMPĂRĂTOR:</span> ${party(buyer, delivery.customer)}</div>
-    <div class="of-row"><span class="of-b">EXPORTATOR:</span> ${party(seller, delivery.seller)}</div>
-    <div class="of-row"><span class="of-b">DESTINATAR:</span> ${party(buyer, delivery.customer)}</div>
-    <div class="of-row">Condiții de livrare: <span class="of-fill" style="min-width:260px;"></span></div>
-    <div class="of-row">AUTO: <span class="of-fill" style="min-width:280px;">${escapeComboHtml(auto)}</span></div>
-
-    <table class="of-tbl">
-      <thead><tr>
-        <th>Denumirea mărfii</th><th>Ambalajul</th><th>Greutatea, tn</th><th>Prețul în ${escapeComboHtml(cur)}</th><th>Suma în ${escapeComboHtml(cur)}</th>
-      </tr></thead>
-      <tbody><tr>
-        <td>${escapeComboHtml(delivery.product || "")}</td>
-        <td class="of-c">În vrac</td>
-        <td class="of-r">${actNum(tnQty, 3)}</td>
-        <td class="of-r">${actNum(unitPerTn, 2)}</td>
-        <td class="of-r">${actNum(sumCur, 2)}</td>
-      </tr></tbody>
-      <tfoot><tr><td class="of-b" colspan="4">Total:</td><td class="of-r of-b">${actNum(sumCur, 2)} ${escapeComboHtml(cur)}</td></tr></tfoot>
+  <style>
+    .invx { font-family:'Times New Roman', Georgia, serif; color:#000; font-size:13px; }
+    .invx table { width:100%; border-collapse:collapse; table-layout:fixed; }
+    .invx .ibox td { border:1px solid #000; padding:6px 8px; vertical-align:top; word-wrap:break-word; }
+    .invx .igoods td, .invx .igoods th { border:1px solid #000; padding:6px 8px; word-wrap:break-word; }
+    .invx .igoods th { font-weight:bold; text-align:center; vertical-align:middle; }
+    .invx .lbl { font-weight:bold; }
+    .invx .val { font-weight:normal; margin-top:5px; line-height:1.4; }
+    .invx .r { text-align:right; }
+    .invx .c { text-align:center; }
+    .invx .itotal { text-align:center; font-weight:bold; font-size:15px; margin:8px 0 4px; }
+    .invx .idecl { font-style:italic; font-size:11.5px; text-align:justify; margin:12px 0 4px; line-height:1.4; }
+    .invx .iplace { font-style:italic; font-size:12px; }
+    .invx .isign { margin-top:52px; font-size:13px; }
+    .invx .iline { border-bottom:1px solid #000; display:inline-block; min-width:230px; }
+  </style>
+  <div class="invx">
+    <table class="ibox">
+      <tr>
+        <td style="width:50%">
+          <div><span class="lbl">Invoice P №</span> ${esc(delivery.invoiceNumber)}</div>
+          <div><span class="lbl">Data:</span> ${dateInv}</div>
+        </td>
+        <td style="width:50%"><span class="lbl">Contract Nr.</span> ${esc(delivery.contractNumber)} <span class="lbl">din</span> ${delivery.contractDate ? formatDateShort(delivery.contractDate) : ""}</td>
+      </tr>
+      <tr>
+        <td style="height:130px"><span class="lbl">VANZATOR:</span><div class="val">${party(seller, delivery.seller)}</div></td>
+        <td><span class="lbl">CUMPARATOR:</span><div class="val">${party(buyer, delivery.customer)}</div></td>
+      </tr>
+      <tr>
+        <td style="height:80px"><span class="lbl">EXPORTATOR:</span><div class="val">${party(seller, delivery.seller)}</div></td>
+        <td><span class="lbl">DESTINATAR:</span><div class="val">${party(buyer, delivery.customer)}</div></td>
+      </tr>
+      <tr>
+        <td style="height:44px"><span class="lbl">Conditii de livrare</span><div class="val">${esc(delivery.deliveryTerms)}</div></td>
+        <td><span class="lbl">AUTO:</span> ${esc(auto)}</td>
+      </tr>
     </table>
-    ${money.isForeign ? `<div class="of-row of-r" style="font-size:10px;">Echivalent în lei (curs ${actNum(delivery.exchangeRate || 0, 4)}): ${actNum(totalLei, 2)} lei</div>` : ""}
-
-    <p class="of-just" style="margin-top:10px;font-size:10px;">„Exportatorul produselor ce fac obiectul acestui document declară că, exceptând cazul în care în mod expres este indicat altfel, aceste produse sunt de origine preferenţială Republica Moldova."</p>
-    <div class="of-row">Or. Briceni, Republica Moldova</div>
-    <div class="of-sign" style="margin-top:22px;">
-      <div class="col">Administrator<div class="ln of-cap">semnătura</div></div>
-      <div class="col"></div>
-    </div>`;
+    <table class="igoods">
+      <tr>
+        <th style="width:28%">Denumirea marfii</th>
+        <th style="width:16%">Ambalajul</th>
+        <th style="width:19%">Greutatea, tn</th>
+        <th style="width:18%">Pretul in ${esc(cur)}</th>
+        <th style="width:19%">Suma in ${esc(cur)}</th>
+      </tr>
+      <tr>
+        <td style="height:40px">${esc(delivery.product)}</td>
+        <td class="c">In vrac</td>
+        <td class="r">${actNum(tnQty, 3)}</td>
+        <td class="r">${actNum(unitPerTn, 2)}</td>
+        <td class="r">${actNum(sumCur, 2)}</td>
+      </tr>
+    </table>
+    <div class="itotal">Total: ${actNum(sumCur, 2)} ${esc(cur)}</div>
+    ${money.isForeign ? `<div class="r" style="font-size:10px;">Echivalent în lei (curs ${actNum(delivery.exchangeRate || 0, 4)}): ${actNum(totalLei, 2)} lei</div>` : ""}
+    <p class="idecl">"Exportatorul produselor ce fac obiectul acestui document declară că, exceptînd cazul în care în mod expres este indicat altfel, aceste produse sînt de origine preferenţială Republica Moldova"</p>
+    <div class="iplace">Or.Briceni, Republica Moldova</div>
+    <div class="isign">Administrator&nbsp;&nbsp;&nbsp;<span class="iline">&nbsp;</span></div>
+  </div>`;
 }
 
 function buildPurchaseActPrintHtml(delivery) {
