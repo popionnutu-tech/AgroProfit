@@ -1178,10 +1178,14 @@ function renderSilosGrid(summary) {
     const head = label ? `<div class="silo-row-label">${label}</div>` : "";
     return `${head}<div class="silo-row" style="--cols:${Math.min(8, Math.max(1, locs.length))}">${locs.map(siloCard).join("")}</div>`;
   };
-  // Rândul 2 începe cu Cilindrul 7 (dacă există), apoi gropile de primire. Rândul 1 = ceilalți cilindri.
-  const c7 = cylinders.find((c) => /(^|\D)0*7(\D|$)/.test(String(c.name || "")));
+  // Rândul 2 începe cu „Cilindru 7" (îl căutăm după NUME în TOATE locațiile active, pentru că poate
+  // fi configurat cu alt tip decât „cilindru" — ex. groapă), apoi gropile de primire. Rândul 1 = ceilalți cilindri.
+  const c7 = activeLocs.find((c) => {
+    const n = String(c.name || "").toLowerCase();
+    return n.includes("cilindru") && /(^|\D)0*7(\D|$)/.test(n);
+  });
   const row1 = cylinders.filter((c) => c !== c7);
-  const row2 = [...(c7 ? [c7] : []), ...pits];
+  const row2 = [...(c7 ? [c7] : []), ...pits.filter((p) => p !== c7)];
   silosGridEl.innerHTML = group(row1, "Cilindri") + group(row2, "");
 
   // Aggregate stock per product across all cylinders (Etapa 3)
