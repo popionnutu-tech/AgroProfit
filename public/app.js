@@ -3647,7 +3647,7 @@ function formatCellValue(value, format) {
     return String(value);
   }
   if (format === "number" && typeof formatNumber === "function") return formatNumber(value);
-  return String(value);
+  return escapeComboHtml(String(value));
 }
 
 function getCellValue(item, col) {
