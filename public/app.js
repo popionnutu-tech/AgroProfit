@@ -6389,14 +6389,21 @@ function buildInvoicePrintHtml(delivery) {
   const tnQty = money.tonnes;
   const unitPerTn = money.isForeign ? money.unitForeign : (tnQty > 0 ? totalLei / tnQty : 0);
   const sumCur = money.isForeign ? money.totalForeign : totalLei;
-  const party = (partner, nameFallback) => {
+  // withBank=true → adaugă banca + IBAN pe rânduri separate (pentru VANZATOR și CUMPARATOR).
+  // EXPORTATOR/DESTINATAR rămân scurte (doar denumire, IDNO, adresă), ca în model.
+  const party = (partner, nameFallback, withBank) => {
     if (!partner && !nameFallback) return `<span class="of-fill" style="min-width:320px;"></span>`;
-    const bits = [
-      `<b>${escapeComboHtml(nameFallback || partner?.name || "")}</b>`,
+    const lines = [`<b>${escapeComboHtml(nameFallback || partner?.name || "")}</b>`];
+    const idAddr = [
       partner?.idno ? `IDNO ${escapeComboHtml(partner.idno)}` : "",
       partner?.address ? escapeComboHtml(partner.address) : ""
-    ].filter(Boolean);
-    return bits.join(", ");
+    ].filter(Boolean).join(", ");
+    if (idAddr) lines.push(idAddr);
+    if (withBank) {
+      if (partner?.bankName) lines.push(`banca: ${escapeComboHtml(partner.bankName)}`);
+      if (partner?.iban) lines.push(`IBAN: ${escapeComboHtml(partner.iban)}`);
+    }
+    return lines.join("<br>");
   };
   const auto = `${delivery.vehicle || ""}${delivery.trailer ? " + " + delivery.trailer : ""}`.trim();
   const esc = (v) => escapeComboHtml(v == null ? "" : String(v));
@@ -6428,15 +6435,15 @@ function buildInvoicePrintHtml(delivery) {
         <td style="width:50%"><span class="lbl">Contract Nr.</span> ${esc(delivery.contractNumber)} <span class="lbl">din</span> ${delivery.contractDate ? formatDateShort(delivery.contractDate) : ""}</td>
       </tr>
       <tr>
-        <td style="height:130px"><span class="lbl">VANZATOR:</span><div class="val">${party(seller, delivery.seller)}</div></td>
-        <td><span class="lbl">CUMPARATOR:</span><div class="val">${party(buyer, delivery.customer)}</div></td>
+        <td style="height:130px"><span class="lbl">VANZATOR:</span><div class="val">${party(seller, delivery.seller, true)}</div></td>
+        <td><span class="lbl">CUMPARATOR:</span><div class="val">${party(buyer, delivery.customer, true)}</div></td>
       </tr>
       <tr>
-        <td style="height:80px"><span class="lbl">EXPORTATOR:</span><div class="val">${party(seller, delivery.seller)}</div></td>
-        <td><span class="lbl">DESTINATAR:</span><div class="val">${party(buyer, delivery.customer)}</div></td>
+        <td style="height:130px"><span class="lbl">EXPORTATOR:</span><div class="val">${party(seller, delivery.seller, true)}</div></td>
+        <td><span class="lbl">DESTINATAR:</span><div class="val">${party(buyer, delivery.customer, true)}</div></td>
       </tr>
       <tr>
-        <td style="height:44px"><span class="lbl">Conditii de livrare</span><div class="val">${esc(delivery.deliveryTerms)}</div></td>
+        <td style="height:44px"><span class="lbl">Conditii de livrare</span><div class="val">${esc(delivery.unloadingPlace || delivery.deliveryTerms)}</div></td>
         <td><span class="lbl">AUTO:</span> ${esc(auto)}</td>
       </tr>
     </table>
@@ -6460,6 +6467,7 @@ function buildInvoicePrintHtml(delivery) {
     ${money.isForeign ? `<div class="r" style="font-size:10px;">Echivalent în lei (curs ${actNum(delivery.exchangeRate || 0, 4)}): ${actNum(totalLei, 2)} lei</div>` : ""}
     <p class="idecl">"Exportatorul produselor ce fac obiectul acestui document declară că, exceptînd cazul în care în mod expres este indicat altfel, aceste produse sînt de origine preferenţială Republica Moldova"</p>
     <div class="iplace">Or.Briceni, Republica Moldova</div>
+    <div style="margin-top:6px;"><span class="lbl">Data:</span> ${dateInv}</div>
     <div class="isign">Administrator&nbsp;&nbsp;&nbsp;<span class="iline">&nbsp;</span></div>
   </div>`;
 }
