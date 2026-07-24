@@ -1070,6 +1070,13 @@ function renderSilosGrid(summary) {
   // Rândul 2: restul locațiilor active (gropi de primire etc.).
   const pits = activeLocs.filter((loc) => String(loc.type || "").toLowerCase() !== "cilindru");
 
+  // „Cilindru 7" — îl căutăm după NUME în TOATE locațiile active (poate fi configurat cu alt tip
+  // decât „cilindru", ex. groapă). Stă primul pe rândul 2, dar NU se micșorează ca gropile propriu-zise.
+  const c7 = activeLocs.find((c) => {
+    const n = String(c.name || "").toLowerCase();
+    return n.includes("cilindru") && /(^|\D)0*7(\D|$)/.test(n);
+  });
+
   // Header dinamic (reflectă numărul real de cilindri + capacitatea totală)
   const titleEl = document.getElementById("silos-title");
   const subEl = document.getElementById("silos-sub");
@@ -1122,10 +1129,12 @@ function renderSilosGrid(summary) {
         : '<span class="silo-product silo-product-empty">gol</span>';
 
       // Gropile de primire (orice locație care nu e cilindru) primesc un aspect distinct:
-      // verzi și mai mici decât cilindrii (clasa silo-card--pit).
+      // verzi (clasa silo-card--pit). Gropile propriu-zise (fără „Cilindru 7") sunt și mai mici, ~80%
+      // (clasa silo-card--pit-sm). „Cilindru 7" rămâne la mărimea normală de groapă.
       const isPit = String(cyl.type || "").toLowerCase() !== "cilindru";
+      const isSmallPit = isPit && cyl !== c7;
       return `
-        <article class="silo-card${ringClass}${isPit ? " silo-card--pit" : ""}" data-id="${escapeComboHtml(String(cyl.id))}" title="${escapeComboHtml(cyl.name)} · ${formatNumber(filled)}/${formatNumber(capacity)} t · ${productsTooltip || 'gol'}">
+        <article class="silo-card${ringClass}${isPit ? " silo-card--pit" : ""}${isSmallPit ? " silo-card--pit-sm" : ""}" data-id="${escapeComboHtml(String(cyl.id))}" title="${escapeComboHtml(cyl.name)} · ${formatNumber(filled)}/${formatNumber(capacity)} t · ${productsTooltip || 'gol'}">
           <div class="silo-card-head">
             <span class="silo-name">${escapeComboHtml(cyl.name)}</span>
             ${productHead}
@@ -1178,12 +1187,7 @@ function renderSilosGrid(summary) {
     const head = label ? `<div class="silo-row-label">${label}</div>` : "";
     return `${head}<div class="silo-row" style="--cols:${Math.min(8, Math.max(1, locs.length))}">${locs.map(siloCard).join("")}</div>`;
   };
-  // Rândul 2 începe cu „Cilindru 7" (îl căutăm după NUME în TOATE locațiile active, pentru că poate
-  // fi configurat cu alt tip decât „cilindru" — ex. groapă), apoi gropile de primire. Rândul 1 = ceilalți cilindri.
-  const c7 = activeLocs.find((c) => {
-    const n = String(c.name || "").toLowerCase();
-    return n.includes("cilindru") && /(^|\D)0*7(\D|$)/.test(n);
-  });
+  // Rândul 2 începe cu „Cilindru 7" (detectat mai sus), apoi gropile de primire. Rândul 1 = ceilalți cilindri.
   const row1 = cylinders.filter((c) => c !== c7);
   const row2 = [...(c7 ? [c7] : []), ...pits.filter((p) => p !== c7)];
   silosGridEl.innerHTML = group(row1, "Cilindri") + group(row2, "");

@@ -2563,6 +2563,12 @@ dialog.details-dialog { width: min(680px, 94vw); max-height: 88vh; overflow-y: a
 }
 .silo-card--pit .silo-name { color: #3B6D11; font-size: 14px; }
 .silo-card--pit .silo-visual { height: 128px; }
+/* Gropile de primire propriu-zise (fără „Cilindru 7"): și mai mici, cam 80%. */
+.silo-card--pit-sm { padding: 10px 10px 10px; gap: 5px; }
+.silo-card--pit-sm .silo-name { font-size: 12px; }
+.silo-card--pit-sm .silo-visual { height: 102px; }
+.silo-card--pit-sm .silo-stored-line { font-size: 0.82rem; }
+.silo-card--pit-sm .silo-meta { font-size: 0.72rem; }
 .silo-card-head {
   display: flex;
   flex-direction: column;
