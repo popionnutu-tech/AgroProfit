@@ -6796,6 +6796,22 @@ function buildCmrHtml(delivery) {
     .cmrx .cx-ghead td { padding:1px 3px 2px; line-height:1.05; }
     .cmrx .cx-gnum { font-weight:bold; font-size:10px; }
     .cmrx .cx-gval { font-size:10.5px; font-weight:bold; }
+    /* Antet dreapta: rândul „Seria MD Nr." cu emblema CMR ovală + disclaimerul trilingv. */
+    .cmrx .cx-seria { display:flex; align-items:center; gap:6px; padding:3px 6px; border-bottom:1px solid #000; }
+    .cmrx .cx-cmr-oval { border:1.5px solid #000; border-radius:50%; padding:1px 8px; font-weight:bold; font-size:11px; letter-spacing:1px; }
+    .cmrx .cx-seria-t { font-size:10px; white-space:nowrap; }
+    .cmrx .cx-seria-t b { font-size:14px; }
+    .cmrx .cx-seria-nr { flex:1; border-bottom:1px solid #000; min-height:13px; font-weight:bold; font-size:12px; text-align:center; letter-spacing:2px; }
+    .cmrx .cx-disc { display:flex; gap:6px; padding:2px 5px; border-bottom:1px solid #000; font-size:5.6px; line-height:1.16; text-align:justify; }
+    .cmrx .cx-disc > div { flex:1; }
+    .cmrx .cx-disc .cx-en { color:#333; }
+    /* Caseta 19 — grila de plată (Preț transport, Reduceri, Sold ... × Expeditor/Valuta/Destinatar). */
+    .cmrx .cx-pay { height:100%; }
+    .cmrx .cx-pay td { border:1px solid #000; font-size:5.8px; line-height:1.06; padding:1px 2px; vertical-align:top; }
+    .cmrx .cx-pay .cx-pay-h { text-align:center; }
+    .cmrx .cx-pay .cx-pay-lbl { width:44%; }
+    /* Caseta 14 — bifele Franco / Nu franco. */
+    .cmrx .cx-fr { display:flex; flex-direction:column; gap:1px; font-size:6.5px; margin-top:2px; }
   </style>
   <div class="cmrx">
     <div class="cx-outer">
@@ -6829,7 +6845,15 @@ function buildCmrHtml(delivery) {
                 <b>SCRISOARE DE TRANSPORT INTERNAȚIONAL</b><br>
                 <i>МЕЖДУНАРОДНАЯ ТОВАРОТРАНСПОРТНАЯ НАКЛАДНАЯ</i><br>
                 INTERNATIONAL CONSIGNMENT NOTE
-                <div class="cx-cmr">CMR</div>
+              </div>
+              <div class="cx-seria">
+                <span class="cx-cmr-oval">CMR</span>
+                <span class="cx-seria-t">Seria <b>MD</b> Nr.</span>
+                <span class="cx-seria-nr">${esc(delivery.cmrSeries || "")}</span>
+              </div>
+              <div class="cx-disc">
+                <div>Acest transport este supus, indiferent de orice clauză contrară, convenției relative la contractul de transport internațional de mărfuri pe șosele (C.M.R.)</div>
+                <div class="cx-en"><i>Данная перевозка, несмотря ни на какие противоречащие оговорки, осуществляется в соответствии с условиями Конвенции о договоре международной дорожной перевозки грузов (КДПГ).</i><br>This carriage is notwithstanding any clause to the contrary, subject to the Convention on the contract for the international carriage of goods by road (CMR)</div>
               </div>
               ${box("16", "Transportator (nume, adresă, țara)", "Перевозчик (наименование, адрес, страна)", "Carrier (name, address, country)", "", { rule: true, style: "flex:1 1 0" })}
               ${box("17", "Transportatori succesivi (nume, adresă, țara)", "Последующий перевозчик", "Successive carriers", "", { rule: true, style: "flex:1 1 0" })}
@@ -6870,12 +6894,43 @@ function buildCmrHtml(delivery) {
       <!-- 13 + 19 (instrucțiuni / plată) -->
       <table>
         <tr>
-          <td style="width:60%">${box("13", "Instrucțiunile expeditorului (formalități vamale și oficiale)", "Указания отправителя", "Sender's instructions", "", { style: "min-height:56px", rule: true })}</td>
-          <td style="width:40%">${box("19", "De plată / Подлежит оплате / To be paid by", "", "", "", { style: "min-height:56px", rule: true })}</td>
+          <td style="width:60%">
+            <div class="cx-box" style="min-height:88px;">
+              <div class="cx-hd"><span class="cx-n">13</span><span class="cx-l">Instrucțiunile expeditorului (formalități vamale și oficiale)<br><i>Указания отправителя (таможенная и прочая обработка)</i><br><span class="cx-en">Sender's instructions (custom's and official formalities)</span></span></div>
+              <div class="cx-grow cx-rule" style="min-height:26px;"></div>
+              <div class="cx-l" style="border-top:1px solid #000;padding-top:2px;">Prețul declarat al mărfii<br><i>Объявленная стоимость груза</i><br><span class="cx-en">Avowed prices of goods</span></div>
+              <div class="cx-l" style="border-top:1px solid #000;padding-top:2px;font-size:6px;">(La trecerea limitei de împuternicire conform cap. IV, art. 23. al. 3, plata anterioară p-u fraht se va preciza după primirea acordului)<br><i>(При превышении предела ответственности, предусмотренного гл. IV, ст. 23, п. 3 указывается только после согласования дополнительной платы к фрахту)</i></div>
+            </div>
+          </td>
+          <td style="width:40%;padding:0;vertical-align:top;">
+            <table class="cx-pay">
+              <tr>
+                <td class="cx-pay-lbl"><span class="cx-n">19</span> De plată<br><i>Подлежит оплате</i><br><span class="cx-en">To be paid by</span></td>
+                <td class="cx-pay-h">Expeditor<br><i>Отправитель</i><br><span class="cx-en">Sender</span></td>
+                <td class="cx-pay-h">Valuta<br><i>Валюта</i><br><span class="cx-en">Currency</span></td>
+                <td class="cx-pay-h">Destinatar<br><i>Получатель</i><br><span class="cx-en">Consignee</span></td>
+              </tr>
+              <tr><td class="cx-pay-lbl">Preț transport / <i>Ставка</i> / Carriage charges</td><td></td><td></td><td></td></tr>
+              <tr><td class="cx-pay-lbl">Reduceri / <i>Скидки</i> / Reductions</td><td></td><td></td><td></td></tr>
+              <tr><td class="cx-pay-lbl">Sold / <i>Разность</i> / Balance</td><td></td><td></td><td></td></tr>
+              <tr><td class="cx-pay-lbl">Sporuri / <i>Надбавки</i> / Supplem. charges</td><td></td><td></td><td></td></tr>
+              <tr><td class="cx-pay-lbl">Accesorii / <i>Дополнительные сборы</i></td><td></td><td></td><td></td></tr>
+              <tr><td class="cx-pay-lbl">Diverse / <i>Прочие</i> / Others</td><td></td><td></td><td></td></tr>
+              <tr><td class="cx-pay-lbl">Total de plată / <i>Итого к оплате</i> / Total</td><td></td><td></td><td></td></tr>
+            </table>
+          </td>
         </tr>
         <tr>
-          <td>${box("14 / 15", "Prescripții de francare · Rambursare", "Указания оплаты фрахта · Возврат", "Carriage paid / forward · Cash on delivery", "", { style: "min-height:30px" })}</td>
-          <td>${box("20", "Convenții speciale", "Особые согласованные условия", "Special agreements", "", { style: "min-height:30px", rule: true })}</td>
+          <td>
+            <div class="cx-box" style="min-height:30px;">
+              <div class="cx-hd"><span class="cx-n">14</span><span class="cx-l">Prescripții de francare / <i>Указания оплаты фрахта</i> / Instructions as to payment for carriage</span></div>
+              <div class="cx-fr"><span>☐ Franco / <i>Франко</i> / Carriage paid</span><span>☐ Nu franco / <i>Нефранко</i> / Carriage forward</span></div>
+            </div>
+            <div class="cx-box" style="min-height:16px;border-top:1px solid #000;">
+              <div class="cx-hd"><span class="cx-n">15</span><span class="cx-l">Rambursare / <i>Возврат</i> / Cash on delivery</span></div>
+            </div>
+          </td>
+          <td>${box("20", "Convenții speciale", "Особые согласованные условия", "Special agreements", "", { style: "min-height:46px", rule: true })}</td>
         </tr>
       </table>
 
