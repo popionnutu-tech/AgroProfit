@@ -218,7 +218,8 @@ const entityLabels = {
   processingTypes: "Tipuri procesare",
   vehicles: "Masini",
   labReports: "Date laborator",
-  companies: "Companiile mele"
+  companies: "Companiile mele",
+  fields: "Campuri"
 };
 
 let currentConfig = null;
@@ -1488,6 +1489,64 @@ function renderLossesReport() {
     </tr>`;
   }
 }
+
+// Raport „Roadă pe câmp" — grupează recepțiile (cu câmp completat) pe câmp, în perioada aleasă.
+function renderFieldYield() {
+  const body = document.getElementById("field-yield-body");
+  const foot = document.getElementById("field-yield-foot");
+  if (!body) return;
+  const from = (document.getElementById("field-yield-from") || {}).value || "";
+  const to = (document.getElementById("field-yield-to") || {}).value || "";
+  const inRange = (iso) => printDocInRange(iso, from, to);
+  const byField = new Map();
+  (receiptsCache || []).forEach((r) => {
+    if (r.status === "Anulat" || !r.fieldName || !inRange(r.createdAt || r.receivedAt)) return;
+    const key = r.fieldName;
+    if (!byField.has(key)) byField.set(key, { qty: 0, byProduct: new Map() });
+    const g = byField.get(key);
+    const q = Number(r.provisionalNetQuantity || r.quantity || 0);
+    g.qty += q;
+    const pk = r.product || "—";
+    g.byProduct.set(pk, (g.byProduct.get(pk) || 0) + q);
+  });
+  const rows = Array.from(byField.entries()).sort((a, b) => String(a[0]).localeCompare(String(b[0]), "ro"));
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="4" class="empty-state">Fără recepții cu câmp pentru filtrul ales.</td></tr>';
+    if (foot) foot.innerHTML = "";
+    return;
+  }
+  let total = 0;
+  body.innerHTML = rows.map(([name, g]) => {
+    total += g.qty;
+    const field = (currentConfig?.fields || []).find((f) => f.name === name);
+    const ha = field && Number(field.area) > 0 ? Number(field.area) : 0;
+    const perHa = ha > 0 ? Math.round((g.qty * 1000) / ha) : null;
+    const products = Array.from(g.byProduct.entries())
+      .map(([p, q]) => `${escapeComboHtml(p)}: ${formatNumber(q)} t`).join(", ");
+    return `<tr>
+      <td>${escapeComboHtml(name)}</td>
+      <td>${products}</td>
+      <td>${formatNumber(g.qty)}</td>
+      <td>${ha > 0 ? formatNumber(ha) + " ha · " + formatNumber(perHa) + " kg/ha" : "—"}</td>
+    </tr>`;
+  }).join("");
+  if (foot) foot.innerHTML = `<tr class="totals-row"><td>TOTAL</td><td></td><td><b>${formatNumber(total)}</b></td><td></td></tr>`;
+}
+
+// Tipărește un tabel de raport EXACT cum e afișat (cu filtrele aplicate). Butoane: .table-print-btn.
+function printReportTable(tableId, title) {
+  const table = document.getElementById(tableId);
+  if (!table) return;
+  const html = `<div class="doc-title">${escapeComboHtml(title || "Raport")}</div>
+    <div class="doc-subtitle">Tipărit: ${new Date().toLocaleString("ro-RO")}</div>
+    <table class="doc-table">${table.innerHTML}</table>`;
+  openPrintWindow(html, title || "Raport");
+}
+document.addEventListener("click", (e) => {
+  const btn = e.target.closest(".table-print-btn");
+  if (!btn) return;
+  printReportTable(btn.dataset.table, btn.dataset.title || "Raport");
+});
 
 function renderStockPeriod() {
   const body = document.getElementById("stock-period-body");
@@ -3501,6 +3560,11 @@ const ENTITY_COLUMNS = {
     { key: "series", label: "Serie" },
     { key: "driver", label: "Șofer" }
   ],
+  fields: [
+    { key: "name", label: "Denumire câmp" },
+    { key: "area", label: "Suprafață (ha)", format: "number" },
+    { key: "note", label: "Observații" }
+  ],
   companies: [
     { key: "name", label: "Denumire" },
     { key: "series", label: "Serie" },
@@ -3770,7 +3834,8 @@ function renderSetupLists(config) {
     "processingTypes",
     "vehicles",
     "labReports",
-    "companies"
+    "companies",
+    "fields"
   ].forEach((entity) => renderMiniList(entity, config[entity] || []));
 }
 
@@ -3810,6 +3875,21 @@ function renderSetupSelectors(config) {
         return `<option value="${v.number}">${v.number}${extra ? " — " + extra : ""}</option>`;
       })
       .join("");
+  }
+  // Select „Câmp" la recepție (din nomenclatorul Câmpuri); gol = fără câmp.
+  const receiptFieldSelect = document.getElementById("receipt-field-select");
+  if (receiptFieldSelect) {
+    const prevF = receiptFieldSelect.value;
+    receiptFieldSelect.innerHTML =
+      `<option value="">— fără câmp —</option>` +
+      (config.fields || [])
+        .filter((f) => f.active !== false)
+        .map((f) => {
+          const ha = Number(f.area) > 0 ? ` (${formatNumber(f.area)} ha)` : "";
+          return `<option value="${escapeComboHtml(String(f.id))}">${escapeComboHtml(f.name)}${ha}</option>`;
+        })
+        .join("");
+    if (prevF) receiptFieldSelect.value = prevF;
   }
   // Select mașină la livrare (din nomenclator); gol = mașina cumpărătorului (la observații).
   if (deliveryVehicleSelect) {
@@ -3912,6 +3992,16 @@ function getEditorSchema(entity) {
         { name: "number", label: "Nr. mașină", type: "text" },
         { name: "series", label: "Serie", type: "text" },
         { name: "driver", label: "Șofer", type: "text" },
+        commonActiveField
+      ]
+    },
+    fields: {
+      title: "Editare câmp",
+      copy: "Câmpul agricol de unde se recoltează roada (pentru alegere la recepție și analiză).",
+      fields: [
+        { name: "name", label: "Denumire câmp", type: "text" },
+        { name: "area", label: "Suprafață (ha)", type: "number", step: "0.01" },
+        { name: "note", label: "Observații", type: "text" },
         commonActiveField
       ]
     },
@@ -4786,6 +4876,13 @@ async function createReceipt(formData) {
     source: "dashboard",
     status: isPending ? "In descarcare" : "Draft"
   };
+
+  // Câmpul agricol (opțional) de unde e roada — trimitem id + denumire pentru analiză.
+  const selectedField = (currentConfig.fields || []).find((f) => String(f.id) === String(formData.get("fieldId")));
+  if (selectedField) {
+    payload.fieldId = selectedField.id;
+    payload.fieldName = selectedField.name;
+  }
 
   // Avertizare "un produs / cilindru": daca cilindrul ales are deja alt produs, confirma.
   const receiptConflict = cylinderConflictProduct(location?.name, product?.name);
@@ -7142,6 +7239,7 @@ async function refreshViewData(view) {
       populateLossesProductFilter();
       renderLossesReport();
       renderUserActivity();
+      renderFieldYield();
     } else if (view === "acasa") {
       await Promise.all([loadDailyReport(), loadAuditLogs()]);
     } else if (view === "audit") {
@@ -7854,6 +7952,8 @@ document.getElementById("stock-period-to")?.addEventListener("change", renderSto
 document.getElementById("stock-period-product")?.addEventListener("change", renderStockPeriod);
 document.getElementById("losses-report-form")?.addEventListener("submit", (e) => { e.preventDefault(); renderLossesReport(); });
 ["losses-from", "losses-to", "losses-product"].forEach((id) => document.getElementById(id)?.addEventListener("change", renderLossesReport));
+document.getElementById("field-yield-form")?.addEventListener("submit", (e) => { e.preventDefault(); renderFieldYield(); });
+["field-yield-from", "field-yield-to"].forEach((id) => document.getElementById(id)?.addEventListener("change", renderFieldYield));
 processingTypeFilterEl.addEventListener("change", () => renderProcessings(processingsCache));
 processingProductFilterEl?.addEventListener("change", () => renderProcessings(processingsCache));
 processingDateFromEl?.addEventListener("change", () => renderProcessings(processingsCache));

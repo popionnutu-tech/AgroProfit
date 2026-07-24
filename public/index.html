@@ -177,6 +177,7 @@
                 <button class="view-tab sidebar-subitem" data-view="nom-locatii" data-access="nomenclator-read" type="button">Locații de stoc</button>
                 <button class="view-tab sidebar-subitem" data-view="nom-tarife" data-access="nomenclator-read" type="button">Tarife</button>
                 <button class="view-tab sidebar-subitem" data-view="nom-masini" data-access="nomenclator-read" type="button">Mașini</button>
+                <button class="view-tab sidebar-subitem" data-view="nom-campuri" data-access="nomenclator-read" type="button">Câmpuri</button>
                 <button class="view-tab sidebar-subitem" data-view="nom-laborator" data-access="nomenclator-read" type="button">Date laborator</button>
                 <button class="view-tab sidebar-subitem" data-view="nom-companii" data-access="setup" type="button">Companiile mele</button>
                 <button class="view-tab sidebar-subitem" data-view="nom-utilizatori" data-access="setup" type="button">Roluri și utilizatori</button>
@@ -555,6 +556,12 @@
                   <select name="receivedBy" id="user-select"></select>
                 </label>
               </div>
+
+              <label>
+                Câmpul (de unde e roada)
+                <select name="fieldId" id="receipt-field-select"><option value="">— fără câmp —</option></select>
+                <span class="field-hint">Opțional. Alege câmpul din nomenclatorul Câmpuri (pentru analiză roadă/câmp).</span>
+              </label>
 
               <label>
                 Observatii
@@ -1787,8 +1794,11 @@
           <div class="report-accordion-list">
             <details class="report-accordion">
               <summary>Receptii pe zi</summary>
+              <div class="report-actions" style="margin:6px 0">
+                <button type="button" class="table-print-btn" data-table="daily-report-receipts-table" data-title="Recepții pe zi">🖨 Tipărește tabelul</button>
+              </div>
               <div class="table-wrap">
-                <table>
+                <table id="daily-report-receipts-table">
                   <thead>
                     <tr>
                       <th>ID</th>
@@ -1828,8 +1838,11 @@
 
             <details class="report-accordion">
               <summary>Livrari pe zi</summary>
+              <div class="report-actions" style="margin:6px 0">
+                <button type="button" class="table-print-btn" data-table="daily-report-deliveries-table" data-title="Livrări pe zi">🖨 Tipărește tabelul</button>
+              </div>
               <div class="table-wrap">
-                <table>
+                <table id="daily-report-deliveries-table">
                   <thead>
                     <tr>
                       <th>ID</th>
@@ -1919,11 +1932,14 @@
                   <label>De la<input type="date" id="losses-from" /></label>
                   <label>Pana la<input type="date" id="losses-to" /></label>
                   <label>Produs<select id="losses-product"><option value="">Toate produsele</option></select></label>
-                  <div class="report-actions"><button type="submit">Actualizează</button></div>
+                  <div class="report-actions">
+                    <button type="submit">Actualizează</button>
+                    <button type="button" class="table-print-btn" data-table="losses-report-table" data-title="Raport pierderi cantitative">🖨 Tipărește tabelul</button>
+                  </div>
                 </div>
               </form>
               <div class="table-wrap">
-                <table>
+                <table id="losses-report-table">
                   <thead>
                     <tr>
                       <th>Produs</th>
@@ -1945,13 +1961,49 @@
           </div>
         </section>
 
+        <section class="panel reports-panel" data-access="reports" data-view="rapoarte">
+          <div class="report-accordion-list">
+            <details class="report-accordion" id="field-yield-accordion">
+              <summary>Roadă pe câmp</summary>
+              <p class="field-hint" style="margin-top:6px">Cât a produs fiecare câmp (din recepțiile cu câmp completat), cu randament kg/ha unde ai pus suprafața.</p>
+              <form class="mini-form report-filter-form" id="field-yield-form">
+                <div class="split">
+                  <label>De la<input type="date" id="field-yield-from" /></label>
+                  <label>Pana la<input type="date" id="field-yield-to" /></label>
+                  <div class="report-actions">
+                    <button type="submit">Actualizează</button>
+                    <button type="button" class="table-print-btn" data-table="field-yield-table" data-title="Roadă pe câmp">🖨 Tipărește tabelul</button>
+                  </div>
+                </div>
+              </form>
+              <div class="table-wrap">
+                <table id="field-yield-table">
+                  <thead>
+                    <tr>
+                      <th>Câmp</th>
+                      <th>Produse</th>
+                      <th>Cantitate (t)</th>
+                      <th>Suprafață · Randament</th>
+                    </tr>
+                  </thead>
+                  <tbody id="field-yield-body"></tbody>
+                  <tfoot id="field-yield-foot"></tfoot>
+                </table>
+              </div>
+            </details>
+          </div>
+        </section>
+
         <section class="panel reports-panel" data-access="security-admin" data-view="rapoarte" id="user-activity-panel" hidden>
           <div class="report-accordion-list">
             <details class="report-accordion" id="user-activity-accordion">
               <summary>Activitate utilizatori <span id="user-activity-count" class="muted-count"></span></summary>
               <p class="field-hint" style="margin-top:6px">Câți utilizatori sunt și cine are puțină sau nicio mișcare, după jurnalul de audit. „Activitate redusă" = sub 5 acțiuni. Cei fără mișcare apar primii.</p>
+              <div class="report-actions" style="margin-bottom:8px">
+                <button type="button" class="table-print-btn" data-table="user-activity-table" data-title="Activitate utilizatori">🖨 Tipărește tabelul</button>
+              </div>
               <div class="table-wrap">
-                <table>
+                <table id="user-activity-table">
                   <thead>
                     <tr>
                       <th>Utilizator</th>
@@ -1970,9 +2022,9 @@
           </div>
         </section>
 
-        <section class="stats config-stats" id="config-summary" data-view="nom-parteneri,nom-produse,nom-locatii,nom-tarife,nom-masini,nom-laborator,nom-companii,nom-utilizatori,nom-setari,nom-automatizare,nom-alerte,nom-securitate"></section>
+        <section class="stats config-stats" id="config-summary" data-view="nom-parteneri,nom-produse,nom-locatii,nom-tarife,nom-masini,nom-campuri,nom-laborator,nom-companii,nom-utilizatori,nom-setari,nom-automatizare,nom-alerte,nom-securitate"></section>
 
-        <section class="setup-grid" data-view="nom-parteneri,nom-produse,nom-locatii,nom-tarife,nom-masini,nom-laborator,nom-companii,nom-utilizatori,nom-setari,nom-automatizare,nom-alerte,nom-securitate" data-access="nomenclator-read">
+        <section class="setup-grid" data-view="nom-parteneri,nom-produse,nom-locatii,nom-tarife,nom-masini,nom-campuri,nom-laborator,nom-companii,nom-utilizatori,nom-setari,nom-automatizare,nom-alerte,nom-securitate" data-access="nomenclator-read">
           <article class="panel" data-view="nom-parteneri">
             <div class="panel-head">
               <h2>Parteneri</h2>
@@ -2162,6 +2214,26 @@
               <button type="submit">Adauga mașină</button>
             </form>
             <div class="list-block" id="vehicles-list"></div>
+          </article>
+
+          <article class="panel" data-view="nom-campuri">
+            <div class="panel-head">
+              <h2>Câmpuri</h2>
+              <p>Câmpurile de unde se recoltează roada — pentru alegere la recepție și analiză roadă/câmp</p>
+            </div>
+            <form class="mini-form" data-entity-form="fields">
+              <input name="name" placeholder="Denumire câmp (ex: Lanul de la iaz)" required />
+              <div class="split">
+                <input name="area" type="number" step="0.01" placeholder="Suprafață (ha)" />
+                <select name="active">
+                  <option value="true">Activ</option>
+                  <option value="false">Inactiv</option>
+                </select>
+              </div>
+              <input name="note" placeholder="Observații (opțional)" />
+              <button type="submit">Adauga câmp</button>
+            </form>
+            <div class="list-block" id="fields-list"></div>
           </article>
 
           <article class="panel" data-view="nom-laborator">
@@ -2408,7 +2480,7 @@
           </article>
         </section>
 
-        <section class="panel editor-panel" id="editor-panel" data-view="nom-parteneri,nom-produse,nom-locatii,nom-tarife,nom-masini,nom-laborator,nom-companii,nom-utilizatori,nom-setari" data-access="nomenclator-update">
+        <section class="panel editor-panel" id="editor-panel" data-view="nom-parteneri,nom-produse,nom-locatii,nom-tarife,nom-masini,nom-campuri,nom-laborator,nom-companii,nom-utilizatori,nom-setari" data-access="nomenclator-update">
           <div class="panel-head">
             <h2 id="editor-title">Editor configurare</h2>
             <p id="editor-copy">

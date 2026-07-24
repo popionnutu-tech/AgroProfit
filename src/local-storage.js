@@ -59,7 +59,8 @@ const defaultConfigState = {
     processingTypes: 3,
     vehicles: 0,
     labReports: 0,
-    companies: 3
+    companies: 3,
+    fields: 0
   },
   roles: listSystemRoles(),
   users: [
@@ -141,6 +142,8 @@ const defaultConfigState = {
   ],
   vehicles: [],
   labReports: [],
+  // Câmpuri agricole (de unde se recoltează roada) — pt. alegere la recepție + analiză roadă/câmp.
+  fields: [],
   // Companiile proprii care emit documentele de tipar (Act de achizitie, Contract, Ordin de plata,
   // ulterior factura de livrare). La tipar utilizatorul alege care companie emite.
   companies: [
@@ -199,7 +202,8 @@ const configEntities = [
   "processingTypes",
   "vehicles",
   "labReports",
-  "companies"
+  "companies",
+  "fields"
 ];
 
 const defaultUserPassword = process.env.DEFAULT_USER_PASSWORD || "Agro2026!";
@@ -1353,6 +1357,13 @@ function normalizeEntityPayload(entity, payload) {
         driver: String(payload.driver || "").trim(),
         active: sanitizeBoolean(payload.active ?? true)
       };
+    case "fields":
+      return {
+        name: requiredText(payload.name, "Denumirea campului"),
+        area: sanitizeNumber(payload.area),
+        note: String(payload.note || "").trim().slice(0, 200),
+        active: sanitizeBoolean(payload.active ?? true)
+      };
     case "companies":
       return {
         name: requiredText(payload.name, "Denumirea companiei"),
@@ -1764,6 +1775,9 @@ async function createReceipt(payload) {
     receivedBy: payload.receivedBy || "",
     location: payload.location || "",
     locationId: payload.locationId ? Number(payload.locationId) : null,
+    // Câmpul agricol de unde e roada (opțional) — pt. analiză roadă/câmp.
+    fieldId: payload.fieldId ? Number(payload.fieldId) : null,
+    fieldName: payload.fieldName || "",
     mixedProductConfirmed,
     reservedQuantity: 0,
     deliveredQuantity: 0,
