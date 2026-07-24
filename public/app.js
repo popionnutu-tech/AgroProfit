@@ -3972,6 +3972,7 @@ function getEditorSchema(entity) {
         { name: "humidityNorm", label: "Norma umiditate", type: "number", step: "0.01" },
         { name: "impurityNorm", label: "Norma impuritati", type: "number", step: "0.01" },
         { name: "cmrDescription", label: "Descriere CMR (caseta 9)", type: "text" },
+        { name: "invoiceName", label: "Denumire pentru invoice/certificat", type: "text" },
         commonActiveField
       ]
     },
@@ -6379,6 +6380,13 @@ function findPartnerByName(name) {
   return (currentConfig?.partners || []).find((p) => String(p.name).trim().toLowerCase() === String(name || "").trim().toLowerCase()) || null;
 }
 
+// Denumirea produsului pentru documentele de tipar (invoice/certificat), completată în Nomenclator → Produse.
+// Dacă lipsește, se folosește denumirea normală a produsului.
+function productInvoiceName(productName) {
+  const p = (currentConfig?.products || []).find((x) => String(x.name).trim().toLowerCase() === String(productName || "").trim().toLowerCase());
+  return (p && p.invoiceName) ? String(p.invoiceName).trim() : "";
+}
+
 function buildInvoicePrintHtml(delivery) {
   const seller = getSellerPartner(delivery);
   const buyer = getBuyerPartner(delivery);
@@ -6456,7 +6464,7 @@ function buildInvoicePrintHtml(delivery) {
         <th style="width:19%">Suma in ${esc(cur)}</th>
       </tr>
       <tr>
-        <td style="height:40px">${esc(delivery.product)}</td>
+        <td style="height:40px">${esc(productInvoiceName(delivery.product) || delivery.product)}</td>
         <td class="c">In vrac</td>
         <td class="r">${actNum(tnQty, 3)}</td>
         <td class="r">${actNum(unitPerTn, 2)}</td>
@@ -6528,6 +6536,11 @@ function buildCertificatePrintHtml(delivery) {
   const fl = (v, min) => `<span class="of-fill" style="min-width:${min || 90}px;">${escapeComboHtml(v === 0 || v ? String(v) : "")}</span>`;
   const auto = `${delivery.vehicle || ""}${delivery.trailer ? " + " + delivery.trailer : ""}`.trim();
   const afla = L.aflatoxinB1 ? escapeComboHtml(L.aflatoxinB1) : "nu s-a depistat";
+  // Numărul certificatului = numărul facturii + „-CC" (crescător, legat de invoice); data = data facturii.
+  const certNr = delivery.invoiceNumber ? `${delivery.invoiceNumber}-CC` : (L.reportNumber || "");
+  const certDate = delivery.invoiceDate ? formatDateShort(delivery.invoiceDate) : (L.reportDate ? formatDateShort(L.reportDate) : "");
+  // Denumirea produsului: din Nomenclator → Produse („Denumire pentru invoice/certificat"), altfel cea normală.
+  const prodName = productInvoiceName(delivery.product) || L.product || delivery.product;
   return `
     <table style="width:100%;border-collapse:collapse;font-size:11px;"><tr>
       <td style="width:58%;vertical-align:top;">
@@ -6539,9 +6552,9 @@ function buildCertificatePrintHtml(delivery) {
       </td>
     </tr></table>
     <div class="of-title" style="margin-top:10px;">CERTIFICAT<small style="text-transform:none;font-weight:400;">Despre calitatea cerealelor</small></div>
-    <div class="of-row of-c">Nr. ${fl(L.reportNumber, 120)} &nbsp; din ${fl(L.reportDate ? formatDateShort(L.reportDate) : "", 120)}</div>
+    <div class="of-row of-c">Nr. ${fl(certNr, 120)} &nbsp; din ${fl(certDate, 120)}</div>
 
-    <div class="of-row">Denumirea produsului: ${fl(L.product || delivery.product, 260)}</div>
+    <div class="of-row">Denumirea produsului: ${fl(prodName, 260)}</div>
     <div class="of-row">Țara de Origine: R. Moldova</div>
     <div class="of-row">Anul recoltei ${fl(L.harvestYear, 80)} &nbsp; Tipul ${fl(L.grainType, 110)} &nbsp; Subtipul ${fl(L.subtype, 120)}</div>
     <div class="of-row">Clasa ${fl(L.grainClass, 120)} &nbsp; Umiditatea ${fl(L.humidity, 60)} % &nbsp; Calitatea ${fl(L.quality, 120)}</div>

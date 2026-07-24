@@ -1402,6 +1402,7 @@ function normalizeEntityPayload(entity, payload) {
         humidityNorm: sanitizeNumber(payload.humidityNorm),
         impurityNorm: sanitizeNumber(payload.impurityNorm),
         cmrDescription: String(payload.cmrDescription || "").trim(),
+        invoiceName: String(payload.invoiceName || "").trim().slice(0, 200),
         active: sanitizeBoolean(payload.active ?? true)
       };
     case "storageLocations":
