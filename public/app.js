@@ -1391,6 +1391,8 @@ function renderUserActivity() {
   if (countEl) countEl.textContent = `(${rows.length} utilizatori · ${noAct} fără activitate · ${lowAct} activitate redusă)`;
 
   const fmt = (iso) => (iso ? String(iso).replace("T", " ").slice(0, 16) : "—");
+  const totLogins = rows.reduce((s, r) => s + r.logins, 0);
+  const totActions = rows.reduce((s, r) => s + r.total, 0);
   body.innerHTML = rows
     .map((r) => {
       let badge, style;
@@ -1408,8 +1410,19 @@ function renderUserActivity() {
           <td><span style="padding:2px 8px;border-radius:10px;font-size:12px;${style}">${badge}</span></td>
         </tr>`;
     })
-    .join("");
+    .join("") + `
+        <tr class="totals-row">
+          <td colspan="2">TOTAL · ${rows.length} utilizatori</td>
+          <td>${totLogins}</td>
+          <td>${totActions}</td>
+          <td></td>
+          <td></td>
+          <td></td>
+        </tr>`;
 }
+
+// Afișare cantitate în KILOGRAME în tabelele de rapoarte (intern stocăm în TONE → ×1000).
+function kgNum(t) { return formatNumber(Math.round(Number(t || 0) * 1000)); }
 
 // Raport „pierderi cantitative" pe produs: primit → procesare → livrat, cu diferența necontabilizată.
 // Doar afișare (agregă recepții/procesări/livrări existente); nu atinge stocul/financiarul.
@@ -1454,38 +1467,49 @@ function renderLossesReport() {
 
   const rows = Array.from(byProduct.entries()).sort((a, b) => String(a[0]).localeCompare(String(b[0]), "ro"));
   if (!rows.length) {
-    body.innerHTML = '<tr><td colspan="8" class="empty-state">Fără date pentru filtrul ales.</td></tr>';
+    body.innerHTML = '<tr><td colspan="9" class="empty-state">Fără date pentru filtrul ales.</td></tr>';
     if (foot) foot.innerHTML = "";
     return;
   }
-  const tot = { received: 0, waterRecv: 0, waste: 0, waterDry: 0, delivered: 0, waterDeliv: 0, diff: 0 };
+  // Stoc curent pe produs (snapshot din sumarul de stoc) — coloană informativă lângă diferență.
+  const stockByProduct = {};
+  ((lastStockSummary && lastStockSummary.byLocation) || []).forEach((i) => {
+    const p = String(i.product || "").trim();
+    if (!p) return;
+    stockByProduct[p] = (stockByProduct[p] || 0) + Number(i.quantity || 0);
+  });
+  const tot = { received: 0, waterRecv: 0, waste: 0, waterDry: 0, delivered: 0, waterDeliv: 0, diff: 0, stock: 0 };
   body.innerHTML = rows
     .map(([prod, g]) => {
       const diff = g.received - g.waste - g.waterDry - g.delivered;
+      const stock = stockByProduct[prod] || 0;
       tot.received += g.received; tot.waterRecv += g.waterRecv; tot.waste += g.waste;
-      tot.waterDry += g.waterDry; tot.delivered += g.delivered; tot.waterDeliv += g.waterDeliv; tot.diff += diff;
+      tot.waterDry += g.waterDry; tot.delivered += g.delivered; tot.waterDeliv += g.waterDeliv;
+      tot.diff += diff; tot.stock += stock;
       return `<tr>
         <td>${escapeComboHtml(prod)}</td>
-        <td>${formatNumber(g.received)}</td>
-        <td>${formatNumber(g.waterRecv)}</td>
-        <td>${formatNumber(g.waste)}</td>
-        <td>${formatNumber(g.waterDry)}</td>
-        <td>${formatNumber(g.delivered)}</td>
-        <td>${formatNumber(g.waterDeliv)}</td>
-        <td><b>${formatNumber(diff)}</b></td>
+        <td>${kgNum(g.received)}</td>
+        <td>${kgNum(g.waterRecv)}</td>
+        <td>${kgNum(g.waste)}</td>
+        <td>${kgNum(g.waterDry)}</td>
+        <td>${kgNum(g.delivered)}</td>
+        <td>${kgNum(g.waterDeliv)}</td>
+        <td><b>${kgNum(diff)}</b></td>
+        <td>${kgNum(stock)}</td>
       </tr>`;
     })
     .join("");
   if (foot) {
     foot.innerHTML = `<tr class="totals-row">
       <td>TOTAL</td>
-      <td>${formatNumber(tot.received)}</td>
-      <td>${formatNumber(tot.waterRecv)}</td>
-      <td>${formatNumber(tot.waste)}</td>
-      <td>${formatNumber(tot.waterDry)}</td>
-      <td>${formatNumber(tot.delivered)}</td>
-      <td>${formatNumber(tot.waterDeliv)}</td>
-      <td><b>${formatNumber(tot.diff)}</b></td>
+      <td>${kgNum(tot.received)}</td>
+      <td>${kgNum(tot.waterRecv)}</td>
+      <td>${kgNum(tot.waste)}</td>
+      <td>${kgNum(tot.waterDry)}</td>
+      <td>${kgNum(tot.delivered)}</td>
+      <td>${kgNum(tot.waterDeliv)}</td>
+      <td><b>${kgNum(tot.diff)}</b></td>
+      <td>${kgNum(tot.stock)}</td>
     </tr>`;
   }
 }
@@ -1522,15 +1546,15 @@ function renderFieldYield() {
     const ha = field && Number(field.area) > 0 ? Number(field.area) : 0;
     const perHa = ha > 0 ? Math.round((g.qty * 1000) / ha) : null;
     const products = Array.from(g.byProduct.entries())
-      .map(([p, q]) => `${escapeComboHtml(p)}: ${formatNumber(q)} t`).join(", ");
+      .map(([p, q]) => `${escapeComboHtml(p)}: ${kgNum(q)} kg`).join(", ");
     return `<tr>
       <td>${escapeComboHtml(name)}</td>
       <td>${products}</td>
-      <td>${formatNumber(g.qty)}</td>
+      <td>${kgNum(g.qty)}</td>
       <td>${ha > 0 ? formatNumber(ha) + " ha · " + formatNumber(perHa) + " kg/ha" : "—"}</td>
     </tr>`;
   }).join("");
-  if (foot) foot.innerHTML = `<tr class="totals-row"><td>TOTAL</td><td></td><td><b>${formatNumber(total)}</b></td><td></td></tr>`;
+  if (foot) foot.innerHTML = `<tr class="totals-row"><td>TOTAL</td><td></td><td><b>${kgNum(total)}</b></td><td></td></tr>`;
 }
 
 // Tipărește un tabel de raport EXACT cum e afișat (cu filtrele aplicate). Butoane: .table-print-btn.
@@ -1630,20 +1654,20 @@ function renderStockPeriod() {
     tInit += init; tRec += rec; tProc += proc; tDel += del; tFin += fin;
     return `<tr>
       <td>${p}</td>
-      <td>${formatNumber(init)}</td>
-      <td>${formatNumber(rec)}</td>
-      <td>${formatNumber(proc)}</td>
-      <td>${formatNumber(del)}</td>
-      <td><b>${formatNumber(fin)}</b></td>
+      <td>${kgNum(init)}</td>
+      <td>${kgNum(rec)}</td>
+      <td>${kgNum(proc)}</td>
+      <td>${kgNum(del)}</td>
+      <td><b>${kgNum(fin)}</b></td>
     </tr>`;
   }).join("") + `
     <tr class="totals-row">
       <td>TOTAL</td>
-      <td>${formatNumber(tInit)}</td>
-      <td>${formatNumber(tRec)}</td>
-      <td>${formatNumber(tProc)}</td>
-      <td>${formatNumber(tDel)}</td>
-      <td>${formatNumber(tFin)}</td>
+      <td>${kgNum(tInit)}</td>
+      <td>${kgNum(tRec)}</td>
+      <td>${kgNum(tProc)}</td>
+      <td>${kgNum(tDel)}</td>
+      <td>${kgNum(tFin)}</td>
     </tr>`;
 }
 
@@ -2669,7 +2693,7 @@ function renderDeliveries(deliveries) {
         : (item.invoicePaid ? "Achitată" : "Neachitată");
       return `
         <tr>
-          <td>#${item.id}</td>
+          <td>Nr. ${item.id}</td>
           <td>${formatDateShort(item.createdAt || item.deliveredAt)}</td>
           <td>${item.location || (item.receiptId ? `#${item.receiptId}` : "-")}</td>
           <td>${item.customer}</td>
@@ -6534,7 +6558,7 @@ function buildInvoicePrintHtml(delivery) {
     <table class="ibox">
       <tr>
         <td style="width:50%">
-          <div><span class="lbl">Invoice P №</span> ${esc(delivery.invoiceNumber)}</div>
+          <div><span class="lbl">Nr.</span> ${esc(delivery.invoiceNumber)}</div>
           <div><span class="lbl">Data:</span> ${dateInv}</div>
         </td>
         <td style="width:50%"><span class="lbl">Contract Nr.</span> ${esc(delivery.contractNumber)} <span class="lbl">din</span> ${delivery.contractDate ? formatDateShort(delivery.contractDate) : ""}</td>
