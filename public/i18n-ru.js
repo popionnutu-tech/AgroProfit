@@ -88,6 +88,7 @@
     "Umiditate %": "Влажность %",
     "Impuritati %": "Сорность %",
     "Vehicul": "Транспорт",
+    "Contact": "Контакт",
     "Receptionat de": "Принял",
     "Observatii": "Примечания",
     "Observații": "Примечания",
@@ -282,7 +283,19 @@
     pending.forEach(function (node) {
       var key = node.nodeValue.trim();
       var ru = RU_DICT[key];
-      if (ru && ru !== key) node.nodeValue = node.nodeValue.replace(key, key + " / " + ru);
+      if (!ru || ru === key) return;
+      var parent = node.parentNode;
+      // In anteturile de tabel (<th>), rusa merge PE RANDUL DE JOS, sub romana, cu font mai mic
+      // => coloanele nu se largesc de la " / RU". Idempotent: nu adauga a doua oara.
+      if (parent && parent.nodeName === "TH") {
+        if (parent.querySelector(":scope > .th-ru")) return;
+        var span = document.createElement("span");
+        span.className = "th-ru";
+        span.textContent = ru;
+        parent.appendChild(span);
+        return;
+      }
+      node.nodeValue = node.nodeValue.replace(key, key + " / " + ru);
     });
 
     // 2) Placeholdere

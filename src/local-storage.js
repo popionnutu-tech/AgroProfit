@@ -1768,6 +1768,7 @@ async function createReceipt(payload) {
     withholdingAmount: sanitizeNumber(payload.withholdingAmount),
     preliminaryPayableAmount: sanitizeNumber(payload.preliminaryPayableAmount),
     vehicle: payload.vehicle || "",
+    contact: String(payload.contact || "").trim().slice(0, 40),
     note: payload.note || "",
     photos: sanitizePhotos(payload.photos),
     source: payload.source || "dashboard",

@@ -1036,13 +1036,13 @@ function getProductPalette(name) {
     return { fill: "#E8A33B", edge: "#A66515", label: "#11211A" }; // corn deep orange
   }
   if (/floar|soarelui|sunflower/i.test(n)) {
-    return { fill: "#3A2F1F", edge: "#1A130A", label: "#FBF8EE" }; // sunflower seed dark
+    return { fill: "#1B1B1B", edge: "#000000", label: "#FBF8EE" }; // sunflower — negru
   }
   if (/soia|soy/i.test(n)) {
     return { fill: "#C9B373", edge: "#7F6E3C", label: "#11211A" }; // soybean pale tan
   }
   if (/rapit|rapese|rapeseed|colza/i.test(n)) {
-    return { fill: "#4A6B2F", edge: "#2A3F1C", label: "#FBF8EE" }; // rapeseed olive
+    return { fill: "#5A3A22", edge: "#2E1D10", label: "#FBF8EE" }; // rapiță — cafeniu închis
   }
   if (/orz|barley/i.test(n)) {
     return { fill: "#B89669", edge: "#6F5638", label: "#11211A" }; // barley tan
@@ -1871,10 +1871,10 @@ function renderReceipts(receipts) {
             ${canChangeSupplier ? `<button type="button" class="cell-btn change-supplier-btn" data-action="change-supplier" data-id="${item.id}" title="Schimbă furnizorul">✎</button>` : ""}
           </td>
           <td>${item.product}${photosMini(item.photos)}</td>
-          <td>${qtyCell}</td>
-          <td title="Apă eliminată la recepție (din umiditatea în exces)">${isPendingWeighing || !(Number(item.estimatedWaterLoss) > 0) ? "—" : formatNumber(Math.round(Number(item.estimatedWaterLoss) * 1000)) + " kg"}</td>
           <td>${item.grossWeight > 0 ? formatNumber(Number(item.grossWeight)) + " kg" : "—"}</td>
           <td>${item.tareWeight > 0 ? formatNumber(Number(item.tareWeight)) + " kg" : "—"}</td>
+          <td title="Apă eliminată la recepție (din umiditatea în exces)">${isPendingWeighing || !(Number(item.estimatedWaterLoss) > 0) ? "—" : formatNumber(Math.round(Number(item.estimatedWaterLoss) * 1000)) + " kg"}</td>
+          <td>${qtyCell}</td>
           <td>${item.location || "-"}</td>
           <td class="col-fin">${currency.format(valoare)}${canEditAmount && !isCanceled ? ` <button type="button" class="cell-btn change-amount-btn" data-action="adjust-amount" data-id="${item.id}" title="Ajustează valoarea recepției">✎</button>` : ""}</td>
           <td class="col-fin">${achitat > 0 ? currency.format(achitat) : "-"}</td>
@@ -2175,15 +2175,15 @@ function renderReceiptTotals(rows) {
   });
   const waterKg = Math.round(totalWater * 1000);
   const qtyCell = `<b>${formatNumber(totalNet)} t</b><br><small>${formatNumber(totalNet * 1000)} kg</small>`;
-  // 17 coloane: ID,Data,Furnizor,Produs | Cantitate | Apă | Masă brută | Tara | Locatie |
+  // 17 coloane: ID,Data,Furnizor,Produs | Masă brută | Tara | Apă | Cantitate | Locatie |
   //             Valoare | Achitat | Rest | Data plată | Stare | Status | Detalii | Acțiuni
   receiptsFootEl.innerHTML = `
     <tr class="totals-row">
       <td colspan="4">TOTAL · ${rows.length} recepții</td>
-      <td>${qtyCell}</td>
+      <td></td>
+      <td></td>
       <td>${waterKg > 0 ? "<b>" + formatNumber(waterKg) + " kg</b>" : "—"}</td>
-      <td></td>
-      <td></td>
+      <td>${qtyCell}</td>
       <td></td>
       <td class="col-fin"><b>${currency.format(totalPay)}</b></td>
       <td class="col-fin">${currency.format(totalPaid)}</td>
@@ -4892,6 +4892,7 @@ async function createReceipt(formData) {
     humidity: formData.get("humidity") || String(selectedProduct?.humidityNorm ?? 0),
     impurity: formData.get("impurity") || String(selectedProduct?.impurityNorm ?? 0),
     vehicle: formData.get("vehicle"),
+    contact: formData.get("contact"),
     note: formData.get("note"),
     photos: gatherPhotos("receipt-photo-brut", "receipt-photo-neto", "receipt-photo-masina"),
     locationId: formData.get("locationId"),
@@ -7320,7 +7321,9 @@ async function refreshViewData(view) {
       renderUserActivity();
       renderFieldYield();
     } else if (view === "acasa") {
-      await Promise.all([loadDailyReport(), loadAuditLogs()]);
+      // Reîncărcăm și recepțiile + procesările: widget-ul „Stoc neprocesat" se calculează din ele,
+      // deci trebuie să fie proaspete la fiecare deschidere a dashboard-ului (nu doar la pornire).
+      await Promise.all([loadDailyReport(), loadAuditLogs(), loadReceipts(), loadProcessings()]);
     } else if (view === "audit") {
       await loadAuditLogs();
     }
@@ -7582,6 +7585,7 @@ function openReceiptDetails(id) {
       ${rdRow("Produs", escapeComboHtml(item.product || "—"))}
       ${rdRow("Locație", escapeComboHtml(item.location || "—"))}
       ${rdRow("Vehicul", escapeComboHtml(item.vehicle || "—"))}
+      ${rdRow("Contact", escapeComboHtml(item.contact || "—"))}
       ${rdRow("Recepționat de", escapeComboHtml(item.receivedBy || "—"))}
     </div>
     <div class="rd-section">

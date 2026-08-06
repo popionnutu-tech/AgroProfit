@@ -1141,6 +1141,15 @@ thead th {
   color: var(--muted);
 }
 
+/* Eticheta RU sub cea RO in anteturile de tabel (mod bilingv operator) — coloane mai inguste. */
+.th-ru {
+  display: block;
+  font-size: 0.82em;
+  font-weight: 400;
+  opacity: 0.6;
+  margin-top: 1px;
+}
+
 .status {
   border: 0;
   border-radius: 999px;
