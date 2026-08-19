@@ -11,3 +11,6 @@ data/
 !.claude/settings.json
 !.claude/hooks/
 .env*.local
+
+# Rapoarte de audit de securitate — NU se comit (repo public)
+SECURITY-AUDIT-*.md
