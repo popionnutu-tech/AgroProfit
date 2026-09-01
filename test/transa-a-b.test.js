@@ -1381,3 +1381,61 @@ test("Retur pe livrare din cilindru (fara receptie): marfa revine in locatia de 
     assert.equal(cilindru.quantity, 80); // 100 - 20
   });
 });
+
+test("Retur: marfa revine in locatia unde a fost descarcata, nu in cea din care s-a completat", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    // Receptie 100 t in Cilindru 1, apoi 70 t mutate in Cilindru 2.
+    const receipt = await seedReceipt(storage, { location: "Cilindru 1" });
+    await storage.createTransfer({
+      productId: 1, fromLocationId: 1, toLocationId: 2, quantity: 70,
+      changeReason: "pregatire livrare", createdBy: "op"
+    });
+
+    // Livrare de 100 t pe receptie: in Cilindru 1 mai sunt doar 30 t, deci scaderea se
+    // completeaza (cascadat) cu 70 t din Cilindru 2.
+    const d = await storage.createDelivery({
+      receiptId: receipt.id, customerId: 2, customer: "X", plannedQuantity: 100, createdBy: "op"
+    });
+    assert.equal(d.location, "Cilindru 1");
+    let summary = await storage.getStockSummary();
+    assert.equal(summary.totals.totalQuantity, 0); // tot stocul a plecat
+
+    // Cumparatorul refuza 40 t; camionul le descarca inapoi in Cilindru 1.
+    await storage.returnDelivery(d.id, {
+      returnedQuantity: 40, reason: "refuz partial", currentUser: { roleCode: "operator" }
+    });
+
+    summary = await storage.getStockSummary();
+    const qtyAt = (name) => Number(
+      (summary.byLocation.find((i) => i.location === name && i.product === "Grau") || {}).quantity || 0
+    );
+    assert.equal(summary.totals.totalQuantity, 40);
+    // Marfa e in Cilindru 1 (unde s-a descarcat fizic), NU in Cilindru 2 (de unde s-a completat).
+    assert.equal(qtyAt("Cilindru 1"), 40);
+    assert.equal(qtyAt("Cilindru 2"), 0);
+  });
+});
+
+test("Retur: regula un-produs/locatie se aplica si la locatiile din afara nomenclatorului", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    // „Depozit vechi" NU e in nomenclator (livrarile pot avea locatia ca text liber).
+    const receipt = await seedReceipt(storage, { location: "Depozit vechi" });
+    await seedReceipt(storage, {
+      location: "Depozit vechi", product: "Porumb", productId: 2,
+      quantity: 50, provisionalNetQuantity: 50, finalNetQuantity: 50
+    });
+
+    const d = await storage.createDelivery({
+      receiptId: receipt.id, customerId: 2, customer: "X", plannedQuantity: 100, createdBy: "op"
+    });
+
+    // Descarcarea ar amesteca Grau peste Porumb — inainte, verificarea se sarea in tacere
+    // pentru ca locatia nu era gasita in nomenclator.
+    await assert.rejects(
+      storage.returnDelivery(d.id, { reason: "refuz", currentUser: { roleCode: "operator" } }),
+      /Porumb/
+    );
+  });
+});

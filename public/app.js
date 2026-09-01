@@ -3118,7 +3118,9 @@ function renderDailyReport(report) {
           <td>${formatDateShort(item.createdAt)}</td>
           <td>${escapeComboHtml(item.customer)}</td>
           <td>${escapeComboHtml(item.product)}</td>
-          <td>${formatNumber(item.deliveredQuantity)}</td>
+          <td>${formatNumber(item.deliveredQuantity)}${Number(item.returnedQuantity || 0) > 0
+            ? ` <span class="status-badge badge-retur" title="Motiv: ${escapeComboHtml(item.returnReason || "-")}">retur ${formatNumber(Math.round(Number(item.returnedQuantity) * 1000))} kg</span>`
+            : ""}</td>
           <td>${currency.format(deliveryInvoiceTotals(item).totalLei)}</td>
           <td>${escapeComboHtml(item.invoiceNumber || "-")}</td>
         </tr>

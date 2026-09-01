@@ -578,12 +578,7 @@ function readConfigState() {
   // Orice locatie de tip "parcare" (ex. Parcare afara) permite mai multe produse — singura
   // exceptie de la regula un-produs. Fortat (robust la editari din nomenclator), conform cerintei.
   state.storageLocations = (state.storageLocations || []).map((loc) => {
-    const n = String((loc && loc.name) || "")
-      .trim()
-      .toLowerCase()
-      .replace(/[ăâ]/g, "a");
-    const isParcare = n.includes("parcare") || String((loc && loc.type) || "").toLowerCase() === "parcare";
-    if (isParcare && loc.multiProduct !== true) {
+    if (isParcareLocation(loc) && loc.multiProduct !== true) {
       return { ...loc, multiProduct: true };
     }
     return loc;
@@ -1001,11 +996,13 @@ function createStockSummary(receipts, deliveries = [], openingDocuments = [], tr
   // astfel poarta (pe locatie) si scaderea coincid, dar ramane robust daca produsul
   // a fost mutat intre timp prin procesare/transfer.
   for (const d of deliveries) {
-    // Livrarea anulată sau returnată integral nu mai produce mișcare de stoc
-    // (marfa se întoarce). La returul PARȚIAL statusul rămâne „Livrat", dar
-    // `deliveredQuantity` a fost deja micșorat cu cantitatea descărcată.
-    if (isVoidedDelivery(d)) continue;
-    let remaining = Number(d.deliveredQuantity || 0);
+    // Livrarea anulată nu a existat niciodată: nicio mișcare, nici ieșirea, nici returul.
+    if (d.status === "Anulat") continue;
+    // Scădem IEȘIREA BRUTĂ (cât a plecat efectiv din stoc la încărcare), nu cantitatea rămasă
+    // după retur. Altfel cascada de mai jos s-ar recalcula cu un număr mai mic și marfa ar
+    // „reveni" în locațiile din care s-a completat, nu în cea unde a fost descărcată fizic.
+    // Creditul returului se aplică separat, mai jos, DUPĂ ce ieșirea a fost alocată.
+    let remaining = Number(d.deliveredQuantity || 0) + Number(d.returnedQuantity || 0);
     if (remaining <= 0) continue;
     const product = d.product;
     const primary = byLocation.find((i) => normLoc(i.location) === normLoc(d.location) && i.product === product);
@@ -1025,6 +1022,40 @@ function createStockSummary(receipts, deliveries = [], openingDocuments = [], tr
         loc.quantity -= take;
         loc.deliveredQuantity += take;
         remaining -= take;
+      }
+    }
+  }
+
+  // Retur / descărcare: marfa se întoarce EXACT în locația unde a fost pusă fizic — cea
+  // verificată la retur (conflict de produs + capacitate). Creditul vine DUPĂ scăderea
+  // livrărilor, ca alocarea ieșirii originale (eventual cascadată pe mai multe locații)
+  // să rămână neatinsă, și ÎNAINTE de plafonarea la zero de mai jos.
+  for (const d of deliveries) {
+    if (d.status === "Anulat") continue;
+    const returnEntries = Array.isArray(d.returns) && d.returns.length > 0
+      ? d.returns
+      : (Number(d.returnedQuantity || 0) > 0
+          ? [{ quantity: Number(d.returnedQuantity), location: d.location }]
+          : []);
+    for (const entry of returnEntries) {
+      const qty = Number(entry.quantity || 0);
+      if (qty <= 0) continue;
+      const locName = entry.location || d.location || "Fara locatie";
+      const target = byLocation.find(
+        (i) => normLoc(i.location) === normLoc(locName) && i.product === d.product
+      );
+      if (target) {
+        target.quantity += qty;
+        target.deliveredQuantity = Math.max(Number(target.deliveredQuantity || 0) - qty, 0);
+      } else {
+        byLocation.push({
+          location: locName,
+          product: d.product,
+          quantity: qty,
+          unit: "tone",
+          costCategory: null,
+          deliveredQuantity: 0
+        });
       }
     }
   }
@@ -1695,6 +1726,16 @@ function sameLocation(a, b) {
 // Detecteaza daca o locatie contine deja ALT produs decat cel care intra. Intoarce numele
 // produsului in conflict (sau null daca e gol / acelasi produs / locatie multiProduct).
 // Sursa unica pentru regula "un produs / locatie" (receptie, procesare, transfer).
+// Locatiile de tip „parcare" sunt singura exceptie de la regula un-produs/locatie.
+// Aceeasi regula ca in `readConfigState` (unde `multiProduct` e fortat pe ele).
+function isParcareLocation(location) {
+  const name = String((location && location.name) || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[ăâ]/g, "a");
+  return name.includes("parcare") || String((location && location.type) || "").toLowerCase() === "parcare";
+}
+
 function findCylinderConflict(summary, toLocation, productName) {
   if (!toLocation) return null;
   // Regula "un produs / locatie" se aplica peste tot, EXCEPTAND locatiile marcate explicit
@@ -4297,9 +4338,15 @@ async function returnDelivery(id, options = {}) {
   // Marfa se intoarce in locatia din care a plecat: aplicam aceleasi reguli ca la orice
   // intrare in cilindru — un singur produs / locatie + capacitate.
   const config = readConfigState();
-  const targetLocation = (config.storageLocations || []).find((item) =>
+  const knownLocation = (config.storageLocations || []).find((item) =>
     sameLocation(item.name, delivery.location)
   );
+  // Livrarile fara receptie pot avea locatia ca text liber, deci numele poate lipsi din
+  // nomenclator. In acel caz NU sarim tacit peste verificari: regula „un produs / locatie"
+  // se poate aplica oricum, dupa nume. Doar capacitatea ramane neverificabila (nu o stim).
+  const targetLocation = knownLocation || (String(delivery.location || "").trim()
+    ? { name: String(delivery.location).trim(), capacity: 0, multiProduct: isParcareLocation({ name: delivery.location }) }
+    : null);
   if (targetLocation) {
     // ATENTIE: summary-ul se calculeaza INAINTE de orice mutatie pe `state` (arrays sunt
     // partajate cu cache-ul, deci o mutatie s-ar vedea imediat in stoc).
