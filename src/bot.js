@@ -39,7 +39,7 @@ const steps = [
 ];
 
 const closedReceiptStatuses = new Set(["Inchis", "Anulat", "Finalizata"]);
-const closedDeliveryStatuses = new Set(["Inchis", "Anulat", "Finalizata"]);
+const closedDeliveryStatuses = new Set(["Inchis", "Anulat", "Finalizata", "Returnat"]);
 
 const numberFormatter = new Intl.NumberFormat("ro-RO", {
   maximumFractionDigits: 2

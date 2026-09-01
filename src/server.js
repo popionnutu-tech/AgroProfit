@@ -60,6 +60,7 @@ const { getDailyReportHandler } = require("./report-handlers");
 const {
   createDeliveryHandler,
   listDeliveriesHandler,
+  returnDeliveryHandler,
   transitionDeliveryHandler,
   updateDeliveryHandler
 } = require("./delivery-handlers");
@@ -582,6 +583,13 @@ app.post("/api/deliveries/:id/cancel", requireRoles(["admin"]), async (req, res)
     console.error("Failed to cancel delivery:", error.message);
     return res.status(400).json({ error: error.message || "Nu am putut anula livrarea." });
   }
+});
+
+// Retur / descarcare marfa (operator + manager + admin): cumparatorul a refuzat marfa dupa
+// incarcare. Body: { returnedQuantity (TONE, optional = retur integral), reason (obligatoriu) }.
+// Marfa se intoarce in locatia din care a plecat; livrarea ramane VIZIBILA in lista.
+app.post("/api/deliveries/:id/return", requireRoles(["operator", "manager", "admin"]), async (req, res) => {
+  return returnDeliveryHandler(req, res, req.params.id);
 });
 
 app.post("/api/deliveries/:id/reopen", requireRoles(["manager", "admin"]), async (req, res) => {

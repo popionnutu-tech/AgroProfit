@@ -1682,6 +1682,8 @@ thead th {
 .badge-ok { background: #d1fae5; color: #065f46; }
 .badge-alert { background: #fee2e2; color: #991b1b; }
 .badge-anulat { background: #e5e7eb; color: #6b7280; text-decoration: line-through; cursor: help; }
+/* Retur / descarcare: marfa s-a intors in stoc. Vizibil pentru toate rolurile. */
+.badge-retur { background: #ffedd5; color: #9a3412; cursor: help; }
 
 .eod-bar { display: flex; align-items: center; gap: 12px; margin: 4px 0 14px; flex-wrap: wrap; }
 .eod-status { font-size: 0.9rem; }

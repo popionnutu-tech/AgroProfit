@@ -16,6 +16,14 @@ function formatCurrency(value) {
   return currencyFormatter.format(Number(value || 0));
 }
 
+// Oglinda lui `isVoidedDelivery` din src/local-storage.js: livrarea anulata sau returnata
+// integral nu mai produce miscare de stoc si nu mai e de facturat/incasat.
+// (Modulul e intentionat pur — fara require-uri — de aceea regula e oglindita, nu importata.)
+function isVoidedDelivery(item) {
+  const status = String((item && item.status) || "");
+  return status === "Anulat" || status === "Returnat";
+}
+
 function sameDay(value, dateValue) {
   return String(value || "").slice(0, 10) === String(dateValue || "").trim();
 }
@@ -23,7 +31,9 @@ function sameDay(value, dateValue) {
 function getOpenDocuments(receipts, deliveries) {
   return {
     receipts: receipts.filter((item) => !["Inchis", "Anulat", "Finalizata"].includes(String(item.status || ""))),
-    deliveries: deliveries.filter((item) => !["Inchis", "Anulat", "Finalizata"].includes(String(item.status || "")))
+    deliveries: deliveries.filter(
+      (item) => !isVoidedDelivery(item) && !["Inchis", "Finalizata"].includes(String(item.status || ""))
+    )
   };
 }
 
@@ -47,7 +57,8 @@ function getOutstandingFinancials(receipts, deliveries, openingDebtItems) {
     .filter((item) => item.outstandingAmount > 0);
 
   const deliveryCollections = deliveries
-    .filter((item) => item.status !== "Anulat") // livrarea anulata nu mai e de incasat
+    // livrarea anulata sau returnata integral nu mai e de incasat
+    .filter((item) => !isVoidedDelivery(item))
     .map((item) => {
       const targetAmount = Number(item.contractPrice || 0) * Number(item.deliveredQuantity || 0);
       const collectedAmount = Number(item.collectedAmount || 0);
@@ -108,8 +119,11 @@ function getOperationalProblems(report, receipts, deliveries, complaints, auditL
   const qualityDeviationReceipts = receipts.filter(
     (item) => Number(item.excessHumidity || 0) > 0 || Number(item.excessImpurity || 0) > 0
   );
-  const deliveriesWithoutInvoice = deliveries.filter((item) => !String(item.invoiceNumber || "").trim());
-  const deliveriesWithoutContractPrice = deliveries.filter((item) => Number(item.contractPrice || 0) <= 0);
+  // Livrarile stinse (anulate / returnate integral) nu mai sunt probleme operationale:
+  // nu au ce factura si nu au ce incasa.
+  const billableDeliveries = deliveries.filter((item) => !isVoidedDelivery(item));
+  const deliveriesWithoutInvoice = billableDeliveries.filter((item) => !String(item.invoiceNumber || "").trim());
+  const deliveriesWithoutContractPrice = billableDeliveries.filter((item) => Number(item.contractPrice || 0) <= 0);
   const openComplaints = complaints.filter((item) => String(item.status || "").toLowerCase() === "deschisa");
   const importantChangesToday = auditLogs.filter(
     (item) => sameDay(item.createdAt, dateValue) && item.action !== "create" && item.entityType !== "auth"
