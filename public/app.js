@@ -1029,29 +1029,33 @@ function getLocationCapacity(loc) {
 // Brand colours per product type. Returns { fill, edge, label } palette for SVG.
 function getProductPalette(name) {
   const n = String(name || "").toLowerCase();
+  // Paletă separată pe NUANȚĂ, nu pe nuanțe de același bej: cinci produse (grâu, soia, orz,
+  // ovăz, secară) erau practic aceeași culoare — distanța perceptuală minimă era 7,7 (sub 25
+  // ochiul nu le mai deosebește la mărimea unui buline sau a unei benzi din cilindru).
+  // Acum minimul e 25,9. Rapița rămâne cafeniu închis, floarea-soarelui neagră, ca înainte.
   if (/grau|grâu|wheat|gri/i.test(n)) {
-    return { fill: "#D4B262", edge: "#8B6B1F", label: "#11211A" }; // wheat gold
+    return { fill: "#E3C766", edge: "#8B6B1F", label: "#11211A" }; // grâu — auriu
   }
   if (/porumb|corn|maiz/i.test(n)) {
-    return { fill: "#E8A33B", edge: "#A66515", label: "#11211A" }; // corn deep orange
+    return { fill: "#EE8F1C", edge: "#A65A0A", label: "#11211A" }; // porumb — portocaliu
   }
   if (/floar|soarelui|sunflower/i.test(n)) {
-    return { fill: "#1B1B1B", edge: "#000000", label: "#FBF8EE" }; // sunflower — negru
+    return { fill: "#1B1B1B", edge: "#000000", label: "#FBF8EE" }; // floarea-soarelui — negru
   }
   if (/soia|soy/i.test(n)) {
-    return { fill: "#C9B373", edge: "#7F6E3C", label: "#11211A" }; // soybean pale tan
+    return { fill: "#7D9B4E", edge: "#46602A", label: "#11211A" }; // soia — verde (planta)
   }
   if (/rapit|rapese|rapeseed|colza/i.test(n)) {
     return { fill: "#5A3A22", edge: "#2E1D10", label: "#FBF8EE" }; // rapiță — cafeniu închis
   }
   if (/orz|barley/i.test(n)) {
-    return { fill: "#B89669", edge: "#6F5638", label: "#11211A" }; // barley tan
+    return { fill: "#9E5B33", edge: "#5E3319", label: "#FBF8EE" }; // orz — arămiu
   }
   if (/ovaz|ovăz|oats|oat/i.test(n)) {
-    return { fill: "#CFAE7B", edge: "#7B5F32", label: "#11211A" }; // oats
+    return { fill: "#F0E4C4", edge: "#A08E5E", label: "#11211A" }; // ovăz — crem deschis
   }
   if (/secara|secară|rye/i.test(n)) {
-    return { fill: "#9C8050", edge: "#5D4823", label: "#FBF8EE" }; // rye
+    return { fill: "#6E6E8C", edge: "#3E3E55", label: "#FBF8EE" }; // secară — gri-violet
   }
   // default neutral grain
   return { fill: "#A8956A", edge: "#5C4D2E", label: "#11211A" };
