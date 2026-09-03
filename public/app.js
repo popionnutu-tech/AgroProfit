@@ -2581,12 +2581,14 @@ function isVoidedDelivery(item) {
   return status === "Anulat" || status === "Returnat";
 }
 
-// Sortare alfabetică românească (ă/â/î/ș/ț tratate ca literele de bază), folosită de
-// selectoarele care listează nomenclatoare — operatorul caută după nume, nu după ordinea
-// în care au fost introduse în sistem.
+// Sortare alfabetică românească (ă/â/î/ș/ț tratate ca literele de bază) cu ordonare
+// NATURALĂ a numerelor: „Cilindru 2" înaintea lui „Cilindru 10", „ABC 9" înaintea lui
+// „ABC 10". Comparația pur alfabetică le pune invers, pentru că „1" < „9" pe caractere.
+const NAME_COLLATOR = new Intl.Collator("ro", { sensitivity: "base", numeric: true });
+
 function sortedByName(list, key = "name") {
   return [...(list || [])].sort((a, b) =>
-    String((a && a[key]) || "").localeCompare(String((b && b[key]) || ""), "ro", { sensitivity: "base" })
+    NAME_COLLATOR.compare(String((a && a[key]) || ""), String((b && b[key]) || ""))
   );
 }
 
@@ -3774,13 +3776,11 @@ function renderMiniList(entity, items) {
     return;
   }
 
-  // Parteneri: afisare alfabetica dupa nume (ro). Nu mutam sursa currentConfig.
-  const displayItems =
-    entity === "partners"
-      ? [...items].sort((a, b) =>
-          String(a.name || "").localeCompare(String(b.name || ""), "ro", { sensitivity: "base" })
-        )
-      : items;
+  // Afisare sortata pentru nomenclatoarele cautate dupa nume/numar. Nu mutam sursa
+  // currentConfig — sortam doar copia folosita la randare.
+  const SORT_KEY_BY_ENTITY = { partners: "name", vehicles: "number" };
+  const sortKey = SORT_KEY_BY_ENTITY[entity];
+  const displayItems = sortKey ? sortedByName(items, sortKey) : items;
 
   const cols = ENTITY_COLUMNS[entity];
   // Fallback to legacy card view if entity is unknown
@@ -3956,7 +3956,7 @@ function renderSetupSelectors(config) {
   // Populate vehicles datalist for the delivery form (Etapa 5)
   const vehiclesDatalist = document.getElementById("vehicles-datalist");
   if (vehiclesDatalist) {
-    vehiclesDatalist.innerHTML = (config.vehicles || [])
+    vehiclesDatalist.innerHTML = sortedByName(config.vehicles, "number")
       .filter((v) => v.active !== false)
       .map((v) => {
         const extra = [v.series, v.driver].filter(Boolean).join(" · ");
