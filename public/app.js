@@ -2581,6 +2581,15 @@ function isVoidedDelivery(item) {
   return status === "Anulat" || status === "Returnat";
 }
 
+// Sortare alfabetică românească (ă/â/î/ș/ț tratate ca literele de bază), folosită de
+// selectoarele care listează nomenclatoare — operatorul caută după nume, nu după ordinea
+// în care au fost introduse în sistem.
+function sortedByName(list, key = "name") {
+  return [...(list || [])].sort((a, b) =>
+    String((a && a[key]) || "").localeCompare(String((b && b[key]) || ""), "ro", { sensitivity: "base" })
+  );
+}
+
 function deliveryStatusBadge(status) {
   const classMap = {
     Proiect: "badge-neutral",
@@ -3484,14 +3493,14 @@ function renderReceiptSelectors(config) {
   // Livrare pe PRODUS + cilindru sursa (#14): nu mai pe lot de receptie.
   renderSelectOptions(
     deliveryProductSelect,
-    config.products,
+    sortedByName(config.products),
     (item) => item.name,
     "Selecteaza produs",
     (item) => item.name
   );
   renderSelectOptions(
     deliverySourceSelect,
-    config.storageLocations,
+    sortedByName(config.storageLocations),
     (item) => item.name,
     "Din cilindru / locatie",
     (item) => item.name
@@ -3975,7 +3984,7 @@ function renderSetupSelectors(config) {
     const prevV = deliveryVehicleSelect.value;
     deliveryVehicleSelect.innerHTML =
       `<option value="">Mașina cumpărătorului (notează la Observații)</option>` +
-      (config.vehicles || [])
+      sortedByName(config.vehicles, "number")
         .filter((v) => v.active !== false)
         .map((v) => {
           const extra = [v.series, v.driver].filter(Boolean).join(" · ");
@@ -3989,7 +3998,7 @@ function renderSetupSelectors(config) {
     const prevT = deliveryTrailerSelect.value;
     deliveryTrailerSelect.innerHTML =
       `<option value="">Fără remorcă</option>` +
-      (config.vehicles || [])
+      sortedByName(config.vehicles, "number")
         .filter((v) => v.active !== false)
         .map((v) => {
           const extra = [v.series, v.driver].filter(Boolean).join(" · ");
@@ -5517,7 +5526,7 @@ function updateDeliverySourceOptions() {
     // Stoc neincarcat sau produs fara stoc: aratam toate locatiile ca fallback.
     deliverySourceSelect.innerHTML =
       `<option value="">Din cilindru / locatie</option>` +
-      (currentConfig.storageLocations || [])
+      sortedByName(currentConfig.storageLocations)
         .map((l) => `<option value="${escapeComboHtml(l.name)}">${escapeComboHtml(l.name)}</option>`)
         .join("");
   }
@@ -8890,7 +8899,7 @@ if (deliveryBillingDialog && deliveryBillingForm) {
     // Populate seller select from nomenclator (partners)
     const sellerSelect = document.getElementById("billing-seller-select");
     if (sellerSelect) {
-      const partners = (currentConfig?.partners || []);
+      const partners = sortedByName(currentConfig?.partners);
       sellerSelect.innerHTML = '<option value="">— alege vânzător —</option>' +
         partners.map((p) => `<option value="${escapeComboHtml(String(p.id))}">${escapeComboHtml(p.name)}</option>`).join("");
       if (delivery.sellerId) sellerSelect.value = String(delivery.sellerId);
