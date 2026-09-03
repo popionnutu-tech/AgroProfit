@@ -2559,23 +2559,31 @@ function deliveryReturnCell(item, canWrite) {
     ? `<span class="status-badge badge-retur" title="Motiv: ${escapeComboHtml(item.returnReason || "-")} · descărcat de ${escapeComboHtml(item.returnedBy || "-")}">Retur ${formatNumber(Math.round(returnedTons * 1000))} kg</span>`
     : "";
   // Aceleași condiții ca pe server (`returnDelivery`), ca butonul să nu ducă la un 403:
-  // livrarea închisă e doar pentru manager/admin, iar cea facturată cere storno întâi.
+  // livrarea închisă e doar pentru manager/admin, iar cea facturată doar pentru contabil.
   const closedForRole = item.status === "Inchis" && !canEditConfirmedStatus();
   const invoiced = String(item.invoiceNumber || "").trim() !== "";
   const canReturn =
     canWrite &&
     !isVoidedDelivery(item) &&
     !closedForRole &&
-    !invoiced &&
+    (!invoiced || canReturnInvoicedDelivery()) &&
     Number(item.deliveredQuantity || 0) > 0;
   const button = canReturn
-    ? `<button type="button" class="cell-btn" data-action="delivery-return" data-id="${item.id}" title="Descarcă marfa înapoi în stoc">Descărcare</button>`
+    ? `<button type="button" class="cell-btn" data-action="delivery-return" data-id="${item.id}" title="${invoiced
+        ? "Livrare facturată — returul cere storno pe factura nr. " + escapeComboHtml(item.invoiceNumber)
+        : "Descarcă marfa înapoi în stoc"}">Descărcare</button>`
     : "";
   return `${info}${info && button ? " " : ""}${button}`;
 }
 
 // Oglinda lui `isVoidedDelivery` din src/local-storage.js: livrarea anulată sau returnată
 // integral nu mai produce mișcare de stoc și nu mai intră în totaluri/încasări.
+// Oglinda lui `CAN_RETURN_INVOICED_ROLES` din src/local-storage.js: returul pe o livrare
+// deja facturată e act contabil (cere storno pe același număr de factură), nu de depozit.
+function canReturnInvoicedDelivery() {
+  return ["accountant", "accountant-sef", "admin"].includes(currentSessionUser?.roleCode);
+}
+
 function isVoidedDelivery(item) {
   const status = item && item.status;
   return status === "Anulat" || status === "Returnat";
@@ -2714,7 +2722,9 @@ function renderDeliveries(deliveries) {
     return true;
   });
   const waterIdx = buildReceiptHumidityIndex(); // construit o dată, folosit de toate rândurile
-  const canDeliveryWrite = canAccess("delivery-write"); // constant pe rol — ridicat din buclă
+  // Constant pe rol — ridicat din buclă. Contabilii nu au `delivery-write`, dar pot face
+  // returul pe livrările facturate, deci butonul trebuie să le apară.
+  const canDeliveryWrite = canAccess("delivery-write") || canReturnInvoicedDelivery();
   deliveriesBodyEl.innerHTML = filtered
     .map((item) => {
       const status = item.status || "Proiect";
@@ -6619,9 +6629,11 @@ function buildInvoicePrintHtml(delivery) {
     .invx .idecl { font-style:italic; font-size:11.5px; text-align:justify; margin:12px 0 4px; line-height:1.4; }
     .invx .iplace { font-style:italic; font-size:12px; }
     .invx .isign { margin-top:52px; font-size:13px; }
+    .invx .iretur { border:2px solid #000; padding:6px 8px; margin-bottom:8px; font-size:12px; font-weight:700; }
     .invx .iline { border-bottom:1px solid #000; display:inline-block; min-width:230px; }
   </style>
   <div class="invx">
+    ${Number(delivery.returnedQuantity || 0) > 0 ? `<div class="iretur">ATENȚIE — marfă returnată: ${formatNumber(Math.round(Number(delivery.returnedQuantity) * 1000))} kg descărcate înapoi în stoc${delivery.returnedAt ? " la " + formatDateShort(delivery.returnedAt) : ""}. Sumele de mai jos sunt cele RĂMASE după retur. Pentru diferență se emite storno / notă de credit pe acest număr de factură.</div>` : ""}
     <table class="ibox">
       <tr>
         <td style="width:50%">

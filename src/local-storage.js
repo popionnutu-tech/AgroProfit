@@ -229,6 +229,9 @@ const DELIVERY_TRANSITIONS = {
 // Sursa unica: foloseste-o oriunde filtrai pana acum doar pe `status !== "Anulat"` la livrari.
 // Plafon pe motivul returului: starea e un singur blob JSON in KV, recitit la fiecare cerere.
 const MAX_RETURN_REASON_LENGTH = 500;
+// Cine poate face retur pe o livrare DEJA FACTURATA: e un act contabil (cere storno / nota
+// de credit pe acelasi numar de factura), deci doar contabilii si adminul.
+const CAN_RETURN_INVOICED_ROLES = ["accountant", "accountant-sef", "admin"];
 // Plafon pe cate descarcari partiale se pot inregistra pe o singura livrare.
 const MAX_RETURNS_PER_DELIVERY = 50;
 
@@ -4295,12 +4298,13 @@ async function returnDelivery(id, options = {}) {
       "Livrarea are incasari inregistrate. Storneaza intai incasarea (Financiar), apoi fa returul."
     );
   }
-  // Livrarea deja FACTURATA: returul ar rescrie tacit aceeasi factura la o cantitate mai mica
-  // (sau la 0), cu acelasi numar, fara nota de credit. Contabil, asta cere storno de factura.
-  if (String(delivery.invoiceNumber || "").trim() !== "") {
-    throw new Error(
-      "Livrarea are factura emisa (nr. " + String(delivery.invoiceNumber).trim() +
-        "). Storneaza factura inainte de retur."
+  // Livrarea deja FACTURATA: returul rescrie aceeasi factura la o cantitate mai mica (sau la
+  // 0), cu acelasi numar. Asta e un act contabil, nu unul de depozit — il face CONTABILUL,
+  // care stie ca trebuie sa emita si storno-ul / nota de credit. Operatorul si managerul nu.
+  const invoiceNumber = String(delivery.invoiceNumber || "").trim();
+  if (invoiceNumber !== "" && !CAN_RETURN_INVOICED_ROLES.includes(role)) {
+    throw forbiddenError(
+      `Livrarea are factura emisa (nr. ${invoiceNumber}). Returul pe o livrare facturata il poate face doar contabilul.`
     );
   }
 
@@ -4395,6 +4399,9 @@ async function returnDelivery(id, options = {}) {
     quantity,
     reason,
     location: delivery.location || "",
+    // Factura afectata la momentul returului — contabilul trebuie sa stie pe ce numar
+    // sa emita storno-ul; numarul poate fi schimbat ulterior pe document.
+    invoiceNumber: invoiceNumber || "",
     returnedBy: actor,
     returnedByUsername: currentUser.username || "",
     returnedByRole: role || "",

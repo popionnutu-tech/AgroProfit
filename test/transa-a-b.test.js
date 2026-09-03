@@ -1205,7 +1205,7 @@ test("Retur: nu se poate repeta pe o livrare deja returnata integral", async () 
   });
 });
 
-test("Retur: blocat cat timp livrarea are factura emisa (inclusiv pentru admin)", async () => {
+test("Retur pe livrare facturata: doar contabilul (nu operatorul, nu managerul)", async () => {
   await withIsolatedWorkspace(async ({ load }) => {
     const storage = load("src/local-storage.js");
     const receipt = await seedReceipt(storage);
@@ -1216,24 +1216,37 @@ test("Retur: blocat cat timp livrarea are factura emisa (inclusiv pentru admin)"
       invoiceNumber: "FA-001", changedBy: "contabil", changeReason: "emitere factura"
     });
 
-    // Returul ar rescrie tacit aceeasi factura la 0, fara nota de credit.
-    await assert.rejects(
-      storage.returnDelivery(d.id, { reason: "refuz", currentUser: { roleCode: "operator" } }),
-      /factura/i
-    );
-    await assert.rejects(
-      storage.returnDelivery(d.id, { reason: "refuz", currentUser: { roleCode: "admin" } }),
-      /factura/i
-    );
+    // Returul rescrie aceeasi factura: e act contabil, nu de depozit.
+    for (const roleCode of ["operator", "manager"]) {
+      await assert.rejects(
+        storage.returnDelivery(d.id, { reason: "refuz", currentUser: { roleCode } }),
+        /doar contabilul/i,
+        `rolul ${roleCode} nu ar trebui sa poata`
+      );
+    }
 
-    // Dupa stornarea facturii (golirea numarului), returul devine posibil.
-    await storage.updateDelivery(d.id, {
-      invoiceNumber: "", changedBy: "contabil", changeReason: "storno factura"
+    const ok = await storage.returnDelivery(d.id, {
+      reason: "refuz cumparator", currentUser: { name: "Contabil", roleCode: "accountant" }
+    });
+    assert.equal(ok.status, "Returnat");
+    assert.equal(ok.returnedByRole, "accountant");
+    // Numarul facturii afectate ramane in istoric, ca sa se stie pe ce se emite storno.
+    assert.equal(ok.returns[0].invoiceNumber, "FA-001");
+  });
+});
+
+test("Retur pe livrare NEfacturata: operatorul poate, ca pana acum", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const receipt = await seedReceipt(storage);
+    const d = await storage.createDelivery({
+      receiptId: receipt.id, customerId: 2, customer: "X", plannedQuantity: 5, createdBy: "op"
     });
     const ok = await storage.returnDelivery(d.id, {
       reason: "refuz", currentUser: { name: "Op", roleCode: "operator" }
     });
     assert.equal(ok.status, "Returnat");
+    assert.equal(ok.returns[0].invoiceNumber, "");
   });
 });
 
