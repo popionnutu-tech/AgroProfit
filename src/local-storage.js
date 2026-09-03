@@ -208,7 +208,7 @@ const configEntities = [
 
 const defaultUserPassword = process.env.DEFAULT_USER_PASSWORD || "Agro2026!";
 
-const DELIVERY_STATUSES = ["Proiect", "Confirmat", "Livrat", "Inchis", "Anulat", "Redeschis"];
+const DELIVERY_STATUSES = ["Proiect", "Confirmat", "Livrat", "Inchis", "Anulat", "Redeschis", "Returnat"];
 const RECEIPT_STATUSES = ["Proiect", "In descarcare", "Draft", "Procesata", "Confirmat", "Inchis", "Anulat", "Redeschis"];
 const COMPLAINT_STATUSES = ["Deschisa", "Acceptata", "Respinsa", "Inchisa"];
 
@@ -218,8 +218,24 @@ const DELIVERY_TRANSITIONS = {
   Livrat: ["Inchis", "Redeschis"],
   Inchis: ["Redeschis"],
   Redeschis: ["Livrat", "Inchis", "Anulat"],
-  Anulat: []
+  Anulat: [],
+  // Retur total — stare terminala. Se seteaza DOAR prin `returnDelivery`, nu prin tranzitie manuala.
+  Returnat: []
 };
+
+// O livrare „stinsa": ANULATA (eroare de operare, ascunsa pe rol) sau RETURNATA integral
+// (cumparatorul a refuzat marfa si s-a descarcat inapoi din camion — ramane vizibila tuturor).
+// Niciuna nu mai produce miscare de stoc si nu mai intra in totaluri/incasari.
+// Sursa unica: foloseste-o oriunde filtrai pana acum doar pe `status !== "Anulat"` la livrari.
+// Plafon pe motivul returului: starea e un singur blob JSON in KV, recitit la fiecare cerere.
+const MAX_RETURN_REASON_LENGTH = 500;
+// Plafon pe cate descarcari partiale se pot inregistra pe o singura livrare.
+const MAX_RETURNS_PER_DELIVERY = 50;
+
+function isVoidedDelivery(delivery) {
+  const status = delivery && delivery.status;
+  return status === "Anulat" || status === "Returnat";
+}
 
 function slugifyUsername(value) {
   const normalized = String(value || "")
@@ -562,12 +578,7 @@ function readConfigState() {
   // Orice locatie de tip "parcare" (ex. Parcare afara) permite mai multe produse — singura
   // exceptie de la regula un-produs. Fortat (robust la editari din nomenclator), conform cerintei.
   state.storageLocations = (state.storageLocations || []).map((loc) => {
-    const n = String((loc && loc.name) || "")
-      .trim()
-      .toLowerCase()
-      .replace(/[ăâ]/g, "a");
-    const isParcare = n.includes("parcare") || String((loc && loc.type) || "").toLowerCase() === "parcare";
-    if (isParcare && loc.multiProduct !== true) {
+    if (isParcareLocation(loc) && loc.multiProduct !== true) {
       return { ...loc, multiProduct: true };
     }
     return loc;
@@ -758,7 +769,7 @@ function createTransactionSummary(transactions) {
 }
 
 function createDeliverySummary(deliveries) {
-  const active = (deliveries || []).filter((item) => item.status !== "Anulat");
+  const active = (deliveries || []).filter((item) => !isVoidedDelivery(item));
   return {
     totalDeliveries: active.length,
     totalDeliveredQuantity: active.reduce(
@@ -985,9 +996,13 @@ function createStockSummary(receipts, deliveries = [], openingDocuments = [], tr
   // astfel poarta (pe locatie) si scaderea coincid, dar ramane robust daca produsul
   // a fost mutat intre timp prin procesare/transfer.
   for (const d of deliveries) {
-    // Livrarea anulată nu mai produce mișcare de stoc (anularea întoarce marfa).
+    // Livrarea anulată nu a existat niciodată: nicio mișcare, nici ieșirea, nici returul.
     if (d.status === "Anulat") continue;
-    let remaining = Number(d.deliveredQuantity || 0);
+    // Scădem IEȘIREA BRUTĂ (cât a plecat efectiv din stoc la încărcare), nu cantitatea rămasă
+    // după retur. Altfel cascada de mai jos s-ar recalcula cu un număr mai mic și marfa ar
+    // „reveni" în locațiile din care s-a completat, nu în cea unde a fost descărcată fizic.
+    // Creditul returului se aplică separat, mai jos, DUPĂ ce ieșirea a fost alocată.
+    let remaining = Number(d.deliveredQuantity || 0) + Number(d.returnedQuantity || 0);
     if (remaining <= 0) continue;
     const product = d.product;
     const primary = byLocation.find((i) => normLoc(i.location) === normLoc(d.location) && i.product === product);
@@ -1007,6 +1022,40 @@ function createStockSummary(receipts, deliveries = [], openingDocuments = [], tr
         loc.quantity -= take;
         loc.deliveredQuantity += take;
         remaining -= take;
+      }
+    }
+  }
+
+  // Retur / descărcare: marfa se întoarce EXACT în locația unde a fost pusă fizic — cea
+  // verificată la retur (conflict de produs + capacitate). Creditul vine DUPĂ scăderea
+  // livrărilor, ca alocarea ieșirii originale (eventual cascadată pe mai multe locații)
+  // să rămână neatinsă, și ÎNAINTE de plafonarea la zero de mai jos.
+  for (const d of deliveries) {
+    if (d.status === "Anulat") continue;
+    const returnEntries = Array.isArray(d.returns) && d.returns.length > 0
+      ? d.returns
+      : (Number(d.returnedQuantity || 0) > 0
+          ? [{ quantity: Number(d.returnedQuantity), location: d.location }]
+          : []);
+    for (const entry of returnEntries) {
+      const qty = Number(entry.quantity || 0);
+      if (qty <= 0) continue;
+      const locName = entry.location || d.location || "Fara locatie";
+      const target = byLocation.find(
+        (i) => normLoc(i.location) === normLoc(locName) && i.product === d.product
+      );
+      if (target) {
+        target.quantity += qty;
+        target.deliveredQuantity = Math.max(Number(target.deliveredQuantity || 0) - qty, 0);
+      } else {
+        byLocation.push({
+          location: locName,
+          product: d.product,
+          quantity: qty,
+          unit: "tone",
+          costCategory: null,
+          deliveredQuantity: 0
+        });
       }
     }
   }
@@ -1677,6 +1726,16 @@ function sameLocation(a, b) {
 // Detecteaza daca o locatie contine deja ALT produs decat cel care intra. Intoarce numele
 // produsului in conflict (sau null daca e gol / acelasi produs / locatie multiProduct).
 // Sursa unica pentru regula "un produs / locatie" (receptie, procesare, transfer).
+// Locatiile de tip „parcare" sunt singura exceptie de la regula un-produs/locatie.
+// Aceeasi regula ca in `readConfigState` (unde `multiProduct` e fortat pe ele).
+function isParcareLocation(location) {
+  const name = String((location && location.name) || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[ăâ]/g, "a");
+  return name.includes("parcare") || String((location && location.type) || "").toLowerCase() === "parcare";
+}
+
 function findCylinderConflict(summary, toLocation, productName) {
   if (!toLocation) return null;
   // Regula "un produs / locatie" se aplica peste tot, EXCEPTAND locatiile marcate explicit
@@ -1944,7 +2003,7 @@ async function getSupplierStatement(partnerId, fromDate, toDate) {
 
   // Livrari catre acest partener (ca CUMPARATOR) — el ne datoreaza contravaloarea (contractPrice × tone).
   const deliveries = (state.deliveries || [])
-    .filter((d) => d.status !== "Anulat")
+    .filter((d) => !isVoidedDelivery(d))
     .filter((d) => Number(d.customerId) === Number(partnerId))
     .filter((d) => inRange(d.createdAt || d.deliveredAt))
     .map((d) => {
@@ -3049,9 +3108,11 @@ async function createComplaint(payload) {
   }
 
   // Suma totală a livrării (informativ) + cantitatea inițială (doar dacă există livrare)
-  const deliveryQty = delivery
-    ? Number(delivery.netWeight > 0 ? delivery.netWeight : delivery.deliveredQuantity || delivery.plannedQuantity || 0)
-    : 0;
+  // Livrarea stinsa (anulata / returnata integral) nu mai are cantitate: fara garda,
+  // fallback-ul pe `plannedQuantity` (neatins de retur) ar reintroduce cantitatea initiala.
+  const deliveryQty = !delivery || isVoidedDelivery(delivery)
+    ? 0
+    : Number(delivery.netWeight > 0 ? delivery.netWeight : delivery.deliveredQuantity || delivery.plannedQuantity || 0);
   // Suma totală a livrării — aceeași convenție ca pe factură:
   //  MDL → kg × lei/kg;  valută (EUR/USD/RON) → tone × preț/tonă × curs.
   const deliveryTotal = delivery
@@ -3297,6 +3358,11 @@ async function updateComplaint(id, payload = {}) {
     const delivery = (state.deliveries || []).find((item) => item.id === targetDeliveryId);
     if (!delivery) {
       throw new Error("Livrarea pentru corectie de stoc nu exista.");
+    }
+    // Livrarea anulata/returnata e sarita de `createStockSummary`: corectia s-ar pierde
+    // tacit si ar lasa o cantitate fantoma pe un document deja stins.
+    if (isVoidedDelivery(delivery)) {
+      throw new Error("Livrarea este anulata sau returnata — nu se poate face corectie de stoc pe ea.");
     }
     const nextDelivered = Number(delivery.deliveredQuantity || 0) + delta;
     if (nextDelivered < 0) {
@@ -4089,7 +4155,7 @@ async function cancelReceipt(id, options = {}) {
     throw new Error("Motivul anularii este obligatoriu.");
   }
   const activeDeliveries = (state.deliveries || []).filter(
-    (d) => d.receiptId === Number(id) && d.status !== "Anulat"
+    (d) => d.receiptId === Number(id) && !isVoidedDelivery(d)
   );
   if (activeDeliveries.length > 0) {
     throw new Error("Receptia are livrari active. Anuleaza intai livrarile, apoi receptia.");
@@ -4128,6 +4194,11 @@ async function cancelDelivery(id, options = {}) {
   if (delivery.status === "Anulat") {
     return delivery;
   }
+  // O livrare returnata a fost deja stinsa, cu marfa intoarsa in stoc. Anularea ei ar doar
+  // ascunde-o pe rol (filterCanceledForRole) si ar sterge urma returului din liste.
+  if (delivery.status === "Returnat") {
+    throw new Error("Livrarea a fost returnata. Nu mai poate fi anulata.");
+  }
   const reason = String(options.reason || "").trim();
   if (!reason) {
     throw new Error("Motivul anularii este obligatoriu.");
@@ -4154,6 +4225,215 @@ async function cancelDelivery(id, options = {}) {
   if (delivery.receiptId) {
     recalcReceiptDeliveryState(state, delivery.receiptId);
   }
+  writeReceiptsState(state);
+  return delivery;
+}
+
+// Retur / descarcare marfa — cumparatorul REFUZA marfa dupa ce camionul a fost incarcat si
+// livrarea formata. Marfa se descarca INAPOI in locatia din care a plecat.
+// Suporta retur TOTAL (livrarea trece in „Returnat") sau PARTIAL (ramane „Livrat", cu
+// cantitatea micsorata). Spre deosebire de „Anulat", „Returnat" ramane VIZIBIL pentru toate
+// rolurile — e un eveniment real de business, nu o eroare de operare ascunsa pe rol.
+//
+// Modelul urmeaza precedentul din `complaint.stockCorrection`: scadem `deliveredQuantity`
+// (si `netWeight`) pe livrare, iar stocul se intoarce AUTOMAT, pentru ca `createStockSummary`
+// scade exact `deliveredQuantity` din locatia livrarii. Astfel se corecteaza dintr-o singura
+// miscare si stocul, si receptia-sursa, si totalul facturii, si tinta de incasare — fara sa
+// atingem fiecare agregator in parte.
+async function returnDelivery(id, options = {}) {
+  const state = readReceiptsState();
+  const delivery = (state.deliveries || []).find((item) => item.id === Number(id));
+  if (!delivery) {
+    return null;
+  }
+
+  const currentUser = options.currentUser || {};
+  const role = normalizeRoleCode(currentUser.roleCode);
+  const actor = currentUser.name || options.changedBy || "dashboard";
+
+  if (delivery.status === "Anulat") {
+    throw new Error("Livrarea este anulata — nu se poate face retur pe ea.");
+  }
+  if (delivery.status === "Returnat") {
+    throw new Error("Livrarea a fost deja returnata integral.");
+  }
+
+  const reason = String(options.reason || "").trim();
+  if (!reason) {
+    throw new Error("Motivul returului este obligatoriu.");
+  }
+  // Starea intreaga e un singur blob JSON recitit la fiecare cerere — fara text nemarginit.
+  if (reason.length > MAX_RETURN_REASON_LENGTH) {
+    throw new Error(`Motivul returului e prea lung (max ${MAX_RETURN_REASON_LENGTH} caractere).`);
+  }
+
+  const receipt = delivery.receiptId
+    ? (state.receipts || []).find((item) => item.id === Number(delivery.receiptId))
+    : null;
+  if (receipt && receipt.status === "Inchis") {
+    throw new Error("Receptia-sursa este inchisa. Redeschide-o inainte de retur.");
+  }
+  // `role &&` ar fi fail-open pentru un apelant intern fara actor — cerem explicit rolul.
+  if (delivery.status === "Inchis" && role !== "admin" && role !== "manager") {
+    throw forbiddenError("Livrarea este inchisa. Doar managerul sau administratorul pot face retur pe ea.");
+  }
+
+  // Livrarea deja INCASATA: cu `deliveredQuantity = 0` tinta de incasat devine 0, iar
+  // `recomputeReferenceSettlement` ar marca livrarea „Incasat" — banii primiti pe marfa
+  // intoarsa ar deveni invizibili in Achitari/Incasari. Ordinea contabila corecta e
+  // storno incasare INTAI, apoi retur (acelasi tipar ca `cancelReceipt`, care refuza
+  // anularea cat timp exista livrari active).
+  // Ne uitam in registrul de tranzactii, nu la `delivery.collectedAmount`: campul de pe
+  // document e derivat si poate fi atins prin PATCH, registrul cere `finance-write`.
+  const activeCollections = (state.transactions || []).filter(
+    (t) => t.referenceType === "delivery"
+      && Number(t.deliveryId) === Number(delivery.id)
+      && isActiveTransaction(t)
+  );
+  if (activeCollections.length > 0) {
+    throw new Error(
+      "Livrarea are incasari inregistrate. Storneaza intai incasarea (Financiar), apoi fa returul."
+    );
+  }
+  // Livrarea deja FACTURATA: returul ar rescrie tacit aceeasi factura la o cantitate mai mica
+  // (sau la 0), cu acelasi numar, fara nota de credit. Contabil, asta cere storno de factura.
+  if (String(delivery.invoiceNumber || "").trim() !== "") {
+    throw new Error(
+      "Livrarea are factura emisa (nr. " + String(delivery.invoiceNumber).trim() +
+        "). Storneaza factura inainte de retur."
+    );
+  }
+
+  const deliveredNow = Number(delivery.deliveredQuantity || 0);
+  if (deliveredNow <= 0) {
+    throw new Error("Livrarea nu are cantitate livrata — nu exista ce descarca.");
+  }
+  if (Array.isArray(delivery.returns) && delivery.returns.length >= MAX_RETURNS_PER_DELIVERY) {
+    throw new Error(`Livrarea are deja ${MAX_RETURNS_PER_DELIVERY} descarcari inregistrate.`);
+  }
+
+  // Cantitatea vine in TONE (frontend-ul imparte kg la 1000, ca la restul formularelor).
+  // DOAR campul absent inseamna retur integral: o valoare invalida (negativ, text, NaN) trebuie
+  // sa dea eroare, nu sa degradeze tacit intr-un retur total, care e stare terminala.
+  const rawQuantity = options.returnedQuantity;
+  let quantity;
+  if (rawQuantity === undefined || rawQuantity === null || rawQuantity === "") {
+    quantity = deliveredNow;
+  } else {
+    quantity = sanitizeNumber(rawQuantity);
+    if (!(quantity > 0)) {
+      throw new Error("Cantitatea returnata trebuie sa fie un numar mai mare ca zero.");
+    }
+    if (Math.round(quantity * 1000) < 1) {
+      throw new Error("Cantitatea returnata trebuie sa fie de cel putin 1 kg.");
+    }
+  }
+  // Comparam in kg rotunjit, ca „retur total" sa nu pice din zecimale.
+  if (Math.round(quantity * 1000) > Math.round(deliveredNow * 1000)) {
+    throw new Error(
+      `Cantitatea returnata (${Math.round(quantity * 1000)} kg) depaseste cantitatea livrata (${Math.round(deliveredNow * 1000)} kg).`
+    );
+  }
+
+  // Marfa se intoarce in locatia din care a plecat: aplicam aceleasi reguli ca la orice
+  // intrare in cilindru — un singur produs / locatie + capacitate.
+  const config = readConfigState();
+  const knownLocation = (config.storageLocations || []).find((item) =>
+    sameLocation(item.name, delivery.location)
+  );
+  // Livrarile fara receptie pot avea locatia ca text liber, deci numele poate lipsi din
+  // nomenclator. In acel caz NU sarim tacit peste verificari: regula „un produs / locatie"
+  // se poate aplica oricum, dupa nume. Doar capacitatea ramane neverificabila (nu o stim).
+  const targetLocation = knownLocation || (String(delivery.location || "").trim()
+    ? { name: String(delivery.location).trim(), capacity: 0, multiProduct: isParcareLocation({ name: delivery.location }) }
+    : null);
+  if (targetLocation) {
+    // ATENTIE: summary-ul se calculeaza INAINTE de orice mutatie pe `state` (arrays sunt
+    // partajate cu cache-ul, deci o mutatie s-ar vedea imediat in stoc).
+    const summary = await getStockSummary();
+    const conflict = findCylinderConflict(summary, targetLocation, delivery.product);
+    if (conflict) {
+      throw new Error(
+        `Nu pot descarca in ${targetLocation.name}: acolo se afla deja ${conflict}. O locatie poate avea un singur produs.`
+      );
+    }
+    const destCurrent = (summary.byLocation || [])
+      .filter((item) => sameLocation(item.location, targetLocation.name))
+      .reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+    const capacity = Number(targetLocation.capacity || 0) / 1000; // kg -> tone
+    if (capacity > 0 && Math.round((destCurrent + quantity) * 1000) > Math.round(capacity * 1000)) {
+      const liber = Math.max(capacity - destCurrent, 0);
+      throw new Error(
+        `Capacitate insuficienta in ${targetLocation.name}: liber ${Math.round(liber * 1000)} kg, de descarcat ${Math.round(quantity * 1000)} kg.`
+      );
+    }
+  }
+
+  const now = new Date().toISOString();
+  const before = {
+    status: delivery.status,
+    deliveredQuantity: delivery.deliveredQuantity,
+    netWeight: delivery.netWeight,
+    returnedQuantity: Number(delivery.returnedQuantity || 0)
+  };
+
+  // Rotunjim la kg: returi partiale repetate ar acumula altfel reziduu de virgula mobila.
+  const toKg = (tons) => Math.round(Number(tons || 0) * 1000) / 1000;
+  const remaining = toKg(Math.max(deliveredNow - quantity, 0));
+  const isFullReturn = remaining <= 0;
+
+  delivery.deliveredQuantity = isFullReturn ? 0 : remaining;
+  delivery.netWeight = toKg(Math.max(Number(delivery.netWeight || 0) - quantity, 0));
+  delivery.returnedQuantity = toKg(Number(delivery.returnedQuantity || 0) + quantity);
+  // `quantityAtDelivery` NU se atinge: ramane marfa care a fost efectiv incarcata in camion.
+
+  // Istoricul descarcarilor — o livrare poate fi descarcata in mai multe randuri.
+  if (!Array.isArray(delivery.returns)) {
+    delivery.returns = [];
+  }
+  delivery.returns.push({
+    quantity,
+    reason,
+    location: delivery.location || "",
+    returnedBy: actor,
+    returnedByUsername: currentUser.username || "",
+    returnedByRole: role || "",
+    returnedAt: now
+  });
+  delivery.returnReason = reason;
+  delivery.returnedBy = actor;
+  delivery.returnedByUsername = currentUser.username || "";
+  delivery.returnedByRole = role || "";
+  delivery.returnedAt = now;
+  if (isFullReturn) {
+    delivery.status = "Returnat";
+  }
+  delivery.changedBy = actor;
+  delivery.updatedAt = now;
+
+  // Receptia-sursa: rezervat / livrat / disponibil se recalculeaza din livrari.
+  if (delivery.receiptId) {
+    recalcReceiptDeliveryState(state, delivery.receiptId);
+  }
+  // Financiar: tinta de incasat = contractPrice x cantitate livrata, deci s-a schimbat.
+  // (`cancelDelivery` omite acest pas; aici il facem, ca soldul partenerului sa ramana corect.)
+  recomputeReferenceSettlement(state, { referenceType: "delivery", deliveryId: delivery.id });
+
+  createAuditEntry(state, {
+    entityType: "delivery",
+    entityId: delivery.id,
+    action: "return",
+    reason,
+    user: actor,
+    oldValue: before,
+    newValue: {
+      status: delivery.status,
+      deliveredQuantity: delivery.deliveredQuantity,
+      netWeight: delivery.netWeight,
+      returnedQuantity: delivery.returnedQuantity
+    }
+  });
+
   writeReceiptsState(state);
   return delivery;
 }
@@ -4254,7 +4534,7 @@ async function getDailyReport(dateValue = new Date().toISOString().slice(0, 10))
   report.deliveries = filterByDate(deliveries, dateValue);
   report.complaints = filterByDate(complaints, dateValue);
   report.summary.deliveredQuantity = report.deliveries.reduce(
-    (sum, item) => sum + (item.status === "Anulat" ? 0 : Number(item.deliveredQuantity || 0)),
+    (sum, item) => sum + (isVoidedDelivery(item) ? 0 : Number(item.deliveredQuantity || 0)),
     0
   );
   report.summary.openComplaints = report.complaints.filter((item) => item.status === "Deschisa").length;
@@ -4303,7 +4583,7 @@ async function getPeriodReport(from, to) {
       collectionsTotal: activePeriodTransactions
         .filter((item) => item.direction === "collection")
         .reduce((sum, item) => sum + Number(item.amount || 0), 0),
-      deliveredQuantity: periodDeliveries.reduce((sum, item) => sum + (item.status === "Anulat" ? 0 : Number(item.deliveredQuantity || 0)), 0),
+      deliveredQuantity: periodDeliveries.reduce((sum, item) => sum + (isVoidedDelivery(item) ? 0 : Number(item.deliveredQuantity || 0)), 0),
       openComplaints: periodComplaints.filter((item) => item.status === "Deschisa").length,
       stockTotal: stockSummary.totals.totalQuantity
     },
@@ -4664,7 +4944,7 @@ async function getDashboardSnapshot(dateValue = new Date().toISOString().slice(0
   }, 0);
 
   const outstandingCollections = deliveries.reduce((sum, item) => {
-    if (item.status === "Anulat") return sum; // livrarea anulată nu mai e de încasat
+    if (isVoidedDelivery(item)) return sum; // livrarea anulată/returnată nu mai e de încasat
     const qty = Number(item.deliveredQuantity || item.netWeight || 0);
     const target = Number(item.contractPrice || 0) * qty;
     const collected = Number(item.collectedAmount || 0);
@@ -4714,7 +4994,7 @@ function toCsvField(value) {
 async function exportResourceAsCsv(resource, roleCode) {
   const mapping = {
     receipts: { list: listReceipts, fields: ["id", "supplier", "product", "quantity", "status", "paymentStatus", "createdAt"] },
-    deliveries: { list: listDeliveries, fields: ["id", "receiptId", "customer", "product", "plannedQuantity", "deliveredQuantity", "status", "createdAt"] },
+    deliveries: { list: listDeliveries, fields: ["id", "receiptId", "customer", "product", "plannedQuantity", "deliveredQuantity", "returnedQuantity", "returnReason", "returnedAt", "status", "createdAt"] },
     transactions: { list: listTransactions, fields: ["id", "referenceType", "partner", "direction", "amount", "appliedAmount", "advanceAmount", "source", "createdAt"] },
     complaints: { list: listComplaints, fields: ["id", "deliveryId", "customer", "product", "status", "complaintType", "contestedQuantity", "createdAt"] },
     "audit-logs": { list: listAuditLogs, fields: ["id", "entityType", "entityId", "action", "user", "reason", "createdAt"] },
@@ -4877,6 +5157,8 @@ module.exports = {
   listUsers,
   reopenReceipt,
   runMigrationIfNeeded,
+  isVoidedDelivery,
+  returnDelivery,
   transitionDelivery,
   updateComplaint,
   updateConfigEntry,

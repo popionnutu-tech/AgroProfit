@@ -62,6 +62,27 @@ npm run dev          # aplicația WEB pe http://localhost:3000
 - `opening` = ecran de scriere → **doar admin**.
 - `opening-read` = citire solduri în Achitări/Încasări → manager + contabili + admin. Nu le reuni.
 
+### 6. Retur / descărcare livrare (`Returnat`) — excepție DELIBERATĂ de drepturi
+Cumpărătorul refuză marfa după ce camionul a fost încărcat și livrarea formată; marfa se
+descarcă înapoi în locația de plecare (`returnDelivery`, buton „Descărcare" pe rândul livrării).
+- Returul **scade `deliveredQuantity` + `netWeight`** — stocul se întoarce automat, pentru că
+  `createStockSummary` scade exact `deliveredQuantity`. Nu adăuga o mișcare separată de stoc:
+  ai dubla cantitatea. Același precedent ca `complaint.stockCorrection`.
+- Retur integral → status `Returnat`; retur parțial → rămâne `Livrat`, cu cantitatea micșorată.
+- `Returnat` **rămâne vizibil pentru toate rolurile**, spre deosebire de `Anulat`, care e ascuns
+  prin `filterCanceledForRole`. Un retur e un eveniment real de business, nu o eroare de operare.
+- **Excepția de drepturi:** returul e permis **operatorului** (el descarcă fizic camionul), deși
+  regula generală din `assertStatusChangePermission` rezervă schimbarea statutului unui document
+  confirmat („Livrat" ∈ `STATUS_CONFIRMED_PLUS`) managerului/adminului. E o decizie asumată —
+  nu o „repara" ca pe un bug. Compensațiile: motiv obligatoriu, audit (`action: "return"`),
+  document vizibil tuturor și listat în „Operațiuni anulate și retururi".
+- Returul e **BLOCAT** cât timp livrarea are factură emisă (`invoiceNumber`) sau încasări active.
+  Ordinea contabilă e storno întâi, retur după — altfel factura s-ar rescrie tacit la 0 cu
+  același număr, iar banii încasați pe marfă întoarsă ar deveni invizibili (ținta devine 0 și
+  `recomputeReferenceSettlement` ar marca livrarea „Incasat").
+- `quantityAtDelivery` = marfa efectiv încărcată în camion; NU se atinge la retur. E citit de
+  bonul de cântar, ca brut − tară = net să rămână adevărat pe documentul tipărit.
+
 ## Deploy
 - **Push pe `main` → Vercel publică automat** pe agroprofit-plus.vercel.app (integrare Git activă).
 - Lucrează pe o **ramură separată** (implicit `dev`), testează pe preview, apoi fă merge în `main`.

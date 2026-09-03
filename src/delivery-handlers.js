@@ -3,6 +3,7 @@ const {
   getConfig,
   listDeliveries,
   listReceipts,
+  returnDelivery,
   transitionDelivery,
   updateDelivery
 } = require("./storage");
@@ -136,9 +137,41 @@ async function transitionDeliveryHandler(req, res, id, newStatus) {
   }
 }
 
+// Retur / descarcare: cumparatorul a refuzat marfa, camionul se descarca inapoi in stoc.
+// `returnedQuantity` vine in TONE (frontend-ul imparte kg la 1000). Lipsa ei = retur integral.
+async function returnDeliveryHandler(req, res, id) {
+  const body = getBody(req);
+  const actor = getActorLabel(req);
+
+  try {
+    const delivery = await returnDelivery(id, {
+      returnedQuantity: body.returnedQuantity,
+      reason: body.reason || body.changeReason,
+      changedBy: actor,
+      currentUser: req.currentUser || {}
+    });
+
+    if (!delivery) {
+      return sendJson(res, 404, { error: "Livrarea nu a fost gasita." });
+    }
+
+    const response = sendJson(res, 200, delivery);
+    triggerCriticalManagementAlert({
+      trigger: "delivery-returned",
+      actor
+    });
+    return response;
+  } catch (error) {
+    console.error("Failed to return delivery:", error.message);
+    const status = error.statusCode || 400;
+    return sendJson(res, status, { error: error.message || "Nu am putut inregistra returul." });
+  }
+}
+
 module.exports = {
   createDeliveryHandler,
   listDeliveriesHandler,
+  returnDeliveryHandler,
   transitionDeliveryHandler,
   updateDeliveryHandler
 };

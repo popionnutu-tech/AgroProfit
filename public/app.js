@@ -1458,7 +1458,7 @@ function renderLossesReport() {
   });
   const humIdx = buildReceiptHumidityIndex();
   (deliveriesCache || []).forEach((d) => {
-    if (d.status === "Anulat" || (prodFilter && d.product !== prodFilter) || !inRange(d.createdAt || d.deliveredAt)) return;
+    if (isVoidedDelivery(d) || (prodFilter && d.product !== prodFilter) || !inRange(d.createdAt || d.deliveredAt)) return;
     const g = bucket(d.product);
     g.delivered += deliveryDisplayQuantity(d);
     const w = deliveryWaterKg(d, humIdx);
@@ -1619,7 +1619,7 @@ function renderStockPeriod() {
   // Livrari: doar ce a iesit REAL din stoc (deliveredQuantity = statut Livrat),
   // ca sa coincida cu stocul real.
   (deliveriesCache || []).forEach((d) => {
-    if (d.status === "Anulat") return;
+    if (isVoidedDelivery(d)) return;
     const p = d.product || "—";
     products.add(p);
     bucket(delBefore, delIn, p, dayOf(d.deliveredAt || d.createdAt), Number(d.deliveredQuantity || 0));
@@ -2546,8 +2546,51 @@ const DELIVERY_TRANSITIONS = {
   Livrat: ["Inchis", "Redeschis"],
   Inchis: ["Redeschis"],
   Redeschis: ["Livrat", "Inchis", "Anulat"],
-  Anulat: []
+  Anulat: [],
+  Returnat: []
 };
+
+// Buton „Descărcare" (retur) + marcajul cantității deja descărcate.
+// Cazul de business: operatorul a încărcat camionul și a format livrarea, iar cumpărătorul
+// refuză marfa — camionul se întoarce și se descarcă înapoi în locația de plecare.
+function deliveryReturnCell(item, canWrite) {
+  const returnedTons = Number(item.returnedQuantity || 0);
+  const info = returnedTons > 0
+    ? `<span class="status-badge badge-retur" title="Motiv: ${escapeComboHtml(item.returnReason || "-")} · descărcat de ${escapeComboHtml(item.returnedBy || "-")}">Retur ${formatNumber(Math.round(returnedTons * 1000))} kg</span>`
+    : "";
+  // Aceleași condiții ca pe server (`returnDelivery`), ca butonul să nu ducă la un 403:
+  // livrarea închisă e doar pentru manager/admin, iar cea facturată cere storno întâi.
+  const closedForRole = item.status === "Inchis" && !canEditConfirmedStatus();
+  const invoiced = String(item.invoiceNumber || "").trim() !== "";
+  const canReturn =
+    canWrite &&
+    !isVoidedDelivery(item) &&
+    !closedForRole &&
+    !invoiced &&
+    Number(item.deliveredQuantity || 0) > 0;
+  const button = canReturn
+    ? `<button type="button" class="cell-btn" data-action="delivery-return" data-id="${item.id}" title="Descarcă marfa înapoi în stoc">Descărcare</button>`
+    : "";
+  return `${info}${info && button ? " " : ""}${button}`;
+}
+
+// Oglinda lui `isVoidedDelivery` din src/local-storage.js: livrarea anulată sau returnată
+// integral nu mai produce mișcare de stoc și nu mai intră în totaluri/încasări.
+function isVoidedDelivery(item) {
+  const status = item && item.status;
+  return status === "Anulat" || status === "Returnat";
+}
+
+// Sortare alfabetică românească (ă/â/î/ș/ț tratate ca literele de bază) cu ordonare
+// NATURALĂ a numerelor: „Cilindru 2" înaintea lui „Cilindru 10", „ABC 9" înaintea lui
+// „ABC 10". Comparația pur alfabetică le pune invers, pentru că „1" < „9" pe caractere.
+const NAME_COLLATOR = new Intl.Collator("ro", { sensitivity: "base", numeric: true });
+
+function sortedByName(list, key = "name") {
+  return [...(list || [])].sort((a, b) =>
+    NAME_COLLATOR.compare(String((a && a[key]) || ""), String((b && b[key]) || ""))
+  );
+}
 
 function deliveryStatusBadge(status) {
   const classMap = {
@@ -2556,7 +2599,8 @@ function deliveryStatusBadge(status) {
     Livrat: "badge-ok",
     Inchis: "badge-neutral",
     Anulat: "badge-alert",
-    Redeschis: "badge-warn"
+    Redeschis: "badge-warn",
+    Returnat: "badge-retur"
   };
   const label = status === "Confirmat" ? "Confirmat (Rezervat)" : status || "Proiect";
   return `<span class="status-badge ${classMap[status] || "badge-neutral"}">${bi(label)}</span>`;
@@ -2565,6 +2609,9 @@ function deliveryStatusBadge(status) {
 // Cantitatea afisata: greutatea neta reala daca s-a livrat, altfel cantitatea livrata,
 // altfel cantitatea planificata (cea introdusa de operator). Evita afisarea "0"/"-0".
 function deliveryDisplayQuantity(item) {
+  // Retur integral: marfa s-a întors în stoc, livrarea nu mai are cantitate. Fără această
+  // gardă, fallback-ul pe `plannedQuantity` ar afișa cantitatea (și factura) inițială.
+  if (item && item.status === "Returnat") return 0;
   if (Number(item.netWeight) > 0) return Number(item.netWeight);
   if (Number(item.deliveredQuantity) > 0) return Number(item.deliveredQuantity);
   return Number(item.plannedQuantity || 0);
@@ -2667,6 +2714,7 @@ function renderDeliveries(deliveries) {
     return true;
   });
   const waterIdx = buildReceiptHumidityIndex(); // construit o dată, folosit de toate rândurile
+  const canDeliveryWrite = canAccess("delivery-write"); // constant pe rol — ridicat din buclă
   deliveriesBodyEl.innerHTML = filtered
     .map((item) => {
       const status = item.status || "Proiect";
@@ -2711,6 +2759,7 @@ function renderDeliveries(deliveries) {
             <div>${deliveryStatusBadge(status)}</div>
             <div class="action-row">${buttons}</div>
             <div class="action-row">${docActionsCell("delivery", item)}</div>
+            ${(() => { const cell = deliveryReturnCell(item, canDeliveryWrite); return cell ? `<div class="action-row">${cell}</div>` : ""; })()}
             ${canAccess("finance") ? `<div class="doc-print-row">
               <button type="button" class="cell-btn cell-btn-primary" data-action="edit-billing" data-id="${item.id}">Date factură</button>
               <details class="print-menu">
@@ -2747,7 +2796,7 @@ function renderDeliveryTotals(rows) {
   let totalLei = 0;
   const totalForeignByCur = {};
   rows.forEach((item) => {
-    if (item.status === "Anulat") return; // livrarea anulată nu intră în totaluri
+    if (item.status === "Anulat" || item.status === "Returnat") return; // anulată/returnată — nu intră în totaluri
     const money = deliveryInvoiceTotals(item);
     totalQty += money.tonnes;
     totalLei += money.totalLei;
@@ -2757,7 +2806,7 @@ function renderDeliveryTotals(rows) {
   const waterIdx = buildReceiptHumidityIndex();
   let totalWaterKg = 0;
   rows.forEach((item) => {
-    if (item.status === "Anulat") return;
+    if (item.status === "Anulat" || item.status === "Returnat") return;
     const w = deliveryWaterKg(item, waterIdx);
     if (w !== null) totalWaterKg += w;
   });
@@ -2877,7 +2926,7 @@ function renderOpenJournal() {
     });
 
   const openDeliveries = deliveriesCache.filter((item) => {
-    if (item.status === "Anulat") return false; // livrarea anulata nu mai e de incasat
+    if (isVoidedDelivery(item)) return false; // livrarea anulată/returnată nu mai e de încasat
     const status = item.collectionStatus || "Neincasat";
     const statusMatch = !deliveryStatusFilter || status === deliveryStatusFilter;
     const partnerMatch = !partnerFilter || String(item.customer || "").toLowerCase().includes(partnerFilter);
@@ -3080,7 +3129,9 @@ function renderDailyReport(report) {
           <td>${formatDateShort(item.createdAt)}</td>
           <td>${escapeComboHtml(item.customer)}</td>
           <td>${escapeComboHtml(item.product)}</td>
-          <td>${formatNumber(item.deliveredQuantity)}</td>
+          <td>${formatNumber(item.deliveredQuantity)}${Number(item.returnedQuantity || 0) > 0
+            ? ` <span class="status-badge badge-retur" title="Motiv: ${escapeComboHtml(item.returnReason || "-")}">retur ${formatNumber(Math.round(Number(item.returnedQuantity) * 1000))} kg</span>`
+            : ""}</td>
           <td>${currency.format(deliveryInvoiceTotals(item).totalLei)}</td>
           <td>${escapeComboHtml(item.invoiceNumber || "-")}</td>
         </tr>
@@ -3139,6 +3190,20 @@ function renderDailyReport(report) {
         qty: Number(d.deliveredQuantity || 0),
         by: d.canceledBy,
         reason: d.cancelReason
+      })),
+    // Retururile (totale ȘI parțiale) intră în același tabel de supraveghere: marfa s-a întors
+    // în stoc și creanța a scăzut, deci conducerea trebuie să le vadă, nu doar din audit.
+    ...allDeliveries
+      .filter((d) => Number(d.returnedQuantity || 0) > 0)
+      .map((d) => ({
+        tip: d.status === "Returnat" ? "Retur livrare" : "Retur parțial",
+        id: d.id,
+        date: d.returnedAt || d.createdAt,
+        partner: d.customer,
+        product: d.product,
+        qty: Number(d.returnedQuantity || 0),
+        by: d.returnedBy,
+        reason: d.returnReason
       })),
     ...(canSeeCanceledTx
       ? report.transactions
@@ -3430,14 +3495,14 @@ function renderReceiptSelectors(config) {
   // Livrare pe PRODUS + cilindru sursa (#14): nu mai pe lot de receptie.
   renderSelectOptions(
     deliveryProductSelect,
-    config.products,
+    sortedByName(config.products),
     (item) => item.name,
     "Selecteaza produs",
     (item) => item.name
   );
   renderSelectOptions(
     deliverySourceSelect,
-    config.storageLocations,
+    sortedByName(config.storageLocations),
     (item) => item.name,
     "Din cilindru / locatie",
     (item) => item.name
@@ -3460,7 +3525,8 @@ function renderReceiptSelectors(config) {
   }
   renderSelectOptions(
     complaintDeliverySelect,
-    deliveriesCache,
+    // O livrare anulată/returnată nu mai are cantitate pe care să se poată reclama ceva.
+    (deliveriesCache || []).filter((item) => !isVoidedDelivery(item)),
     (item) => `#${item.id} - ${item.customer} - ${item.product}`,
     "— fără livrare anume —"
   );
@@ -3710,13 +3776,11 @@ function renderMiniList(entity, items) {
     return;
   }
 
-  // Parteneri: afisare alfabetica dupa nume (ro). Nu mutam sursa currentConfig.
-  const displayItems =
-    entity === "partners"
-      ? [...items].sort((a, b) =>
-          String(a.name || "").localeCompare(String(b.name || ""), "ro", { sensitivity: "base" })
-        )
-      : items;
+  // Afisare sortata pentru nomenclatoarele cautate dupa nume/numar. Nu mutam sursa
+  // currentConfig — sortam doar copia folosita la randare.
+  const SORT_KEY_BY_ENTITY = { partners: "name", vehicles: "number" };
+  const sortKey = SORT_KEY_BY_ENTITY[entity];
+  const displayItems = sortKey ? sortedByName(items, sortKey) : items;
 
   const cols = ENTITY_COLUMNS[entity];
   // Fallback to legacy card view if entity is unknown
@@ -3892,7 +3956,7 @@ function renderSetupSelectors(config) {
   // Populate vehicles datalist for the delivery form (Etapa 5)
   const vehiclesDatalist = document.getElementById("vehicles-datalist");
   if (vehiclesDatalist) {
-    vehiclesDatalist.innerHTML = (config.vehicles || [])
+    vehiclesDatalist.innerHTML = sortedByName(config.vehicles, "number")
       .filter((v) => v.active !== false)
       .map((v) => {
         const extra = [v.series, v.driver].filter(Boolean).join(" · ");
@@ -3920,7 +3984,7 @@ function renderSetupSelectors(config) {
     const prevV = deliveryVehicleSelect.value;
     deliveryVehicleSelect.innerHTML =
       `<option value="">Mașina cumpărătorului (notează la Observații)</option>` +
-      (config.vehicles || [])
+      sortedByName(config.vehicles, "number")
         .filter((v) => v.active !== false)
         .map((v) => {
           const extra = [v.series, v.driver].filter(Boolean).join(" · ");
@@ -3934,7 +3998,7 @@ function renderSetupSelectors(config) {
     const prevT = deliveryTrailerSelect.value;
     deliveryTrailerSelect.innerHTML =
       `<option value="">Fără remorcă</option>` +
-      (config.vehicles || [])
+      sortedByName(config.vehicles, "number")
         .filter((v) => v.active !== false)
         .map((v) => {
           const extra = [v.series, v.driver].filter(Boolean).join(" · ");
@@ -5340,14 +5404,16 @@ function renderTransactionReferenceOptions() {
   const currentReferenceValue = transactionReferenceSelect.value;
 
   if (referenceType === "delivery") {
+    // Livrarea anulată/returnată nu mai are ce încasa (ținta e 0).
+    const collectableDeliveries = (deliveriesCache || []).filter((item) => !isVoidedDelivery(item));
     renderSelectOptions(
       transactionReferenceSelect,
-      deliveriesCache,
+      collectableDeliveries,
       (item) => `#${item.id} - ${item.customer} - ${item.product}`,
       "Selecteaza livrarea"
     );
 
-    setSelectValue(transactionReferenceSelect, [currentReferenceValue, deliveriesCache[0]?.id]);
+    setSelectValue(transactionReferenceSelect, [currentReferenceValue, collectableDeliveries[0]?.id]);
 
     return;
   }
@@ -5460,7 +5526,7 @@ function updateDeliverySourceOptions() {
     // Stoc neincarcat sau produs fara stoc: aratam toate locatiile ca fallback.
     deliverySourceSelect.innerHTML =
       `<option value="">Din cilindru / locatie</option>` +
-      (currentConfig.storageLocations || [])
+      sortedByName(currentConfig.storageLocations)
         .map((l) => `<option value="${escapeComboHtml(l.name)}">${escapeComboHtml(l.name)}</option>`)
         .join("");
   }
@@ -6654,7 +6720,7 @@ function buildCertificatePrintHtml(delivery) {
   const buyer = getBuyerPartner(delivery);
   const L = lab || {};
   const money = deliveryInvoiceTotals(delivery);
-  const kg = money.kg || Math.round(deliveryQtyTonnes(delivery) * 1000);
+  const kg = Number.isFinite(money.kg) ? money.kg : Math.round(deliveryQtyTonnes(delivery) * 1000);
   const fl = (v, min) => `<span class="of-fill" style="min-width:${min || 90}px;">${escapeComboHtml(v === 0 || v ? String(v) : "")}</span>`;
   const auto = `${delivery.vehicle || ""}${delivery.trailer ? " + " + delivery.trailer : ""}`.trim();
   const afla = L.aflatoxinB1 ? escapeComboHtml(L.aflatoxinB1) : "nu s-a depistat";
@@ -6720,7 +6786,12 @@ function deliveryQtyTonnes(delivery) {
 function buildBonCantarHtml(delivery, company) {
   const seller = getSellerPartner(delivery);
   const buyer = getBuyerPartner(delivery);
-  const qty = deliveryQtyTonnes(delivery);
+  // Bonul de cântar consemnează cântărirea de la ÎNCĂRCARE: brut − tară = net. Returul
+  // micșorează `netWeight`, deci folosim `quantityAtDelivery` (marfa efectiv încărcată),
+  // altfel documentul tipărit iese aritmetic fals după o descărcare parțială.
+  const loaded = Number(delivery.quantityAtDelivery || 0);
+  const qty = loaded > 0 ? loaded : deliveryQtyTonnes(delivery);
+  const returnedTons = Number(delivery.returnedQuantity || 0);
   return `${docHeader(company)}
     <div class="doc-title">Bon de cântar</div>
     <div class="doc-subtitle">Nr. ${delivery.id} · ${formatDateShort(delivery.invoiceDate || delivery.createdAt)}</div>
@@ -6736,6 +6807,7 @@ function buildBonCantarHtml(delivery, company) {
       <div><b>Masă netă:</b> ${formatNumber(qty)} t</div>
       <div><b>Data:</b> ${formatDateShort(delivery.invoiceDate || delivery.createdAt)}</div>
     </div>
+    ${returnedTons > 0 ? `<div class="doc-note"><b>Retur:</b> ${formatNumber(Math.round(returnedTons * 1000))} kg descărcate înapoi în stoc${delivery.returnReason ? " · " + escapeComboHtml(delivery.returnReason) : ""}. Cantitate rămasă livrată: ${formatNumber(deliveryQtyTonnes(delivery))} t.</div>` : ""}
     <div class="doc-sign"><div>Cântăritor</div><div>Șofer</div></div>`;
 }
 
@@ -6748,7 +6820,7 @@ function buildCmrHtml(delivery) {
   const money = deliveryInvoiceTotals(delivery);
   // Caseta 11 „Вес брутто" = greutatea MĂRFII (la cereale în vrac, brut marfă = net marfă),
   // consecventă cu factura. NU masa camionului încărcat (delivery.grossWeight = camion + marfă).
-  const grossKg = money.kg || Math.round(deliveryQtyTonnes(delivery) * 1000);
+  const grossKg = Number.isFinite(money.kg) ? money.kg : Math.round(deliveryQtyTonnes(delivery) * 1000);
   const esc = (val) => escapeComboHtml(val == null ? "" : String(val));
   const dateLoad = formatDateShort(delivery.invoiceDate || delivery.createdAt);
   // Caseta 1 — Expeditor (vânzătorul din livrare).
@@ -7836,6 +7908,19 @@ async function cancelDocumentRequest(kind, id, reason) {
   return res.json();
 }
 
+async function returnDeliveryRequest(id, returnedQuantityTons, reason) {
+  const res = await fetch(`/api/deliveries/${id}/return`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ returnedQuantity: returnedQuantityTons, reason })
+  });
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({}));
+    throw new Error(e.error || "Nu am putut înregistra returul.");
+  }
+  return res.json();
+}
+
 async function editDocumentNoteRequest(entity, id, note) {
   const res = await fetch(`/api/documents/${entity}/${id}/note`, {
     method: "PATCH",
@@ -7868,6 +7953,47 @@ document.addEventListener("click", async (event) => {
     try {
       await cancelDocumentRequest(kind, id, reason.trim());
       await reloadAfterDocChange();
+    } catch (e) {
+      window.alert(e.message);
+    }
+    return;
+  }
+  const returnBtn = event.target.closest('[data-action="delivery-return"]');
+  if (returnBtn) {
+    const id = returnBtn.dataset.id;
+    const item = (deliveriesCache || []).find((d) => String(d.id) === String(id));
+    const maxKg = Math.round(Number((item && item.deliveredQuantity) || 0) * 1000);
+    if (maxKg <= 0) {
+      window.alert("Livrarea nu are marfă de descărcat.");
+      return;
+    }
+    const raw = window.prompt(
+      `Câte kg se descarcă înapoi în ${(item && item.location) || "locația de plecare"}?\n` +
+        `Livrat: ${maxKg} kg. Lasă valoarea completă pentru retur total.`,
+      String(maxKg)
+    );
+    if (raw === null) return;
+    const kg = Number(String(raw).replace(",", ".").trim());
+    if (!Number.isFinite(kg) || kg <= 0) {
+      window.alert("Cantitatea trebuie să fie un număr mai mare ca zero.");
+      return;
+    }
+    if (kg > maxKg) {
+      window.alert(`Cantitatea depășește cât s-a livrat (${maxKg} kg).`);
+      return;
+    }
+    const reason = window.prompt("Motivul returului (obligatoriu) — ex.: cumpărătorul a refuzat marfa:");
+    if (reason === null) return;
+    if (!reason.trim()) {
+      window.alert("Motivul este obligatoriu.");
+      return;
+    }
+    try {
+      // kg -> tone: intern totul se ține în TONE.
+      await returnDeliveryRequest(id, kg / 1000, reason.trim());
+      // Reîncărcare țintită: returul atinge livrarea, stocul și recepția-sursă. Transferurile
+      // nu se schimbă, iar jurnalul de audit aduce tot blob-ul pentru câteva rânduri.
+      await Promise.all([loadDeliveries(), loadStocks(), loadReceipts()]);
     } catch (e) {
       window.alert(e.message);
     }
@@ -8773,7 +8899,7 @@ if (deliveryBillingDialog && deliveryBillingForm) {
     // Populate seller select from nomenclator (partners)
     const sellerSelect = document.getElementById("billing-seller-select");
     if (sellerSelect) {
-      const partners = (currentConfig?.partners || []);
+      const partners = sortedByName(currentConfig?.partners);
       sellerSelect.innerHTML = '<option value="">— alege vânzător —</option>' +
         partners.map((p) => `<option value="${escapeComboHtml(String(p.id))}">${escapeComboHtml(p.name)}</option>`).join("");
       if (delivery.sellerId) sellerSelect.value = String(delivery.sellerId);

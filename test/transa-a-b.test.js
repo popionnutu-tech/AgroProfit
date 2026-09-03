@@ -1074,3 +1074,368 @@ test("Redenumire cilindru migreaza referintele -> stocul se muta cu numele nou",
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// RETUR / DESCARCARE: cumparatorul refuza marfa dupa ce camionul a fost incarcat
+// si livrarea formata. Marfa se descarca inapoi in locatia de plecare.
+// ---------------------------------------------------------------------------
+
+test("Retur total: status Returnat + marfa revine integral in stoc", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const receipt = await seedReceipt(storage);
+    const delivery = await storage.createDelivery({
+      receiptId: receipt.id,
+      customerId: 2,
+      customer: "Export Grain",
+      plannedQuantity: 30,
+      createdBy: "op"
+    });
+    let r = (await storage.listReceipts()).find((x) => x.id === receipt.id);
+    assert.equal(r.availableQuantity, 70); // 100 - 30 livrate
+
+    const returned = await storage.returnDelivery(delivery.id, {
+      reason: "cumparatorul a refuzat marfa",
+      currentUser: { name: "Operator", roleCode: "operator" }
+    });
+    assert.equal(returned.status, "Returnat");
+    assert.equal(returned.deliveredQuantity, 0);
+    assert.equal(returned.returnedQuantity, 30);
+    assert.equal(returned.returnReason, "cumparatorul a refuzat marfa");
+    assert.equal(returned.returnedByRole, "operator");
+    assert.equal(returned.returns.length, 1);
+    // Marfa incarcata in camion ramane documentata pe livrare.
+    assert.equal(returned.quantityAtDelivery, 30);
+
+    r = (await storage.listReceipts()).find((x) => x.id === receipt.id);
+    assert.equal(r.availableQuantity, 100); // marfa a revenit integral
+  });
+});
+
+test("Retur partial: livrarea ramane Livrat, cu cantitatea micsorata", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const receipt = await seedReceipt(storage);
+    const delivery = await storage.createDelivery({
+      receiptId: receipt.id, customerId: 2, customer: "X", plannedQuantity: 25, createdBy: "op"
+    });
+
+    // Cumparatorul accepta 18 t, intoarce 7 t.
+    const returned = await storage.returnDelivery(delivery.id, {
+      returnedQuantity: 7,
+      reason: "calitate sub contract",
+      currentUser: { name: "Operator", roleCode: "operator" }
+    });
+    assert.equal(returned.status, "Livrat"); // ramane livrare activa
+    assert.equal(returned.deliveredQuantity, 18);
+    assert.equal(returned.returnedQuantity, 7);
+
+    const r = (await storage.listReceipts()).find((x) => x.id === receipt.id);
+    assert.equal(r.availableQuantity, 82); // 100 - 18
+
+    const stats = await storage.getStats();
+    assert.equal(stats.deliveries.totalDeliveredQuantity, 18);
+  });
+});
+
+test("Retur: doua descarcari partiale se cumuleaza si inchid livrarea", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const receipt = await seedReceipt(storage);
+    const d = await storage.createDelivery({
+      receiptId: receipt.id, customerId: 2, customer: "X", plannedQuantity: 10, createdBy: "op"
+    });
+    await storage.returnDelivery(d.id, {
+      returnedQuantity: 4, reason: "prima parte", currentUser: { roleCode: "operator" }
+    });
+    const second = await storage.returnDelivery(d.id, {
+      returnedQuantity: 6, reason: "restul", currentUser: { roleCode: "operator" }
+    });
+    assert.equal(second.status, "Returnat");
+    assert.equal(second.returnedQuantity, 10);
+    assert.equal(second.returns.length, 2);
+
+    const stats = await storage.getStats();
+    assert.equal(stats.deliveries.totalDeliveredQuantity, 0);
+  });
+});
+
+test("Retur: motivul e obligatoriu", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const receipt = await seedReceipt(storage);
+    const d = await storage.createDelivery({
+      receiptId: receipt.id, customerId: 2, customer: "X", plannedQuantity: 5, createdBy: "op"
+    });
+    await assert.rejects(
+      storage.returnDelivery(d.id, { reason: "  ", currentUser: { roleCode: "operator" } }),
+      /Motivul/i
+    );
+  });
+});
+
+test("Retur: cantitatea nu poate depasi ce s-a livrat", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const receipt = await seedReceipt(storage);
+    const d = await storage.createDelivery({
+      receiptId: receipt.id, customerId: 2, customer: "X", plannedQuantity: 5, createdBy: "op"
+    });
+    await assert.rejects(
+      storage.returnDelivery(d.id, {
+        returnedQuantity: 6, reason: "gresit", currentUser: { roleCode: "operator" }
+      }),
+      /depaseste/i
+    );
+  });
+});
+
+test("Retur: nu se poate repeta pe o livrare deja returnata integral", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const receipt = await seedReceipt(storage);
+    const d = await storage.createDelivery({
+      receiptId: receipt.id, customerId: 2, customer: "X", plannedQuantity: 5, createdBy: "op"
+    });
+    await storage.returnDelivery(d.id, { reason: "refuz", currentUser: { roleCode: "operator" } });
+    await assert.rejects(
+      storage.returnDelivery(d.id, { reason: "inca o data", currentUser: { roleCode: "operator" } }),
+      /deja returnata/i
+    );
+  });
+});
+
+test("Retur: blocat cat timp livrarea are factura emisa (inclusiv pentru admin)", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const receipt = await seedReceipt(storage);
+    const d = await storage.createDelivery({
+      receiptId: receipt.id, customerId: 2, customer: "X", plannedQuantity: 5, createdBy: "op"
+    });
+    await storage.updateDelivery(d.id, {
+      invoiceNumber: "FA-001", changedBy: "contabil", changeReason: "emitere factura"
+    });
+
+    // Returul ar rescrie tacit aceeasi factura la 0, fara nota de credit.
+    await assert.rejects(
+      storage.returnDelivery(d.id, { reason: "refuz", currentUser: { roleCode: "operator" } }),
+      /factura/i
+    );
+    await assert.rejects(
+      storage.returnDelivery(d.id, { reason: "refuz", currentUser: { roleCode: "admin" } }),
+      /factura/i
+    );
+
+    // Dupa stornarea facturii (golirea numarului), returul devine posibil.
+    await storage.updateDelivery(d.id, {
+      invoiceNumber: "", changedBy: "contabil", changeReason: "storno factura"
+    });
+    const ok = await storage.returnDelivery(d.id, {
+      reason: "refuz", currentUser: { name: "Op", roleCode: "operator" }
+    });
+    assert.equal(ok.status, "Returnat");
+  });
+});
+
+test("Retur: blocat cat timp exista incasari active pe livrare", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const receipt = await seedReceipt(storage);
+    const d = await storage.createDelivery({
+      receiptId: receipt.id, customerId: 2, customer: "X",
+      plannedQuantity: 10, contractPrice: 4000, createdBy: "op"
+    });
+    const tx = await storage.createTransaction({
+      referenceType: "delivery", deliveryId: d.id, direction: "collection",
+      amount: 40000, partnerId: 2, createdBy: "contabil"
+    });
+
+    // Fara garda, tinta ar deveni 0 si livrarea s-ar marca „Incasat" — banii primiti pe
+    // marfa intoarsa ar disparea din Achitari/Incasari.
+    await assert.rejects(
+      storage.returnDelivery(d.id, { reason: "refuz", currentUser: { roleCode: "admin" } }),
+      /incasari/i
+    );
+
+    // Dupa storno, returul trece.
+    await storage.updateTransaction(tx.id, {
+      status: "Anulat", changeReason: "storno incasare",
+      currentUser: { roleCode: "admin" }, changedBy: "admin"
+    });
+    const ok = await storage.returnDelivery(d.id, {
+      reason: "refuz", currentUser: { roleCode: "operator" }
+    });
+    assert.equal(ok.status, "Returnat");
+  });
+});
+
+test("Retur: cantitatea invalida da eroare, nu retur integral tacit", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const receipt = await seedReceipt(storage);
+    const d = await storage.createDelivery({
+      receiptId: receipt.id, customerId: 2, customer: "X", plannedQuantity: 30, createdBy: "op"
+    });
+    for (const bad of [-5, "abc", NaN, 0]) {
+      await assert.rejects(
+        storage.returnDelivery(d.id, {
+          returnedQuantity: bad, reason: "test", currentUser: { roleCode: "operator" }
+        }),
+        /Cantitatea returnata/i,
+        `valoarea ${String(bad)} ar trebui respinsa`
+      );
+    }
+    // Livrarea a ramas neatinsa.
+    const after = (await storage.listDeliveries()).find((x) => x.id === d.id);
+    assert.equal(after.status, "Livrat");
+    assert.equal(after.deliveredQuantity, 30);
+  });
+});
+
+test("Retur: motivul prea lung e respins (blob-ul KV e unic)", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const receipt = await seedReceipt(storage);
+    const d = await storage.createDelivery({
+      receiptId: receipt.id, customerId: 2, customer: "X", plannedQuantity: 5, createdBy: "op"
+    });
+    await assert.rejects(
+      storage.returnDelivery(d.id, {
+        reason: "x".repeat(20000), currentUser: { roleCode: "operator" }
+      }),
+      /prea lung/i
+    );
+  });
+});
+
+test("Retur: livrarea returnata nu mai poate fi anulata (nu se ascunde urma)", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const receipt = await seedReceipt(storage);
+    const d = await storage.createDelivery({
+      receiptId: receipt.id, customerId: 2, customer: "X", plannedQuantity: 5, createdBy: "op"
+    });
+    await storage.returnDelivery(d.id, { reason: "refuz", currentUser: { roleCode: "operator" } });
+    await assert.rejects(
+      storage.cancelDelivery(d.id, { reason: "vreau sa o ascund", currentUser: { roleCode: "admin" } }),
+      /returnata/i
+    );
+  });
+});
+
+test("Retur: livrarea returnata iese din stocul livrat si lasa audit", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const receipt = await seedReceipt(storage);
+    const d = await storage.createDelivery({
+      receiptId: receipt.id, customerId: 2, customer: "X", plannedQuantity: 40, createdBy: "op"
+    });
+    let summary = await storage.getStockSummary();
+    assert.equal(summary.totals.totalQuantity, 60); // 100 - 40
+
+    await storage.returnDelivery(d.id, {
+      reason: "camion refuzat la poarta", currentUser: { name: "Op", roleCode: "operator" }
+    });
+    summary = await storage.getStockSummary();
+    assert.equal(summary.totals.totalQuantity, 100); // marfa descarcata inapoi
+
+    const logs = await storage.listAuditLogs();
+    const entry = logs.find((l) => l.entityType === "delivery" && l.action === "return");
+    assert.ok(entry, "returul trebuie sa lase o urma in audit");
+    assert.equal(entry.reason, "camion refuzat la poarta");
+    assert.equal(entry.newValue.returnedQuantity, 40);
+  });
+});
+
+test("Retur pe livrare din cilindru (fara receptie): marfa revine in locatia de plecare", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    // Receptie direct in Cilindru 1, apoi livrare pe produs + cilindru (fluxul curent).
+    await seedReceipt(storage, { location: "Cilindru 1" });
+    const d = await storage.createDelivery({
+      customerId: 2,
+      customer: "Export Grain",
+      product: "Grau",
+      productId: 1,
+      sourceLocation: "Cilindru 1",
+      plannedQuantity: 35,
+      createdBy: "op"
+    });
+    assert.equal(d.location, "Cilindru 1");
+
+    let summary = await storage.getStockSummary();
+    let cilindru = summary.byLocation.find((i) => i.location === "Cilindru 1" && i.product === "Grau");
+    assert.equal(cilindru.quantity, 65); // 100 - 35
+
+    const returned = await storage.returnDelivery(d.id, {
+      returnedQuantity: 15,
+      reason: "cumparatorul a acceptat doar 20 t",
+      currentUser: { name: "Op", roleCode: "operator" }
+    });
+    assert.equal(returned.status, "Livrat");
+    assert.equal(returned.deliveredQuantity, 20);
+
+    // Marfa descarcata s-a intors exact in cilindrul de plecare.
+    summary = await storage.getStockSummary();
+    cilindru = summary.byLocation.find((i) => i.location === "Cilindru 1" && i.product === "Grau");
+    assert.equal(cilindru.quantity, 80); // 100 - 20
+  });
+});
+
+test("Retur: marfa revine in locatia unde a fost descarcata, nu in cea din care s-a completat", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    // Receptie 100 t in Cilindru 1, apoi 70 t mutate in Cilindru 2.
+    const receipt = await seedReceipt(storage, { location: "Cilindru 1" });
+    await storage.createTransfer({
+      productId: 1, fromLocationId: 1, toLocationId: 2, quantity: 70,
+      changeReason: "pregatire livrare", createdBy: "op"
+    });
+
+    // Livrare de 100 t pe receptie: in Cilindru 1 mai sunt doar 30 t, deci scaderea se
+    // completeaza (cascadat) cu 70 t din Cilindru 2.
+    const d = await storage.createDelivery({
+      receiptId: receipt.id, customerId: 2, customer: "X", plannedQuantity: 100, createdBy: "op"
+    });
+    assert.equal(d.location, "Cilindru 1");
+    let summary = await storage.getStockSummary();
+    assert.equal(summary.totals.totalQuantity, 0); // tot stocul a plecat
+
+    // Cumparatorul refuza 40 t; camionul le descarca inapoi in Cilindru 1.
+    await storage.returnDelivery(d.id, {
+      returnedQuantity: 40, reason: "refuz partial", currentUser: { roleCode: "operator" }
+    });
+
+    summary = await storage.getStockSummary();
+    const qtyAt = (name) => Number(
+      (summary.byLocation.find((i) => i.location === name && i.product === "Grau") || {}).quantity || 0
+    );
+    assert.equal(summary.totals.totalQuantity, 40);
+    // Marfa e in Cilindru 1 (unde s-a descarcat fizic), NU in Cilindru 2 (de unde s-a completat).
+    assert.equal(qtyAt("Cilindru 1"), 40);
+    assert.equal(qtyAt("Cilindru 2"), 0);
+  });
+});
+
+test("Retur: regula un-produs/locatie se aplica si la locatiile din afara nomenclatorului", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    // „Depozit vechi" NU e in nomenclator (livrarile pot avea locatia ca text liber).
+    const receipt = await seedReceipt(storage, { location: "Depozit vechi" });
+    await seedReceipt(storage, {
+      location: "Depozit vechi", product: "Porumb", productId: 2,
+      quantity: 50, provisionalNetQuantity: 50, finalNetQuantity: 50
+    });
+
+    const d = await storage.createDelivery({
+      receiptId: receipt.id, customerId: 2, customer: "X", plannedQuantity: 100, createdBy: "op"
+    });
+
+    // Descarcarea ar amesteca Grau peste Porumb — inainte, verificarea se sarea in tacere
+    // pentru ca locatia nu era gasita in nomenclator.
+    await assert.rejects(
+      storage.returnDelivery(d.id, { reason: "refuz", currentUser: { roleCode: "operator" } }),
+      /Porumb/
+    );
+  });
+});
