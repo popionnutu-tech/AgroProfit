@@ -76,10 +76,14 @@ descarcă înapoi în locația de plecare (`returnDelivery`, buton „Descărcar
   confirmat („Livrat" ∈ `STATUS_CONFIRMED_PLUS`) managerului/adminului. E o decizie asumată —
   nu o „repara" ca pe un bug. Compensațiile: motiv obligatoriu, audit (`action: "return"`),
   document vizibil tuturor și listat în „Operațiuni anulate și retururi".
-- Returul e **BLOCAT** cât timp livrarea are factură emisă (`invoiceNumber`) sau încasări active.
-  Ordinea contabilă e storno întâi, retur după — altfel factura s-ar rescrie tacit la 0 cu
-  același număr, iar banii încasați pe marfă întoarsă ar deveni invizibili (ținta devine 0 și
-  `recomputeReferenceSettlement` ar marca livrarea „Incasat").
+- Livrare **FACTURATĂ** → returul îl poate face doar **contabilul** (`CAN_RETURN_INVOICED_ROLES`
+  = accountant, accountant-sef, admin), fiindcă rescrie aceeași factură la o sumă mai mică, cu
+  același număr; el emite și storno-ul. Numărul facturii afectate se salvează în `returns[]`,
+  iar factura tipărită afișează un avertisment de retur. Operatorul și managerul nu pot.
+- Livrare cu **ÎNCASĂRI active** → retur BLOCAT pentru toți. Nu e o regulă de drepturi, ci de
+  corectitudine: cu `deliveredQuantity = 0` ținta devine 0, iar `recomputeReferenceSettlement`
+  ar marca livrarea „Incasat" — banii primiți pe marfă întoarsă ar dispărea din Achitări/Încasări.
+  Ordinea corectă: storno încasare întâi, retur după.
 - `quantityAtDelivery` = marfa efectiv încărcată în camion; NU se atinge la retur. E citit de
   bonul de cântar, ca brut − tară = net să rămână adevărat pe documentul tipărit.
 

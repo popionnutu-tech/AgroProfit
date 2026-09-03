@@ -588,9 +588,15 @@ app.post("/api/deliveries/:id/cancel", requireRoles(["admin"]), async (req, res)
 // Retur / descarcare marfa (operator + manager + admin): cumparatorul a refuzat marfa dupa
 // incarcare. Body: { returnedQuantity (TONE, optional = retur integral), reason (obligatoriu) }.
 // Marfa se intoarce in locatia din care a plecat; livrarea ramane VIZIBILA in lista.
-app.post("/api/deliveries/:id/return", requireRoles(["operator", "manager", "admin"]), async (req, res) => {
-  return returnDeliveryHandler(req, res, req.params.id);
-});
+app.post(
+  "/api/deliveries/:id/return",
+  // Contabilii intra aici pentru livrarile DEJA FACTURATE (vezi CAN_RETURN_INVOICED_ROLES);
+  // pentru restul, garda fina e in `returnDelivery`.
+  requireRoles(["operator", "manager", "accountant", "accountant-sef", "admin"]),
+  async (req, res) => {
+    return returnDeliveryHandler(req, res, req.params.id);
+  }
+);
 
 app.post("/api/deliveries/:id/reopen", requireRoles(["manager", "admin"]), async (req, res) => {
   return transitionDeliveryHandler(req, res, req.params.id, "Redeschis");
