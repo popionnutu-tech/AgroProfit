@@ -1603,7 +1603,8 @@ function renderStockPeriod() {
   const procBefore = {}, procIn = {};
   const delBefore = {}, delIn = {};
   const bucket = (beforeObj, inObj, p, day, qty) => {
-    if (!(qty > 0)) return;
+    // Acceptă și valori NEGATIVE: un retur scade dintr-o ieșire, la ziua lui.
+    if (!qty) return;
     if (from && day < from) beforeObj[p] = (beforeObj[p] || 0) + qty;
     else if (inPeriod(day)) inObj[p] = (inObj[p] || 0) + qty;
   };
@@ -1620,13 +1621,26 @@ function renderStockPeriod() {
     bucket(procBefore, procIn, p, day, Math.max(provNet - finalNet, 0));
   });
 
-  // Livrari: doar ce a iesit REAL din stoc (deliveredQuantity = statut Livrat),
-  // ca sa coincida cu stocul real.
+  // Livrări: ce a ieșit REAL din stoc LA DATA LIVRĂRII — cantitatea BRUTĂ, dinainte de
+  // retururi. `deliveredQuantity` e micșorat de retur, deci singur ar rescrie retroactiv ziua
+  // livrării (marfa ar apărea ca și cum n-ar fi plecat niciodată în zilele dintre livrare și
+  // retur). Returul intră mai jos, ca intrare datată la ziua descărcării.
   (deliveriesCache || []).forEach((d) => {
-    if (isVoidedDelivery(d)) return;
+    if (!d || d.status === "Anulat") return; // anularea șterge complet mișcarea
     const p = d.product || "—";
     products.add(p);
-    bucket(delBefore, delIn, p, dayOf(d.deliveredAt || d.createdAt), Number(d.deliveredQuantity || 0));
+    const gross = Number(d.deliveredQuantity || 0) + Number(d.returnedQuantity || 0);
+    if (gross > 0) bucket(delBefore, delIn, p, dayOf(d.deliveredAt || d.createdAt), gross);
+    // Descărcările se scad din ieșiri, fiecare la ziua ei reală.
+    const entries = Array.isArray(d.returns) && d.returns.length > 0
+      ? d.returns
+      : (Number(d.returnedQuantity || 0) > 0
+          ? [{ quantity: Number(d.returnedQuantity), returnedAt: d.returnedAt || d.createdAt }]
+          : []);
+    entries.forEach((e) => {
+      const qty = Number(e.quantity || 0);
+      if (qty > 0) bucket(delBefore, delIn, p, dayOf(e.returnedAt || d.createdAt), -qty);
+    });
   });
 
   // Pierderi la procesarile noi (model miscare): intrare − iesire = deseu + apa.
@@ -3207,18 +3221,18 @@ function renderDailyReport(report) {
       })),
     // Retururile (totale ȘI parțiale) intră în același tabel de supraveghere: marfa s-a întors
     // în stoc și creanța a scăzut, deci conducerea trebuie să le vadă, nu doar din audit.
-    ...allDeliveries
-      .filter((d) => Number(d.returnedQuantity || 0) > 0)
-      .map((d) => ({
-        tip: d.status === "Returnat" ? "Retur livrare" : "Retur parțial",
-        id: d.id,
-        date: d.returnedAt || d.createdAt,
-        partner: d.customer,
-        product: d.product,
-        qty: Number(d.returnedQuantity || 0),
-        by: d.returnedBy,
-        reason: d.returnReason
-      })),
+    // Vin de la server ca mișcări cu data lor REALĂ (ziua descărcării) — derivându-le din
+    // livrările zilei, un retur făcut în altă zi decât livrarea nu apărea deloc.
+    ...(report.returns || []).map((r) => ({
+      tip: "Retur livrare",
+      id: r.deliveryId,
+      date: r.returnedAt || r.date,
+      partner: r.customer,
+      product: r.product,
+      qty: Number(r.quantity || 0),
+      by: r.returnedBy,
+      reason: r.reason
+    })),
     ...(canSeeCanceledTx
       ? report.transactions
           .filter((t) => t.status === "Anulat")

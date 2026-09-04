@@ -1452,3 +1452,61 @@ test("Retur: regula un-produs/locatie se aplica si la locatiile din afara nomenc
     );
   });
 });
+
+test("Retur: ziua livrarii NU se rescrie retroactiv; returul intra la data lui", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const receipt = await seedReceipt(storage);
+    const d = await storage.createDelivery({
+      receiptId: receipt.id, customerId: 2, customer: "X", plannedQuantity: 25, createdBy: "op"
+    });
+    const deliveryDay = String(d.createdAt).slice(0, 10);
+
+    // Raportul zilei livrarii, INAINTE de retur.
+    let report = await storage.getDailyReport(deliveryDay);
+    assert.equal(report.summary.deliveredQuantity, 25);
+
+    await storage.returnDelivery(d.id, {
+      returnedQuantity: 7, reason: "refuz partial", currentUser: { roleCode: "operator" }
+    });
+
+    // Aceeasi zi, regenerata DUPA retur: trebuie sa arate tot 25 t iesite atunci.
+    report = await storage.getDailyReport(deliveryDay);
+    assert.equal(report.summary.deliveredQuantity, 25, "ziua livrarii nu se rescrie");
+
+    // Returul apare ca miscare proprie, la ziua descarcarii.
+    assert.equal(report.summary.returnedQuantity, 7);
+    assert.equal(report.returns.length, 1);
+    assert.equal(report.returns[0].quantity, 7);
+    assert.equal(report.returns[0].deliveryId, d.id);
+
+    // Stocul CURENT ramane corect: 100 - 25 + 7 = 82.
+    const summary = await storage.getStockSummary();
+    assert.equal(summary.totals.totalQuantity, 82);
+  });
+});
+
+test("Retur integral: ziua livrarii pastreaza iesirea, returul o compenseaza la data lui", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const receipt = await seedReceipt(storage);
+    const d = await storage.createDelivery({
+      receiptId: receipt.id, customerId: 2, customer: "X", plannedQuantity: 30, createdBy: "op"
+    });
+    const day = String(d.createdAt).slice(0, 10);
+    await storage.returnDelivery(d.id, { reason: "refuz total", currentUser: { roleCode: "operator" } });
+
+    const report = await storage.getDailyReport(day);
+    // Marfa CHIAR a plecat in ziua aceea, chiar daca s-a intors ulterior.
+    assert.equal(report.summary.deliveredQuantity, 30);
+    assert.equal(report.summary.returnedQuantity, 30);
+
+    // Livrarea ANULATA, in schimb, nu a existat niciodata: zero pe ambele.
+    const d2 = await storage.createDelivery({
+      receiptId: receipt.id, customerId: 2, customer: "Y", plannedQuantity: 10, createdBy: "op"
+    });
+    await storage.cancelDelivery(d2.id, { reason: "greseala", currentUser: { roleCode: "admin" } });
+    const report2 = await storage.getDailyReport(String(d2.createdAt).slice(0, 10));
+    assert.equal(report2.summary.deliveredQuantity, 30, "anulata nu adauga nimic");
+  });
+});

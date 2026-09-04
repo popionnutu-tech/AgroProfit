@@ -235,6 +235,57 @@ const CAN_RETURN_INVOICED_ROLES = ["accountant", "accountant-sef", "admin"];
 // Plafon pe cate descarcari partiale se pot inregistra pe o singura livrare.
 const MAX_RETURNS_PER_DELIVERY = 50;
 
+// Cantitatea care a IESIT efectiv din stoc LA DATA LIVRARII (bruta, inainte de retururi).
+// `deliveredQuantity` e micsorat de retur, deci singur ar rescrie retroactiv ziua livrarii:
+// un raport pe 3 septembrie, regenerat dupa un retur din 5 septembrie, ar arata alta cifra
+// decat cea trimisa atunci. Returul e o miscare SEPARATA, datata cand s-a descarcat marfa.
+function getDeliveryGrossQuantity(delivery) {
+  if (!delivery || delivery.status === "Anulat") return 0; // anularea sterge complet miscarea
+  return Number(delivery.deliveredQuantity || 0) + Number(delivery.returnedQuantity || 0);
+}
+
+// Retururile ca lista plata de miscari, fiecare cu data ei reala (`returnedAt`).
+// Livrarile vechi (dinainte de `returns[]`) sunt acoperite prin campurile de pe document.
+function listReturnMovements(deliveries, range = {}) {
+  const from = String(range.from || "").slice(0, 10);
+  const to = String(range.to || "").slice(0, 10);
+  const out = [];
+  for (const d of deliveries || []) {
+    if (!d || d.status === "Anulat") continue; // anularea sterge si returul
+    const entries = Array.isArray(d.returns) && d.returns.length > 0
+      ? d.returns
+      : (Number(d.returnedQuantity || 0) > 0
+          ? [{
+              quantity: Number(d.returnedQuantity),
+              location: d.location,
+              reason: d.returnReason,
+              returnedBy: d.returnedBy,
+              returnedAt: d.returnedAt || d.updatedAt || d.createdAt
+            }]
+          : []);
+    for (const e of entries) {
+      const quantity = Number(e.quantity || 0);
+      if (quantity <= 0) continue;
+      const day = String(e.returnedAt || d.createdAt || "").slice(0, 10);
+      if (from && day && day < from) continue;
+      if (to && day && day > to) continue;
+      out.push({
+        deliveryId: d.id,
+        date: day,
+        returnedAt: e.returnedAt || null,
+        quantity,
+        product: d.product || "",
+        location: e.location || d.location || "",
+        customer: d.customer || "",
+        reason: e.reason || "",
+        returnedBy: e.returnedBy || "",
+        invoiceNumber: e.invoiceNumber || ""
+      });
+    }
+  }
+  return out.sort((a, b) => String(b.returnedAt || "").localeCompare(String(a.returnedAt || "")));
+}
+
 function isVoidedDelivery(delivery) {
   const status = delivery && delivery.status;
   return status === "Anulat" || status === "Returnat";
@@ -4545,10 +4596,14 @@ async function getDailyReport(dateValue = new Date().toISOString().slice(0, 10))
   const report = createDailyReport(dateValue, receipts, processings, transactions, stockSummary);
   report.deliveries = filterByDate(deliveries, dateValue);
   report.complaints = filterByDate(complaints, dateValue);
+  // Ziua livrarii pastreaza cat a IESIT atunci din stoc. Returul e o miscare separata,
+  // trecuta la data la care marfa a fost descarcata inapoi.
   report.summary.deliveredQuantity = report.deliveries.reduce(
-    (sum, item) => sum + (isVoidedDelivery(item) ? 0 : Number(item.deliveredQuantity || 0)),
+    (sum, item) => sum + getDeliveryGrossQuantity(item),
     0
   );
+  report.returns = listReturnMovements(deliveries, { from: dateValue, to: dateValue });
+  report.summary.returnedQuantity = report.returns.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
   report.summary.openComplaints = report.complaints.filter((item) => item.status === "Deschisa").length;
   return report;
 }
@@ -4571,6 +4626,8 @@ async function getPeriodReport(from, to) {
   const periodTransactions = filterByDateRange(transactions, from, to);
   const periodDeliveries = filterByDateRange(deliveries, from, to);
   const periodComplaints = filterByDateRange(complaints, from, to);
+  // Retururile intra dupa data DESCARCARII, nu dupa data livrarii pe care o corecteaza.
+  const periodReturns = listReturnMovements(deliveries, { from, to });
   // Sumarul cantitativ exclude receptiile anulate.
   const activePeriodReceipts = periodReceipts.filter((item) => item.status !== "Anulat");
   // Plata/incasare anulata sau stornata = storno: NU intra in totalurile de plati/incasari
@@ -4595,7 +4652,9 @@ async function getPeriodReport(from, to) {
       collectionsTotal: activePeriodTransactions
         .filter((item) => item.direction === "collection")
         .reduce((sum, item) => sum + Number(item.amount || 0), 0),
-      deliveredQuantity: periodDeliveries.reduce((sum, item) => sum + (isVoidedDelivery(item) ? 0 : Number(item.deliveredQuantity || 0)), 0),
+      // Iesirea BRUTA la data livrarii; returul e numarat separat, la data lui.
+      deliveredQuantity: periodDeliveries.reduce((sum, item) => sum + getDeliveryGrossQuantity(item), 0),
+      returnedQuantity: periodReturns.reduce((sum, item) => sum + Number(item.quantity || 0), 0),
       openComplaints: periodComplaints.filter((item) => item.status === "Deschisa").length,
       stockTotal: stockSummary.totals.totalQuantity
     },
@@ -4603,7 +4662,8 @@ async function getPeriodReport(from, to) {
     processings: periodProcessings,
     transactions: periodTransactions,
     deliveries: periodDeliveries,
-    complaints: periodComplaints
+    complaints: periodComplaints,
+    returns: periodReturns
   };
 }
 
@@ -5170,6 +5230,8 @@ module.exports = {
   reopenReceipt,
   runMigrationIfNeeded,
   isVoidedDelivery,
+  getDeliveryGrossQuantity,
+  listReturnMovements,
   returnDelivery,
   transitionDelivery,
   updateComplaint,

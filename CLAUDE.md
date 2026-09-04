@@ -86,6 +86,11 @@ descarcă înapoi în locația de plecare (`returnDelivery`, buton „Descărcar
   Ordinea corectă: storno încasare întâi, retur după.
 - `quantityAtDelivery` = marfa efectiv încărcată în camion; NU se atinge la retur. E citit de
   bonul de cântar, ca brut − tară = net să rămână adevărat pe documentul tipărit.
+- **Istoricul nu se rescrie.** Rapoartele NU citesc `deliveredQuantity` direct (e micșorat de
+  retur, deci ar schimba retroactiv ziua livrării). Folosesc `getDeliveryGrossQuantity()` =
+  cât a ieșit efectiv atunci, iar returul intră ca mișcare separată la data lui, prin
+  `listReturnMovements()`. Regula: **ziua livrării păstrează ieșirea brută; ziua descărcării
+  primește intrarea.** Livrarea `Anulat` face excepție — n-a existat, deci zero pe ambele.
 
 ## Deploy
 - **Push pe `main` → Vercel publică automat** pe agroprofit-plus.vercel.app (integrare Git activă).
