@@ -280,7 +280,11 @@ function buildExecutiveSummaryMessage(snapshot) {
   return [
     `Inchidere zi ${snapshot.report.date} | STATUS ${status.label}`,
     `Concluzie: ${status.reason}.`,
-    `KPI: receptii ${snapshot.report.summary.receiptsCount} | net ${formatNumber(provisionalNetQuantity)} t | randament ${formatNumber(yieldPercent)}% | livrat ${formatNumber(snapshot.report.summary.deliveredQuantity || 0)} t`,
+    `KPI: receptii ${snapshot.report.summary.receiptsCount} | net ${formatNumber(provisionalNetQuantity)} t | randament ${formatNumber(yieldPercent)}% | livrat ${formatNumber(snapshot.report.summary.deliveredQuantity || 0)} t${
+      Number(snapshot.report.summary.returnedQuantity || 0) > 0
+        ? ` (retur ${formatNumber(snapshot.report.summary.returnedQuantity)} t)`
+        : ""
+    }`,
     `Cash: plati azi ${formatCurrency(snapshot.report.summary.paymentsTotal || 0)} | incasari azi ${formatCurrency(snapshot.report.summary.collectionsTotal || 0)}`,
     `Expunere: plati restante ${formatCurrency(snapshot.financials.totalPayables)} | incasari restante ${formatCurrency(snapshot.financials.totalReceivables)} | stoc ${formatNumber(snapshot.report.summary.stockTotal)} t`
   ].join("\n");

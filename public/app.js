@@ -3063,7 +3063,16 @@ function renderDailyReport(report) {
     ["Brut intrat", formatNumber(report.summary.grossQuantity)],
     ["Net provizoriu", formatNumber(report.summary.provisionalNetQuantity)],
     ["Procesat", formatNumber(report.summary.processedQuantity)],
+    // „Livrat" e ieșirea BRUTĂ a zilei (cât a plecat efectiv atunci). Dacă în ziua aceea
+    // s-a și descărcat marfă înapoi, arătăm returul separat, altfel cardul și TOTAL-ul de
+    // sub tabelul de livrări (care e net) spun cifre diferite fără nicio explicație.
     ["Livrat", formatNumber(report.summary.deliveredQuantity || 0)],
+    ...(Number(report.summary.returnedQuantity || 0) > 0
+      ? [["Retur", "−" + formatNumber(report.summary.returnedQuantity)],
+         ["Livrat net", formatNumber(
+           Math.max(Number(report.summary.deliveredQuantity || 0) - Number(report.summary.returnedQuantity || 0), 0)
+         )]]
+      : []),
     ["Deseu", formatNumber(report.summary.confirmedWaste)],
     ["Plati", currency.format(report.summary.paymentsTotal || 0)],
     ["Incasari", currency.format(report.summary.collectionsTotal || 0)],

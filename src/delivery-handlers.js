@@ -90,7 +90,9 @@ async function updateDeliveryHandler(req, res, id) {
   try {
     const delivery = await updateDelivery(id, {
       ...getBody(req),
-      changedBy: getActorLabel(req)
+      changedBy: getActorLabel(req),
+      // Rolul REAL, din sesiune — nu din body. Decide daca se pot atinge campurile de facturare.
+      actorRole: (req.currentUser || {}).roleCode
     });
 
     if (!delivery) {

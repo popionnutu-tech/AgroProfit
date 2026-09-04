@@ -672,7 +672,7 @@ test("NUM: sanitizeNumber accepta virgula zecimala (pret livrare 4,09 -> 4.09)",
       receiptId: receipt.id, customerId: 2, customer: "X", plannedQuantity: 10, createdBy: "op"
     });
     const updated = await storage.updateDelivery(delivery.id, {
-      priceForeign: "4,09", changeReason: "Completare date factura"
+      priceForeign: "4,09", changeReason: "Completare date factura", actorRole: "accountant"
     });
     assert.equal(updated.priceForeign, 4.09);
   });
@@ -1213,7 +1213,8 @@ test("Retur pe livrare facturata: doar contabilul (nu operatorul, nu managerul)"
       receiptId: receipt.id, customerId: 2, customer: "X", plannedQuantity: 5, createdBy: "op"
     });
     await storage.updateDelivery(d.id, {
-      invoiceNumber: "FA-001", changedBy: "contabil", changeReason: "emitere factura"
+      invoiceNumber: "FA-001", changedBy: "contabil", changeReason: "emitere factura",
+      actorRole: "accountant"
     });
 
     // Returul rescrie aceeasi factura: e act contabil, nu de depozit.
@@ -1331,7 +1332,7 @@ test("Retur: livrarea returnata nu mai poate fi anulata (nu se ascunde urma)", a
     await storage.returnDelivery(d.id, { reason: "refuz", currentUser: { roleCode: "operator" } });
     await assert.rejects(
       storage.cancelDelivery(d.id, { reason: "vreau sa o ascund", currentUser: { roleCode: "admin" } }),
-      /returnata/i
+      /retur/i
     );
   });
 });
@@ -1508,5 +1509,84 @@ test("Retur integral: ziua livrarii pastreaza iesirea, returul o compenseaza la 
     await storage.cancelDelivery(d2.id, { reason: "greseala", currentUser: { roleCode: "admin" } });
     const report2 = await storage.getDailyReport(String(d2.createdAt).slice(0, 10));
     assert.equal(report2.summary.deliveredQuantity, 30, "anulata nu adauga nimic");
+  });
+});
+
+test("Facturare: operatorul NU poate atinge campurile de factura (ocolea garda de retur)", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const receipt = await seedReceipt(storage);
+    const d = await storage.createDelivery({
+      receiptId: receipt.id, customerId: 2, customer: "X", plannedQuantity: 5, createdBy: "op"
+    });
+    await storage.updateDelivery(d.id, {
+      invoiceNumber: "FA-007", changeReason: "emitere factura", actorRole: "accountant"
+    });
+
+    // Drumul de ocolire: operatorul golea numarul facturii, apoi facea returul.
+    await assert.rejects(
+      storage.updateDelivery(d.id, {
+        invoiceNumber: "", changeReason: "sterg factura", actorRole: "operator"
+      }),
+      /facturare/i
+    );
+    // Nici prin lipsa rolului (apel fara actor) nu se mai poate.
+    await assert.rejects(
+      storage.updateDelivery(d.id, { invoiceNumber: "", changeReason: "fara rol" }),
+      /facturare/i
+    );
+
+    // Factura a ramas, deci garda de retur tine.
+    const after = (await storage.listDeliveries()).find((x) => x.id === d.id);
+    assert.equal(after.invoiceNumber, "FA-007");
+    await assert.rejects(
+      storage.returnDelivery(d.id, { reason: "refuz", currentUser: { roleCode: "operator" } }),
+      /doar contabilul/i
+    );
+
+    // Campurile ne-financiare raman editabile de operator.
+    const noted = await storage.updateDelivery(d.id, {
+      note: "camion intarziat", changeReason: "observatie", actorRole: "operator"
+    });
+    assert.equal(noted.note, "camion intarziat");
+  });
+});
+
+test("Retur partial: livrarea nu mai poate fi anulata (ar sterge miscarea din istoric)", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const receipt = await seedReceipt(storage);
+    const d = await storage.createDelivery({
+      receiptId: receipt.id, customerId: 2, customer: "X", plannedQuantity: 20, createdBy: "op"
+    });
+    await storage.returnDelivery(d.id, {
+      returnedQuantity: 5, reason: "refuz partial", currentUser: { roleCode: "operator" }
+    });
+    // Statusul a ramas „Livrat", dar exista un retur inregistrat.
+    const after = (await storage.listDeliveries()).find((x) => x.id === d.id);
+    assert.equal(after.status, "Livrat");
+    await assert.rejects(
+      storage.cancelDelivery(d.id, { reason: "anulez", currentUser: { roleCode: "admin" } }),
+      /retur/i
+    );
+  });
+});
+
+test("Retur: contabilul NU poate returna o livrare nefacturata (e treaba depozitului)", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const receipt = await seedReceipt(storage);
+    const d = await storage.createDelivery({
+      receiptId: receipt.id, customerId: 2, customer: "X", plannedQuantity: 5, createdBy: "op"
+    });
+    await assert.rejects(
+      storage.returnDelivery(d.id, { reason: "refuz", currentUser: { roleCode: "accountant" } }),
+      /nu e facturata/i
+    );
+    // Operatorul poate.
+    const ok = await storage.returnDelivery(d.id, {
+      reason: "refuz", currentUser: { roleCode: "operator" }
+    });
+    assert.equal(ok.status, "Returnat");
   });
 });
