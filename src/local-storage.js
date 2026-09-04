@@ -213,7 +213,7 @@ const RECEIPT_STATUSES = ["Proiect", "In descarcare", "Draft", "Procesata", "Con
 const COMPLAINT_STATUSES = ["Deschisa", "Acceptata", "Respinsa", "Inchisa"];
 
 const DELIVERY_TRANSITIONS = {
-  Proiect: ["Confirmat", "Anulat"],
+  Proiect: ["Confirmat", "Livrat", "Anulat"],
   Confirmat: ["Livrat", "Anulat"],
   Livrat: ["Inchis", "Redeschis"],
   Inchis: ["Redeschis"],
@@ -878,7 +878,9 @@ function createStockSummary(receipts, deliveries = [], openingDocuments = [], tr
 
   for (const item of receipts) {
     // Anulat (canceled) si "In descarcare" (asteapta a 2-a cantarire) NU intra in stoc.
-    if (item.status === "Anulat" || item.status === "In descarcare") continue;
+    // „Proiect" = document pregatit de contabil, inca neconfirmat la cantar — marfa nu e
+    // fizic in stoc. „In descarcare" asteapta a doua cantarire. Anulat nu conteaza deloc.
+    if (item.status === "Anulat" || item.status === "In descarcare" || item.status === "Proiect") continue;
     const location = item.location || "Fara locatie";
     const key = `${location}::${item.product}`;
     const fallbackQuantity = Number(item.quantity || 0);
@@ -1834,7 +1836,10 @@ async function createReceipt(payload) {
     note: payload.note || "",
     photos: sanitizePhotos(payload.photos),
     source: payload.source || "dashboard",
-    status: payload.status || "Draft",
+    // „Proiect" = pregatita de contabil pentru documente; nu intra in stoc pana cand
+    // operatorul nu o confirma la cantar cu greutatile reale.
+    status: payload.isDraft ? "Proiect" : (payload.status || "Draft"),
+    isDraft: payload.isDraft === true,
     receivedBy: payload.receivedBy || "",
     location: payload.location || "",
     locationId: payload.locationId ? Number(payload.locationId) : null,

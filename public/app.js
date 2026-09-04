@@ -341,7 +341,7 @@ function docActionsCell(kind, item) {
   }
   let html = "";
   if (canCancelDocuments()) {
-    html += `<button type="button" class="cell-btn cell-btn-danger" data-action="doc-cancel" data-kind="${kind}" data-id="${item.id}" title="Anulează (rămâne în listă, fără mișcări)">Anulează</button>`;
+    html += `<button type="button" class="cell-btn cell-btn-danger" data-action="doc-cancel" data-kind="${kind}" data-id="${item.id}" title="Anulează (rămâne în listă, fără mișcări)">${bi("Anulează")}</button>`;
   }
   if (currentSessionUser?.roleCode === "admin") {
     html += ` <button type="button" class="cell-btn" data-action="doc-note" data-kind="${kind}" data-id="${item.id}" data-note="${escapeComboHtml(item.note || "")}" title="Comentariu / data reală">💬</button>`;
@@ -2560,7 +2560,7 @@ const DELIVERY_TRANSITIONS = {
 function deliveryReturnCell(item, canWrite) {
   const returnedTons = Number(item.returnedQuantity || 0);
   const info = returnedTons > 0
-    ? `<span class="status-badge badge-retur" title="Motiv: ${escapeComboHtml(item.returnReason || "-")} · descărcat de ${escapeComboHtml(item.returnedBy || "-")}">Retur ${formatNumber(Math.round(returnedTons * 1000))} kg</span>`
+    ? `<span class="status-badge badge-retur" title="Motiv: ${escapeComboHtml(item.returnReason || "-")} · descărcat de ${escapeComboHtml(item.returnedBy || "-")}">${bi("Retur")} ${formatNumber(Math.round(returnedTons * 1000))} kg</span>`
     : "";
   // Aceleași condiții ca pe server (`returnDelivery`), ca butonul să nu ducă la un 403:
   // livrarea închisă e doar pentru manager/admin, iar cea facturată doar pentru contabil.
@@ -2575,7 +2575,7 @@ function deliveryReturnCell(item, canWrite) {
   const button = canReturn
     ? `<button type="button" class="cell-btn" data-action="delivery-return" data-id="${item.id}" title="${invoiced
         ? "Livrare facturată — returul cere storno pe factura nr. " + escapeComboHtml(item.invoiceNumber)
-        : "Descarcă marfa înapoi în stoc"}">Descărcare</button>`
+        : bi("Descarcă marfa înapoi în stoc")}">${bi("Descărcare")}</button>`
     : "";
   return `${info}${info && button ? " " : ""}${button}`;
 }
@@ -7980,28 +7980,28 @@ document.addEventListener("click", async (event) => {
     const item = (deliveriesCache || []).find((d) => String(d.id) === String(id));
     const maxKg = Math.round(Number((item && item.deliveredQuantity) || 0) * 1000);
     if (maxKg <= 0) {
-      window.alert("Livrarea nu are marfă de descărcat.");
+      window.alert(bi("Livrarea nu are marfă de descărcat."));
       return;
     }
     const raw = window.prompt(
-      `Câte kg se descarcă înapoi în ${(item && item.location) || "locația de plecare"}?\n` +
-        `Livrat: ${maxKg} kg. Lasă valoarea completă pentru retur total.`,
+      `${bi("Câte kg se descarcă înapoi în")} ${(item && item.location) || bi("locația de plecare")}?\n` +
+        `${bi("Livrat")}: ${maxKg} kg. ${bi("Lasă valoarea completă pentru retur total.")}`,
       String(maxKg)
     );
     if (raw === null) return;
     const kg = Number(String(raw).replace(",", ".").trim());
     if (!Number.isFinite(kg) || kg <= 0) {
-      window.alert("Cantitatea trebuie să fie un număr mai mare ca zero.");
+      window.alert(bi("Cantitatea trebuie să fie un număr mai mare ca zero."));
       return;
     }
     if (kg > maxKg) {
-      window.alert(`Cantitatea depășește cât s-a livrat (${maxKg} kg).`);
+      window.alert(`${bi("Cantitatea depășește cât s-a livrat")} (${maxKg} kg).`);
       return;
     }
-    const reason = window.prompt("Motivul returului (obligatoriu) — ex.: cumpărătorul a refuzat marfa:");
+    const reason = window.prompt(bi("Motivul returului (obligatoriu) — ex.: cumpărătorul a refuzat marfa:"));
     if (reason === null) return;
     if (!reason.trim()) {
-      window.alert("Motivul este obligatoriu.");
+      window.alert(bi("Motivul este obligatoriu."));
       return;
     }
     try {
