@@ -288,12 +288,27 @@ function setCurrentUser(user) {
   if (uaPanel) uaPanel.hidden = true;
 }
 
+// Accepta si o lista "a,b" = ORICARE dintre capabilitati. Folosit acolo unde acelasi ecran
+// serveste doua roluri diferite: ex. formularul de recepție e al operatorului
+// (`receipt-write`), dar contabilul intra in el ca sa pregateasca un „Proiect"
+// (`document-draft`) — proiectul nu misca stoc, deci nu e acelasi drept.
 function canAccess(capability) {
   if (!currentSessionUser?.roleCode) {
     return false;
   }
+  if (!Array.isArray(currentSessionUser.permissions)) {
+    return false;
+  }
+  return String(capability || "")
+    .split(",")
+    .map((c) => c.trim())
+    .filter(Boolean)
+    .some((c) => currentSessionUser.permissions.includes(c));
+}
 
-  return Array.isArray(currentSessionUser.permissions) && currentSessionUser.permissions.includes(capability);
+// Contabilul poate DOAR pregati documente („Proiect"), nu poate misca stoc.
+function isDraftOnlyUser() {
+  return canAccess("document-draft") && !canAccess("receipt-write");
 }
 
 // Vizibilitatea documentelor ANULATE:
@@ -386,6 +401,10 @@ function canAccessView(view) {
 }
 
 function applyRoleAccess() {
+  // Avertismentul „regim de proiect" apare doar celor care NU pot scrie documente reale.
+  document.querySelectorAll("[data-draft-hint]").forEach((el) => {
+    el.hidden = !isDraftOnlyUser();
+  });
   document.querySelectorAll("[data-access]").forEach((element) => {
     const capability = element.dataset.access;
     element.hidden = !canAccess(capability);
@@ -1611,7 +1630,9 @@ function renderStockPeriod() {
 
   // Receptii (cantitate bruta de intrare) + pierderi de la procesarile vechi (receptie procesata)
   (receiptsCache || []).forEach((r) => {
-    if (r.status === "Anulat") return;
+    // Oglinda lui `isReceiptInStock` din src/local-storage.js: „Proiect" (pregătit de
+    // contabil) și „In descarcare" (așteaptă a doua cântărire) nu sunt marfă fizică.
+    if (["Anulat", "In descarcare", "Proiect"].includes(String(r.status || ""))) return;
     const p = r.product || "—";
     products.add(p);
     const provNet = Number(r.provisionalNetQuantity || r.quantity || 0);
@@ -2559,7 +2580,7 @@ function renderTransactionTotals(rows) {
 }
 
 const DELIVERY_TRANSITIONS = {
-  Proiect: ["Confirmat", "Anulat"],
+  Proiect: ["Confirmat", "Livrat", "Anulat"],
   Confirmat: ["Livrat", "Anulat"],
   Livrat: ["Inchis", "Redeschis"],
   Inchis: ["Redeschis"],
@@ -8919,7 +8940,8 @@ deliveriesBodyEl.addEventListener("click", async (event) => {
       payload.changeReason = `Tranzitie ${action}`;
     }
     await transitionDelivery(id, action, payload);
-    await Promise.all([loadDeliveries(), loadReceipts(), loadAuditLogs(), loadDailyReport()]);
+    // `loadStocks` e necesar: confirmarea unui „Proiect" scade stocul abia acum.
+    await Promise.all([loadDeliveries(), loadReceipts(), loadStocks(), loadAuditLogs(), loadDailyReport()]);
   } catch (error) {
     window.alert(error.message);
     await loadDeliveries();

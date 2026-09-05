@@ -1590,3 +1590,107 @@ test("Retur: contabilul NU poate returna o livrare nefacturata (e treaba depozit
     assert.equal(ok.status, "Returnat");
   });
 });
+
+// --- Flux „Proiect": contabilul pregateste documentul, operatorul il confirma la cantar ---
+
+test("Proiect receptie: nu intra in stoc, nu creeaza datorie, nu e livrabil", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    await seedReceipt(storage, { location: "Cilindru 1" }); // 100 t reale
+    const draft = await storage.createReceipt({
+      supplier: "Agro Nord", supplierId: 1, product: "Grau", productId: 1,
+      quantity: 50, provisionalNetQuantity: 50, finalNetQuantity: 50,
+      preliminaryPayableAmount: 150000, unit: "tone", price: 3000,
+      location: "Cilindru 1", isDraft: true, actorRole: "accountant", createdBy: "contabil"
+    });
+    assert.equal(draft.status, "Proiect");
+
+    // Stocul ramane 100, nu 150.
+    const summary = await storage.getStockSummary();
+    assert.equal(summary.totals.totalQuantity, 100);
+
+    // Nu apare nici in KPI, nici in datoriile catre furnizor.
+    const stats = await storage.getStats();
+    assert.equal(stats.totalQuantity, 100);
+    assert.equal(stats.totalReceipts, 1);
+    const dash = await storage.getDashboardSnapshot();
+    assert.equal(dash.outstanding.payments, 300000); // doar receptia reala
+
+    // Si, mai ales, nu se poate livra din ea.
+    await assert.rejects(
+      storage.createDelivery({
+        receiptId: draft.id, customerId: 2, customer: "X", plannedQuantity: 10, createdBy: "op"
+      }),
+      /nu e inca in stoc/i
+    );
+  });
+});
+
+test("Proiect: operatorul nu poate crea proiecte, iar un document real nu se intoarce in proiect", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    await assert.rejects(
+      storage.createReceipt({
+        supplier: "Agro Nord", supplierId: 1, product: "Grau", productId: 1, quantity: 10,
+        location: "Cilindru 1", isDraft: true, actorRole: "operator", createdBy: "op"
+      }),
+      /doar contabilul/i
+    );
+
+    const real = await seedReceipt(storage);
+    // Trecerea inapoi in „Proiect" ar scoate marfa din stoc, lasand documentul sa para in regula.
+    await assert.rejects(
+      storage.updateReceiptStatusWithAudit(real.id, "Proiect", {
+        changeReason: "ascund marfa", actorRole: "operator", changedBy: "op"
+      }),
+      /doar la creare/i
+    );
+  });
+});
+
+test("Proiect livrare: rezerva marfa, nu scade stocul; confirmarea la cantar o scade", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const receipt = await seedReceipt(storage, { location: "Cilindru 1" });
+    const draft = await storage.createDelivery({
+      receiptId: receipt.id, customerId: 2, customer: "Export Grain",
+      plannedQuantity: 30, isDraft: true, actorRole: "accountant", createdBy: "contabil"
+    });
+    assert.equal(draft.status, "Proiect");
+    assert.equal(draft.deliveredQuantity, 0);
+
+    // Stocul e neatins: marfa e doar rezervata pe hartie.
+    let summary = await storage.getStockSummary();
+    assert.equal(summary.totals.totalQuantity, 100);
+
+    // Operatorul confirma la cantar (Proiect -> Livrat, cu greutati reale).
+    const confirmed = await storage.transitionDelivery(draft.id, "Livrat", {
+      grossWeight: 40, tareWeight: 12, changeReason: "cantarit",
+      currentUser: { name: "Op", roleCode: "operator" }
+    });
+    assert.equal(confirmed.status, "Livrat");
+    assert.equal(confirmed.deliveredQuantity, 28); // 40 - 12
+
+    summary = await storage.getStockSummary();
+    assert.equal(summary.totals.totalQuantity, 72);
+  });
+});
+
+test("Proiect livrare: confirmarea peste stocul disponibil e refuzata", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const receipt = await seedReceipt(storage, { location: "Cilindru 1" });
+    const draft = await storage.createDelivery({
+      receiptId: receipt.id, customerId: 2, customer: "X",
+      plannedQuantity: 50, isDraft: true, actorRole: "accountant", createdBy: "contabil"
+    });
+    // La creare nu s-a scazut nimic, deci verificarea trebuie sa fie AICI.
+    await assert.rejects(
+      storage.transitionDelivery(draft.id, "Livrat", {
+        grossWeight: 200, tareWeight: 10, changeReason: "cantarit",
+        currentUser: { roleCode: "operator" }
+      }),
+      /Stoc insuficient/i
+    );
+  });
+});

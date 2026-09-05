@@ -470,13 +470,14 @@
         </section>
 
         <section class="grid" data-view="receptii">
-          <div class="receipt-new-bar" data-access="receipt-write" style="grid-column: 1 / -1;">
+          <div class="receipt-new-bar" data-access="receipt-write,document-draft" style="grid-column: 1 / -1;">
             <button type="button" id="receipt-new-toggle" class="receipt-new-btn" aria-expanded="false" aria-controls="receipt-form">
               <span class="rnb-icon">＋</span> Recepție nouă
             </button>
             <span class="receipt-new-hint">Apasă pentru a deschide formularul de introducere.</span>
           </div>
-          <form class="panel form-panel collapsed" id="receipt-form" data-access="receipt-write">
+          <form class="panel form-panel collapsed" id="receipt-form" data-access="receipt-write,document-draft">
+            <p class="draft-hint" data-draft-hint hidden>📄 <b>Regim de proiect.</b> Documentul se salvează ca <b>Proiect</b>: nu intră în stoc, nu creează datorie și nu poate fi livrat. Operatorul îl confirmă la cântar, cu greutățile reale.</p>
             <div class="panel-head">
               <h2>Receptie noua</h2>
               <p>Operatorul introduce rapid doar datele primare, restul ramane optional.</p>
@@ -1220,13 +1221,14 @@
         </section>
 
         <section class="grid delivery-grid" data-view="livrari">
-          <div class="receipt-new-bar" data-access="delivery-write" style="grid-column: 1 / -1;">
+          <div class="receipt-new-bar" data-access="delivery-write,document-draft" style="grid-column: 1 / -1;">
             <button type="button" id="delivery-new-toggle" class="receipt-new-btn" aria-expanded="false" aria-controls="delivery-form">
               <span class="rnb-icon">＋</span> Livrare nouă
             </button>
             <span class="receipt-new-hint">Apasă pentru a deschide formularul de livrare.</span>
           </div>
-          <form class="panel form-panel collapsed" id="delivery-form" data-access="delivery-write">
+          <form class="panel form-panel collapsed" id="delivery-form" data-access="delivery-write,document-draft">
+              <p class="draft-hint" data-draft-hint hidden>📄 <b>Regim de proiect.</b> Documentul se salvează ca <b>Proiect</b>: nu intră în stoc, nu creează datorie și nu poate fi livrat. Operatorul îl confirmă la cântar, cu greutățile reale.</p>
               <div class="panel-head">
                 <h2>Livrare / iesire din stoc</h2>
                 <p>Formular scurt pentru iesirea reala din stoc, cu detalii comerciale optionale.</p>

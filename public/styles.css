@@ -1684,6 +1684,9 @@ thead th {
 .badge-anulat { background: #e5e7eb; color: #6b7280; text-decoration: line-through; cursor: help; }
 /* Retur / descarcare: marfa s-a intors in stoc. Vizibil pentru toate rolurile. */
 .badge-retur { background: #ffedd5; color: #9a3412; cursor: help; }
+/* Avertisment „regim de proiect" in formularele de receptie/livrare (contabil). */
+.draft-hint { background: #fef3c7; border: 1px solid #d9a441; border-radius: 8px;
+  padding: 8px 12px; margin: 0 0 12px; font-size: 0.9rem; color: #6b4a05; }
 
 .eod-bar { display: flex; align-items: center; gap: 12px; margin: 4px 0 14px; flex-wrap: wrap; }
 .eod-status { font-size: 0.9rem; }

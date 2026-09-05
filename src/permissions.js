@@ -28,6 +28,7 @@ const SYSTEM_ROLE_CAPABILITIES = {
   ],
   accountant: [
     "receipts-read",
+    "document-draft",
     "processings-read",
     "stocks-read",
     "deliveries-read",
@@ -44,6 +45,7 @@ const SYSTEM_ROLE_CAPABILITIES = {
   ],
   "accountant-sef": [
     "receipts-read",
+    "document-draft",
     "processings-read",
     "stocks-read",
     "deliveries-read",
@@ -72,6 +74,7 @@ const SYSTEM_ROLE_CAPABILITIES = {
   ],
   admin: [
     "receipts-read",
+    "document-draft",
     "receipt-write",
     "processings-read",
     "processing-write",

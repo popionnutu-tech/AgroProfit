@@ -167,6 +167,11 @@ async function createReceiptHandler(req, res) {
   // Cantar in 2 pasi: la intrare se salveaza doar masa bruta (status "In descarcare");
   // cantitatea (net) ramane necunoscuta pana la a doua cantarire (tara).
   const isPendingWeighing = body.status === "In descarcare";
+  // Regimul de PROIECT nu se ia din body: il decide ROLUL din sesiune. Contabilul pregateste
+  // documentul inainte ca operatorul sa apuce sa-l introduca; operatorul, care e la cantar,
+  // creeaza documente reale, nu proiecte.
+  const actorRole = (req.currentUser || {}).roleCode;
+  const isDraft = ["accountant", "accountant-sef"].includes(String(actorRole || ""));
 
   if (!body.productId) {
     return sendJson(res, 400, { error: "Campul productId este obligatoriu." });
@@ -218,7 +223,7 @@ async function createReceiptHandler(req, res) {
       if (!(Number(body.grossWeight) > 0)) {
         return sendJson(res, 400, { error: "Introdu masa bruta (camion plin)." });
       }
-    } else if (!Number.isFinite(normalizedQuantity) || normalizedQuantity <= 0) {
+    } else if (!isDraft && (!Number.isFinite(normalizedQuantity) || normalizedQuantity <= 0)) {
       return sendJson(res, 400, { error: "Cantitatea trebuie sa fie mai mare ca zero." });
     }
 
@@ -255,7 +260,10 @@ async function createReceiptHandler(req, res) {
       ...estimate,
       createdBy: actor,
       source: body.source || "dashboard",
-      status: body.status || "Draft"
+      // La proiect NU trimitem status: `createReceipt` refuza combinatia isDraft + status.
+      status: isDraft ? undefined : (body.status || "Draft"),
+      isDraft,
+      actorRole
     });
 
     const response = sendJson(res, 201, receiptForRequest(req, receipt));

@@ -308,7 +308,14 @@ app.get(
   listReceiptsHandler
 );
 
-app.post("/api/receipts", requireRoles(["operator", "manager", "admin"]), createReceiptHandler);
+// Contabilii intra aici DOAR ca sa pregateasca documente in „Proiect" (regimul e fortat de
+// rol in handler): proiectul nu misca stoc, nu creeaza datorie si nu e livrabil pana cand
+// operatorul nu il confirma la cantar.
+app.post(
+  "/api/receipts",
+  requireRoles(["operator", "manager", "accountant", "accountant-sef", "admin"]),
+  createReceiptHandler
+);
 
 app.patch("/api/receipts/:id/status", requireRoles(["operator", "manager", "admin"]), async (req, res) => {
   return updateReceiptStatusHandler(req, res, req.params.id);
@@ -549,7 +556,11 @@ app.get(
   listDeliveriesHandler
 );
 
-app.post("/api/deliveries", requireRoles(["operator", "manager", "admin"]), createDeliveryHandler);
+app.post(
+  "/api/deliveries",
+  requireRoles(["operator", "manager", "accountant", "accountant-sef", "admin"]),
+  createDeliveryHandler
+);
 
 app.patch("/api/deliveries/:id", requireRoles(["operator", "manager", "admin", "accountant", "accountant-sef"]), async (req, res) => {
   return updateDeliveryHandler(req, res, req.params.id);

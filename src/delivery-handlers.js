@@ -67,11 +67,16 @@ async function createDeliveryHandler(req, res) {
       }
     }
 
+    // Regimul de PROIECT il decide ROLUL din sesiune, nu body-ul: contabilul pregateste
+    // documentul, operatorul il confirma la cantar.
+    const actorRole = (req.currentUser || {}).roleCode;
     const delivery = await createDelivery({
       ...body,
       plannedQuantity,
       createdBy: actor,
-      customer: customer.name
+      customer: customer.name,
+      isDraft: ["accountant", "accountant-sef"].includes(String(actorRole || "")),
+      actorRole
     });
 
     const response = sendJson(res, 201, delivery);
