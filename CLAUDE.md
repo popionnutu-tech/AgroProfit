@@ -110,9 +110,17 @@ introducă. Îl creează în status **`Proiect`**.
   scăderea ar fi consumat marfa ALTOR recepții prin cascada pe locații, ascunsă de `Math.max(…,0)`.
 - `Proiect` se setează **doar la creare**. Un document existent nu se întoarce în proiect —
   altfel oricine cu drept de status ar scoate marfă din stoc lăsând documentul să pară în regulă.
-- Livrarea-proiect are `deliveredQuantity = 0` (doar rezervare). Operatorul o confirmă la cântar
-  prin `Proiect → Livrat`; **acolo** se face verificarea de stoc, fiindcă la creare nu s-a scăzut
-  nimic. Prin `Confirmat` n-ar putea: acela e în `STATUS_CONFIRMED_PLUS`, rezervat manager/admin.
+- Livrarea-proiect are `deliveredQuantity = 0` **și `netWeight = 0`** (doar rezervare). Nu pune
+  cantitate în `netWeight`: toate fallback-urile de tip `deliveredQuantity || netWeight` (facturi,
+  creanțe, totaluri) ar reactiva-o și proiectul ar apărea ca marfă livrată.
+- Operatorul o confirmă la cântar prin `Proiect → Livrat`, **direct**. `Proiect → Confirmat` e
+  interzis intenționat: scotea documentul din verificarea de stoc și îl bloca pentru operator.
+- **Verificarea de stoc se leagă de STAREA documentului, nu de tranziție.** Se compară cât mai
+  iese acum (`netWeight − deliveredQuantity`) cu disponibilul. Dacă o legi de `currentStatus`,
+  orice pas intermediar devine o poartă deschisă — exact așa s-a redeschis gaura o dată.
+- `isDeliveryPendingStockExit()` e perechea lui `isReceiptInStock()` pentru livrări. Folosește-le
+  peste tot unde numeri cantități sau bani; lipsa predicatului pentru livrări a fost cauza
+  găurii, nu o scăpare punctuală.
 
 ## Deploy
 - **Push pe `main` → Vercel publică automat** pe agroprofit-plus.vercel.app (integrare Git activă).

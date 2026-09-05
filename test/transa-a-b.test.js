@@ -1694,3 +1694,95 @@ test("Proiect livrare: confirmarea peste stocul disponibil e refuzata", async ()
     );
   });
 });
+
+test("Proiect: ocolul prin «Confirmat» nu mai exista, iar verificarea tine pe orice cale", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const receipt = await seedReceipt(storage, { location: "Cilindru 1" }); // 100 t
+    const draft = await storage.createDelivery({
+      receiptId: receipt.id, customerId: 2, customer: "X",
+      plannedQuantity: 50, isDraft: true, actorRole: "accountant", createdBy: "contabil"
+    });
+
+    // Pasul intermediar prin „Confirmat" scotea documentul din conditia de verificare.
+    await assert.rejects(
+      storage.transitionDelivery(draft.id, "Confirmat", {
+        changeReason: "ocol", currentUser: { roleCode: "manager" }
+      }),
+      /Tranzitie invalida/i
+    );
+
+    // Iar pe calea directa, 190 t dintr-o receptie de 100 t sunt refuzate.
+    await assert.rejects(
+      storage.transitionDelivery(draft.id, "Livrat", {
+        grossWeight: 200, tareWeight: 10, changeReason: "cantarit",
+        currentUser: { roleCode: "operator" }
+      }),
+      /Stoc insuficient/i
+    );
+
+    const stock = await storage.getStockSummary();
+    assert.equal(stock.totals.totalQuantity, 100, "stocul a ramas neatins");
+  });
+});
+
+test("Proiect livrare: nu e creanta, nu are cantitate, nu intra in totaluri", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    await seedReceipt(storage, { location: "Cilindru 1" });
+    const draft = await storage.createDelivery({
+      customerId: 2, customer: "Export Grain", product: "Grau", productId: 1,
+      sourceLocation: "Cilindru 1", plannedQuantity: 40, contractPrice: 4000,
+      isDraft: true, actorRole: "accountant", createdBy: "contabil"
+    });
+    // netWeight 0: altfel `deliveredQuantity || netWeight` reactiva cantitatea planificata.
+    assert.equal(draft.netWeight, 0);
+    assert.equal(draft.deliveredQuantity, 0);
+
+    const dash = await storage.getDashboardSnapshot();
+    assert.equal(dash.outstanding.collections, 0, "proiectul nu e de incasat");
+
+    const stats = await storage.getStats();
+    assert.equal(stats.deliveries.totalDeliveredQuantity, 0);
+  });
+});
+
+test("Proiect receptie: nu se poate cere din body, si nu atrage plata inaintea celei reale", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    // Operatorul nu poate crea o receptie „ascunsa" cerand statusul direct.
+    await assert.rejects(
+      storage.createReceipt({
+        supplier: "Agro Nord", supplierId: 1, product: "Grau", productId: 1, quantity: 50,
+        location: "Cilindru 1", status: "Proiect", createdBy: "op"
+      }),
+      /nu se poate seta la crearea/i
+    );
+    await assert.rejects(
+      storage.createReceipt({
+        supplier: "Agro Nord", supplierId: 1, product: "Grau", productId: 1, quantity: 50,
+        location: "Cilindru 1", status: "Anulat", createdBy: "op"
+      }),
+      /nu se poate seta la crearea/i
+    );
+
+    // Proiectul creat de contabil PRIMUL nu trebuie sa absoarba plata receptiei reale.
+    const proiect = await storage.createReceipt({
+      supplier: "Agro Nord", supplierId: 1, product: "Grau", productId: 1, quantity: 50,
+      provisionalNetQuantity: 50, finalNetQuantity: 50, preliminaryPayableAmount: 150000,
+      unit: "tone", price: 3000, location: "Cilindru 1",
+      isDraft: true, actorRole: "accountant", createdBy: "contabil"
+    });
+    const reala = await seedReceipt(storage, { preliminaryPayableAmount: 150000 });
+    await storage.createTransaction({
+      referenceType: "receipt", receiptId: reala.id, direction: "payment",
+      amount: 150000, partnerId: 1, createdBy: "contabil"
+    });
+
+    const list = await storage.listReceipts();
+    const p = list.find((r) => r.id === proiect.id);
+    const r = list.find((r) => r.id === reala.id);
+    assert.equal(Number(p.paidAmount || 0), 0, "proiectul nu absoarbe plata");
+    assert.equal(Number(r.paidAmount || 0), 150000, "plata sta pe receptia reala");
+  });
+});

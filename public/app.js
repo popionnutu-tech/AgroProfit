@@ -1468,7 +1468,7 @@ function renderLossesReport() {
   // Câmpul de dată prioritar = `createdAt` (ca ecranele Recepții/Procesări/Livrări), ca raportul
   // să se reconcilieze cu ele; fallback pe data reală a operației.
   (receiptsCache || []).forEach((r) => {
-    if (r.status === "Anulat" || (prodFilter && r.product !== prodFilter) || !inRange(r.createdAt || r.receivedAt)) return;
+    if (!isReceiptInStock(r) || (prodFilter && r.product !== prodFilter) || !inRange(r.createdAt || r.receivedAt)) return;
     const g = bucket(r.product);
     g.received += Number(r.provisionalNetQuantity || r.quantity || 0);
     g.waterRecv += Number(r.estimatedWaterLoss || 0);
@@ -1630,9 +1630,7 @@ function renderStockPeriod() {
 
   // Receptii (cantitate bruta de intrare) + pierderi de la procesarile vechi (receptie procesata)
   (receiptsCache || []).forEach((r) => {
-    // Oglinda lui `isReceiptInStock` din src/local-storage.js: „Proiect" (pregătit de
-    // contabil) și „In descarcare" (așteaptă a doua cântărire) nu sunt marfă fizică.
-    if (["Anulat", "In descarcare", "Proiect"].includes(String(r.status || ""))) return;
+    if (!isReceiptInStock(r)) return;
     const p = r.product || "—";
     products.add(p);
     const provNet = Number(r.provisionalNetQuantity || r.quantity || 0);
@@ -1808,8 +1806,11 @@ function renderCriticalAlertsStatus(status) {
 function statusOptions(current, allowCancel = canCancelDocuments()) {
   // „Anulat" apare doar pentru cine poate anula (admin). Pastram „Anulat" daca documentul
   // e deja anulat, ca sa nu se piarda valoarea curenta din select.
-  return ["Draft", "Confirmat", "Procesata", "Inchis", "Anulat", "Redeschis", "Noua", "Verificata", "Finalizata"]
+  return ["Proiect", "Draft", "Confirmat", "Procesata", "Inchis", "Anulat", "Redeschis", "Noua", "Verificata", "Finalizata"]
     .filter((status) => status !== "Anulat" || allowCancel || current === "Anulat")
+    // „Proiect" se setează doar la creare (de contabil): apare în listă doar ca să se vadă
+    // valoarea curentă, nu ca destinație posibilă.
+    .filter((status) => status !== "Proiect" || current === "Proiect")
     .map((status) => {
       const selected = current === status ? "selected" : "";
       return `<option value="${status}" ${selected}>${bi(status)}</option>`;
@@ -2094,7 +2095,7 @@ function renderCloseDayStatus() {
   const todayEl = document.getElementById("today-received");
   if (todayEl) {
     const todayDone = receiptsCache.filter(
-      (r) => isToday(r) && r.status !== "Anulat" && r.status !== "In descarcare"
+      (r) => isToday(r) && isReceiptInStock(r)
     );
     const totalTons = todayDone.reduce(
       (s, r) => s + Number(r.finalNetQuantity ?? r.provisionalNetQuantity ?? r.quantity ?? 0),
@@ -2257,7 +2258,7 @@ function checkEndOfDayProcessing() {
     dismissed = false;
   }
   const todaysReceipts = receiptsCache.filter(
-    (r) => String(r.createdAt || r.receivedAt || "").slice(0, 10) === today && r.status !== "Anulat"
+    (r) => String(r.createdAt || r.receivedAt || "").slice(0, 10) === today && isReceiptInStock(r)
   );
   const todaysProcessings = processingsCache.filter(
     (p) => String(p.createdAt || p.processedAt || "").slice(0, 10) === today
@@ -2580,7 +2581,7 @@ function renderTransactionTotals(rows) {
 }
 
 const DELIVERY_TRANSITIONS = {
-  Proiect: ["Confirmat", "Livrat", "Anulat"],
+  Proiect: ["Livrat", "Anulat"],
   Confirmat: ["Livrat", "Anulat"],
   Livrat: ["Inchis", "Redeschis"],
   Inchis: ["Redeschis"],
@@ -2623,6 +2624,17 @@ function canReturnInvoicedDelivery() {
   return ["accountant", "accountant-sef", "admin"].includes(currentSessionUser?.roleCode);
 }
 
+// Oglinda lui `isReceiptInStock` din src/local-storage.js: „Proiect" (pregătit de contabil,
+// neconfirmat la cântar) și „In descarcare" (așteaptă a doua cântărire) NU sunt marfă fizică.
+function isReceiptInStock(item) {
+  return !["Anulat", "In descarcare", "Proiect"].includes(String((item && item.status) || ""));
+}
+
+// Oglinda lui `isDeliveryPendingStockExit`: proiectul de livrare n-a scos încă marfa.
+function isDeliveryPendingStockExit(item) {
+  return String((item && item.status) || "") === "Proiect";
+}
+
 function isVoidedDelivery(item) {
   const status = item && item.status;
   return status === "Anulat" || status === "Returnat";
@@ -2659,6 +2671,8 @@ function deliveryDisplayQuantity(item) {
   // Retur integral: marfa s-a întors în stoc, livrarea nu mai are cantitate. Fără această
   // gardă, fallback-ul pe `plannedQuantity` ar afișa cantitatea (și factura) inițială.
   if (item && item.status === "Returnat") return 0;
+  // Proiectul contabilului n-a scos încă marfa: nu are cantitate livrată.
+  if (isDeliveryPendingStockExit(item)) return 0;
   if (Number(item.netWeight) > 0) return Number(item.netWeight);
   if (Number(item.deliveredQuantity) > 0) return Number(item.deliveredQuantity);
   return Number(item.plannedQuantity || 0);
@@ -2845,7 +2859,8 @@ function renderDeliveryTotals(rows) {
   let totalLei = 0;
   const totalForeignByCur = {};
   rows.forEach((item) => {
-    if (item.status === "Anulat" || item.status === "Returnat") return; // anulată/returnată — nu intră în totaluri
+    // Anulată / returnată / proiect neconfirmat — nu intră în totaluri.
+    if (isVoidedDelivery(item) || isDeliveryPendingStockExit(item)) return;
     const money = deliveryInvoiceTotals(item);
     totalQty += money.tonnes;
     totalLei += money.totalLei;
@@ -2975,7 +2990,8 @@ function renderOpenJournal() {
     });
 
   const openDeliveries = deliveriesCache.filter((item) => {
-    if (isVoidedDelivery(item)) return false; // livrarea anulată/returnată nu mai e de încasat
+    // Anulată/returnată nu mai e de încasat; proiectul nu e încă marfă plecată.
+    if (isVoidedDelivery(item) || isDeliveryPendingStockExit(item)) return false;
     const status = item.collectionStatus || "Neincasat";
     const statusMatch = !deliveryStatusFilter || status === deliveryStatusFilter;
     const partnerMatch = !partnerFilter || String(item.customer || "").toLowerCase().includes(partnerFilter);
@@ -8940,8 +8956,14 @@ deliveriesBodyEl.addEventListener("click", async (event) => {
       payload.changeReason = `Tranzitie ${action}`;
     }
     await transitionDelivery(id, action, payload);
-    // `loadStocks` e necesar: confirmarea unui „Proiect" scade stocul abia acum.
-    await Promise.all([loadDeliveries(), loadReceipts(), loadStocks(), loadAuditLogs(), loadDailyReport()]);
+    // Stocul se reîncarcă doar la acțiunile care chiar îl mișcă („Livrat" scade marfa —
+    // inclusiv la confirmarea unui „Proiect"; „Anulat"/„Redeschis" o întorc). „Confirmat" și
+    // „Inchis" nu ating stocul, iar fiecare cerere aduce tot blobul de stare.
+    const movesStock = ["Livrat", "Anulat", "Redeschis"].includes(action);
+    await Promise.all([
+      loadDeliveries(), loadReceipts(), loadAuditLogs(), loadDailyReport(),
+      ...(movesStock ? [loadStocks()] : [])
+    ]);
   } catch (error) {
     window.alert(error.message);
     await loadDeliveries();

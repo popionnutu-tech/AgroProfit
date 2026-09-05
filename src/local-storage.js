@@ -213,7 +213,10 @@ const RECEIPT_STATUSES = ["Proiect", "In descarcare", "Draft", "Procesata", "Con
 const COMPLAINT_STATUSES = ["Deschisa", "Acceptata", "Respinsa", "Inchisa"];
 
 const DELIVERY_TRANSITIONS = {
-  Proiect: ["Confirmat", "Livrat", "Anulat"],
+  // Proiectul se confirma DIRECT la cantar. Prin "Confirmat" verificarea de stoc era
+  // ocolita, iar documentul devenea inaccesibil operatorului ("Confirmat" e in
+  // STATUS_CONFIRMED_PLUS, rezervat manager/admin) — se bloca la jumatate de drum.
+  Proiect: ["Livrat", "Anulat"],
   Confirmat: ["Livrat", "Anulat"],
   Livrat: ["Inchis", "Redeschis"],
   Inchis: ["Redeschis"],
@@ -242,6 +245,12 @@ const WAREHOUSE_ONLY_RETURN_ROLES = ["accountant", "accountant-sef"];
 // sa apuce sa le introduca). Proiectul NU misca stoc si NU creeaza datorie; operatorul il
 // confirma la cantar cu greutatile reale.
 const CAN_CREATE_DRAFT_ROLES = ["accountant", "accountant-sef", "admin"];
+// Statusuri care NU se pot cere din body la crearea unei receptii:
+//   „Proiect" — se obtine doar prin `isDraft`, decis de ROL. Altfel oricine putea crea o
+//               receptie in afara stocului, a KPI-ului si a datoriei: ascundere de marfa.
+//   „Anulat"  — ocolea regula „doar adminul anuleaza, cu motiv + audit", iar
+//               `filterCanceledForRole` o facea invizibila pentru restul rolurilor.
+const RECEIPT_STATUSES_FORBIDDEN_AT_CREATE = ["Proiect", "Anulat"];
 // Plafon pe cate descarcari partiale se pot inregistra pe o singura livrare.
 const MAX_RETURNS_PER_DELIVERY = 50;
 
@@ -307,6 +316,13 @@ function listReturnMovements(deliveries, range = {}) {
 //   „Proiect"       — pregatita de contabil pentru documente; marfa n-a fost cantarita
 // SURSA UNICA. Regula legata: ce nu e in stoc NU se poate livra (vezi createDelivery).
 const RECEIPT_STATUSES_OUT_OF_STOCK = ["Anulat", "In descarcare", "Proiect"];
+
+// O livrare care inca NU a scos marfa din stoc: proiectul contabilului, care asteapta
+// cantarul. Perechea lui `isReceiptInStock`. Foloseste-o oriunde numeri cantitati sau bani
+// pe livrari — un proiect nu e marfa plecata si nu e creanta.
+function isDeliveryPendingStockExit(delivery) {
+  return String((delivery && delivery.status) || "") === "Proiect";
+}
 
 function isReceiptInStock(receipt) {
   return !RECEIPT_STATUSES_OUT_OF_STOCK.includes(String((receipt && receipt.status) || ""));
@@ -1316,7 +1332,8 @@ function allocateDocumentNumber(docType, refId, companyId, changedBy) {
 function computeReservedQuantity(state, receiptId) {
   return (state.deliveries || [])
     .filter((item) => item.receiptId === Number(receiptId))
-    .filter((item) => item.status === "Confirmat" || item.status === "Livrat" || item.status === "Redeschis")
+    // „Proiect" rezerva marfa la fel ca „Confirmat": documentul exista si asteapta cantarul.
+    .filter((item) => ["Proiect", "Confirmat", "Livrat", "Redeschis"].includes(item.status))
     .reduce((sum, item) => {
       if (item.status === "Livrat" || item.status === "Redeschis") {
         return sum + Number(item.deliveredQuantity || item.netWeight || item.plannedQuantity || 0);
@@ -1367,7 +1384,9 @@ function recalcReceiptDeliveryState(state, receiptId) {
 
   receipt.reservedQuantity = reserved;
   receipt.deliveredQuantity = delivered;
-  receipt.availableQuantity = Math.max(base - reserved, 0);
+  // Aceeasi regula ca `getReceiptAvailableQuantity`: ce nu e in stoc nu e disponibil.
+  // Altfel campul persistat spunea 100 acolo unde functia spunea 0.
+  receipt.availableQuantity = isReceiptInStock(receipt) ? Math.max(base - reserved, 0) : 0;
 
   let deliveryStatus = "Nelivrat";
   if (delivered > 0 && delivered >= base) {
@@ -1431,7 +1450,7 @@ function createDailyReport(dateValue, receipts, processings, transactions, stock
   );
   const dailyTransactions = filterByDate(transactions, dateValue);
   // Sumarul cantitativ exclude receptiile anulate (lista le pastreaza pentru afisare).
-  const activeDailyReceipts = dailyReceipts.filter((item) => item.status !== "Anulat");
+  const activeDailyReceipts = dailyReceipts.filter((item) => isReceiptInStock(item));
   // Plata/incasare anulata sau stornata = storno: NU intra in totalurile de plati/incasari.
   // Folosim ACELASI predicat ca extrasul de cont/decontari (isActiveTransaction), ca totalurile
   // din raport sa nu se departeze niciodata de Financiar.
@@ -1673,7 +1692,7 @@ async function listReceipts() {
   const paidByReceipt = new Map();
   const receiptsByPartner = new Map();
   for (const r of state.receipts || []) {
-    if (r.status === "Anulat") continue; // receptia anulata nu are datorie
+    if (!isReceiptInStock(r)) continue; // proiectul/receptia necantarita nu au inca datorie
     const pid = Number(r.supplierId);
     if (!receiptsByPartner.has(pid)) receiptsByPartner.set(pid, []);
     receiptsByPartner.get(pid).push(r);
@@ -1847,8 +1866,13 @@ async function createReceipt(payload) {
     if (payload.status && payload.status !== "Proiect") {
       throw new Error("Un document in regim de proiect nu poate primi alt status la creare.");
     }
-  } else if (payload.status && !RECEIPT_STATUSES.includes(payload.status)) {
-    throw new Error(`Status receptie invalid: ${payload.status}.`);
+  } else if (payload.status) {
+    if (!RECEIPT_STATUSES.includes(payload.status)) {
+      throw new Error(`Status receptie invalid: ${payload.status}.`);
+    }
+    if (RECEIPT_STATUSES_FORBIDDEN_AT_CREATE.includes(payload.status)) {
+      throw new Error(`Statusul "${payload.status}" nu se poate seta la crearea unei receptii.`);
+    }
   }
   const grossWeight = sanitizeNumber(payload.grossWeight);
   const tareWeight = sanitizeNumber(payload.tareWeight);
@@ -1934,7 +1958,6 @@ async function createReceipt(payload) {
     // „Proiect" = pregatita de contabil; nu intra in stoc, nu produce datorie, nu e
     // livrabila. Devine document real cand operatorul o confirma la cantar.
     status: payload.isDraft === true ? "Proiect" : (payload.status || "Draft"),
-    isDraft: payload.isDraft === true,
     receivedBy: payload.receivedBy || "",
     location: payload.location || "",
     locationId: payload.locationId ? Number(payload.locationId) : null,
@@ -2064,7 +2087,7 @@ async function getSupplierStatement(partnerId, fromDate, toDate) {
 
   // Receptii de la acest furnizor
   const receipts = (state.receipts || [])
-    .filter((r) => r.status !== "Anulat") // receptia anulata nu intra in extrasul de cont
+    .filter((r) => isReceiptInStock(r)) // doar marfa chiar primita intra in extrasul de cont
     .filter((r) => Number(r.supplierId) === Number(partnerId))
     .filter((r) => inRange(r.createdAt || r.receivedAt))
     .map((r) => {
@@ -3065,9 +3088,10 @@ async function createDelivery(payload) {
     deliveredQuantity: isDraftDelivery ? 0 : plannedQuantity,
     grossWeight,
     tareWeight,
-    netWeight: netFromMass > 0 ? netFromMass : plannedQuantity,
+    // La proiect NU exista cantarire: orice valoare aici ar reactiva cantitatea prin
+    // fallback-urile de tip `deliveredQuantity || netWeight` (facturi, creante, totaluri).
+    netWeight: isDraftDelivery ? 0 : (netFromMass > 0 ? netFromMass : plannedQuantity),
     quantityAtDelivery: isDraftDelivery ? 0 : plannedQuantity,
-    isDraft: isDraftDelivery,
     // Marcaj: livrarea a fost introdusa in kg. Vechile livrari nu au acest camp -> afisate in tone.
     enteredUnit: payload.enteredUnit === "kg" ? "kg" : "tone",
     invoiceNumber: payload.invoiceNumber || "",
@@ -3161,28 +3185,50 @@ async function transitionDelivery(id, newStatus, payload = {}) {
       throw new Error("netWeight trebuie sa fie > 0 (gross - tara).");
     }
 
-    // La confirmarea unui PROIECT marfa iese abia acum din stoc, deci verificam disponibilul
-    // aici — la creare nu s-a scazut nimic. `transitionDelivery` nu avea nicio verificare.
-    if (currentStatus === "Proiect") {
+    // Cat marfa mai iese ACUM din stoc pentru acest document. Legam verificarea de STAREA
+    // documentului (cat a scos deja), nu de tranzitia prin care trece: altfel un pas prin
+    // "Confirmat" scotea documentul din conditie si se putea livra oricat.
+    // Acopera deopotriva confirmarea unui proiect (a scos 0) si re-livrarea dupa redeschidere
+    // (a scos deja X, mai scoate doar diferenta).
+    const alreadyTaken = Number(delivery.deliveredQuantity || 0);
+    const extraNeeded = netWeight - alreadyTaken;
+    if (extraNeeded > 0) {
       if (delivery.receiptId) {
         const availableOnReceipt = getReceiptAvailableQuantity(state, delivery.receiptId);
-        if (availableOnReceipt !== null && Math.round(netWeight * 1000) > Math.round(availableOnReceipt * 1000)) {
+        if (availableOnReceipt !== null && Math.round(extraNeeded * 1000) > Math.round(availableOnReceipt * 1000)) {
           throw new Error(
             `Stoc insuficient pe receptia #${delivery.receiptId}: disponibil ` +
-              `${Math.round(availableOnReceipt * 1000)} kg, cerut ${Math.round(netWeight * 1000)} kg.`
+              `${Math.round(availableOnReceipt * 1000)} kg, cerut ${Math.round(extraNeeded * 1000)} kg.`
           );
         }
       } else {
-        const summary = await getStockSummary();
+        // Sincron, pe starea deja incarcata: `getStockSummary()` ar mai fi recalculat si
+        // alocarea FIFO a platilor (irelevanta aici) si ar fi introdus un `await` intre
+        // citirea si scrierea starii, adica o fereastra in care o alta cerere poate
+        // inlocui cache-ul si tranzitia s-ar pierde tacit.
+        const summary = createStockSummary(
+          state.receipts, state.deliveries, state.openingDocuments || [],
+          state.transfers || [], state.processings || []
+        );
         const inStock = Number(
           (summary.byLocation.find(
             (i) => sameLocation(i.location, delivery.location) && i.product === delivery.product
           ) || {}).quantity || 0
         );
-        if (Math.round(netWeight * 1000) > Math.round(inStock * 1000)) {
+        // Rezervarile ALTOR proiecte pe aceeasi locatie+produs (nu si al nostru).
+        const reservedByOthers = (state.deliveries || [])
+          .filter((d) => d.id !== delivery.id
+            && !d.receiptId
+            && d.product === delivery.product
+            && sameLocation(d.location, delivery.location)
+            && Number(d.deliveredQuantity || 0) === 0
+            && ["Proiect", "Confirmat", "Redeschis"].includes(d.status))
+          .reduce((sum, d) => sum + Number(d.plannedQuantity || 0), 0);
+        const available = inStock - reservedByOthers;
+        if (Math.round(extraNeeded * 1000) > Math.round(available * 1000)) {
           throw new Error(
             `Stoc insuficient pentru ${delivery.product} in ${delivery.location}: disponibil ` +
-              `${Math.round(inStock * 1000)} kg, cerut ${Math.round(netWeight * 1000)} kg.`
+              `${Math.round(available * 1000)} kg, cerut ${Math.round(extraNeeded * 1000)} kg.`
           );
         }
       }
@@ -4745,7 +4791,7 @@ async function getPeriodReport(from, to) {
   // Retururile intra dupa data DESCARCARII, nu dupa data livrarii pe care o corecteaza.
   const periodReturns = listReturnMovements(deliveries, { from, to });
   // Sumarul cantitativ exclude receptiile anulate.
-  const activePeriodReceipts = periodReceipts.filter((item) => item.status !== "Anulat");
+  const activePeriodReceipts = periodReceipts.filter((item) => isReceiptInStock(item));
   // Plata/incasare anulata sau stornata = storno: NU intra in totalurile de plati/incasari
   // (acelasi predicat ca extrasul de cont/decontari, ca sa nu se departeze de Financiar).
   const activePeriodTransactions = periodTransactions.filter((item) => isActiveTransaction(item));
@@ -5135,6 +5181,7 @@ async function getDashboardSnapshot(dateValue = new Date().toISOString().slice(0
 
   const outstandingCollections = deliveries.reduce((sum, item) => {
     if (isVoidedDelivery(item)) return sum; // livrarea anulată/returnată nu mai e de încasat
+    if (isDeliveryPendingStockExit(item)) return sum; // proiectul nu e marfă plecată
     const qty = Number(item.deliveredQuantity || item.netWeight || 0);
     const target = Number(item.contractPrice || 0) * qty;
     const collected = Number(item.collectedAmount || 0);
@@ -5347,6 +5394,8 @@ module.exports = {
   listUsers,
   reopenReceipt,
   runMigrationIfNeeded,
+  isDeliveryPendingStockExit,
+  isReceiptInStock,
   isVoidedDelivery,
   getDeliveryGrossQuantity,
   listReturnMovements,
