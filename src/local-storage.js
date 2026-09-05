@@ -239,6 +239,11 @@ const CAN_RETURN_INVOICED_ROLES = ["accountant", "accountant-sef", "admin"];
 // vanzator, TVA, achitat). NU operatorul: el ar putea goli `invoiceNumber` ca sa ocoleasca
 // garda de mai sus. Managerul e inclus fiindca supervizeaza contabilitatea.
 const CAN_EDIT_BILLING_ROLES = ["accountant", "accountant-sef", "manager", "admin"];
+// Campurile de facturare ale unei livrari. Sursa unica: verificate si la creare, si la editare.
+const DELIVERY_BILLING_FIELDS = [
+  "invoiceNumber", "invoiceDate", "seller", "sellerId", "priceLei", "priceForeign",
+  "currency", "exchangeRate", "vatRate", "invoicePaid", "contractPrice"
+];
 // Roluri pur contabile: pot face retur DOAR pe livrarile facturate (acolo e actul contabil).
 const WAREHOUSE_ONLY_RETURN_ROLES = ["accountant", "accountant-sef"];
 // Cine pregateste documente in „Proiect" (contabilul are nevoie de ele inainte ca operatorul
@@ -1329,9 +1334,13 @@ function allocateDocumentNumber(docType, refId, companyId, changedBy) {
   return { number: next, allocated: true };
 }
 
-function computeReservedQuantity(state, receiptId) {
+function computeReservedQuantity(state, receiptId, options = {}) {
+  // `excludeDeliveryId`: la confirmarea unei livrari, propria ei rezervare NU trebuie sa se
+  // scada din disponibil — altfel documentul concureaza cu el insusi.
+  const excludeId = options.excludeDeliveryId != null ? Number(options.excludeDeliveryId) : null;
   return (state.deliveries || [])
     .filter((item) => item.receiptId === Number(receiptId))
+    .filter((item) => excludeId === null || item.id !== excludeId)
     // „Proiect" rezerva marfa la fel ca „Confirmat": documentul exista si asteapta cantarul.
     .filter((item) => ["Proiect", "Confirmat", "Livrat", "Redeschis"].includes(item.status))
     .reduce((sum, item) => {
@@ -1355,7 +1364,7 @@ function getReceiptBaseQuantity(receipt) {
   );
 }
 
-function getReceiptAvailableQuantity(state, receiptId) {
+function getReceiptAvailableQuantity(state, receiptId, options = {}) {
   const receipt = state.receipts.find((item) => item.id === Number(receiptId));
   if (!receipt) {
     return null;
@@ -1368,7 +1377,7 @@ function getReceiptAvailableQuantity(state, receiptId) {
   }
 
   const baseQuantity = getReceiptBaseQuantity(receipt);
-  const reserved = computeReservedQuantity(state, receiptId);
+  const reserved = computeReservedQuantity(state, receiptId, options);
   return Math.max(baseQuantity - reserved, 0);
 }
 
@@ -1886,7 +1895,7 @@ async function createReceipt(payload) {
     ? receiptConfig.storageLocations.find((l) => Number(l.id) === Number(payload.locationId))
     : receiptConfig.storageLocations.find((l) => l.name === payload.location);
   let mixedProductConfirmed = false;
-  const receiptSummary = await getStockSummary();
+  const receiptSummary = stockSummaryFromState(state);
   // Regula "un produs / locatie" se aplica oriunde NU e bifat "Permite mai multe produse"
   // (cilindri + groapa de primire etc.); doar Parcare afara (multiProduct) e exceptata.
   if (receiptLocation && receiptLocation.multiProduct !== true) {
@@ -2239,6 +2248,9 @@ function resolveLossMethod(type) {
 // (+ cilindru destinatie la uscare) si cantitatea. Stocul se actualizeaza prin
 // miscarea din createStockSummary (movement===true), nu prin editarea receptiei.
 async function createProcessing(payload) {
+  // Starea se citeste de la inceput: verificarea de stoc de mai jos o foloseste, iar asa
+  // nu mai exista niciun `await` intre citirea si scrierea ei.
+  const state = readReceiptsState();
   const config = readConfigState();
 
   const productName =
@@ -2304,7 +2316,7 @@ async function createProcessing(payload) {
   }
 
   // #8: nu se poate procesa mai mult decat exista in stoc (produs + locatie sursa).
-  const summary = await getStockSummary();
+  const summary = stockSummaryFromState(state);
   const available = Number(
     (summary.byLocation.find(
       (i) => sameLocation(i.location, sourceLocation) && i.product === productName
@@ -2336,7 +2348,6 @@ async function createProcessing(payload) {
 
   const status = payload.status === "In lucru" ? "In lucru" : payload.status || "Confirmat";
 
-  const state = readReceiptsState();
   if (!Array.isArray(state.processings)) {
     state.processings = [];
   }
@@ -2662,7 +2673,7 @@ async function updateProcessing(id, payload = {}) {
     const willAffectStock = newStatus !== "In lucru" && newStatus !== "Anulat";
     // #8 re-verificat: la activarea unei procesari (model miscare) trebuie sa existe stoc.
     if (processing.movement === true && wasInactive && willAffectStock) {
-      const summary = await getStockSummary();
+      const summary = stockSummaryFromState(state);
       const available = Number(
         (summary.byLocation.find(
           (i) => sameLocation(i.location, processing.sourceLocation) && i.product === processing.product
@@ -2725,7 +2736,7 @@ async function updateProcessing(id, payload = {}) {
         );
       }
       const outputQuantity = Math.max(processedQuantity - confirmedWaste - waterRemoved, 0);
-      const finalizeSummary = await getStockSummary();
+      const finalizeSummary = stockSummaryFromState(state);
       const destConflict = findCylinderConflict(
         finalizeSummary,
         cfg.storageLocations.find((l) => l.name === destLocation),
@@ -2964,6 +2975,13 @@ async function updateTransaction(id, payload = {}) {
 
 async function createDelivery(payload) {
   const state = readReceiptsState();
+  // Simetric cu `updateDelivery`: campurile de facturare sunt ale contabilului. Erau pazite
+  // doar la editare, deci se puteau strecura la CREARE — inclusiv `contractPrice`, care e
+  // drumul banilor spre incasari.
+  const touchesBillingAtCreate = DELIVERY_BILLING_FIELDS.some((f) => payload[f] !== undefined);
+  if (touchesBillingAtCreate && !CAN_EDIT_BILLING_ROLES.includes(normalizeRoleCode(payload.actorRole))) {
+    throw forbiddenError("Datele de facturare pot fi completate doar de contabil, manager sau administrator.");
+  }
   const isDraftDelivery = payload.isDraft === true;
   if (isDraftDelivery) {
     const draftRole = normalizeRoleCode(payload.actorRole);
@@ -3029,7 +3047,7 @@ async function createDelivery(payload) {
     }
   } else {
     // #14: plafon pe stocul produsului in locatia sursa.
-    const summary = await getStockSummary();
+    const summary = stockSummaryFromState(state);
     const inStock = Number(
       (summary.byLocation.find(
         (i) => sameLocation(i.location, sourceLocation) && i.product === productName
@@ -3194,7 +3212,9 @@ async function transitionDelivery(id, newStatus, payload = {}) {
     const extraNeeded = netWeight - alreadyTaken;
     if (extraNeeded > 0) {
       if (delivery.receiptId) {
-        const availableOnReceipt = getReceiptAvailableQuantity(state, delivery.receiptId);
+        const availableOnReceipt = getReceiptAvailableQuantity(state, delivery.receiptId, {
+          excludeDeliveryId: delivery.id
+        });
         if (availableOnReceipt !== null && Math.round(extraNeeded * 1000) > Math.round(availableOnReceipt * 1000)) {
           throw new Error(
             `Stoc insuficient pe receptia #${delivery.receiptId}: disponibil ` +
@@ -3206,10 +3226,7 @@ async function transitionDelivery(id, newStatus, payload = {}) {
         // alocarea FIFO a platilor (irelevanta aici) si ar fi introdus un `await` intre
         // citirea si scrierea starii, adica o fereastra in care o alta cerere poate
         // inlocui cache-ul si tranzitia s-ar pierde tacit.
-        const summary = createStockSummary(
-          state.receipts, state.deliveries, state.openingDocuments || [],
-          state.transfers || [], state.processings || []
-        );
+        const summary = stockSummaryFromState(state);
         const inStock = Number(
           (summary.byLocation.find(
             (i) => sameLocation(i.location, delivery.location) && i.product === delivery.product
@@ -3289,6 +3306,12 @@ async function createComplaint(payload) {
     ? (state.deliveries || []).find((item) => item.id === Number(payload.deliveryId))
     : null;
 
+  if (delivery && isDeliveryPendingStockExit(delivery)) {
+    throw new Error(
+      `Livrarea #${delivery.id} e in regim de proiect — marfa n-a plecat inca, deci nu se poate reclama.`
+    );
+  }
+
   // Determinăm firma (cumpărător) și produsul: din livrare dacă există, altfel din payload.
   let customer = delivery ? delivery.customer : (payload.customer || "");
   const product = delivery ? delivery.product : requiredText(payload.product, "Produsul reclamat");
@@ -3304,7 +3327,7 @@ async function createComplaint(payload) {
   // Suma totală a livrării (informativ) + cantitatea inițială (doar dacă există livrare)
   // Livrarea stinsa (anulata / returnata integral) nu mai are cantitate: fara garda,
   // fallback-ul pe `plannedQuantity` (neatins de retur) ar reintroduce cantitatea initiala.
-  const deliveryQty = !delivery || isVoidedDelivery(delivery)
+  const deliveryQty = !delivery || isVoidedDelivery(delivery) || isDeliveryPendingStockExit(delivery)
     ? 0
     : Number(delivery.netWeight > 0 ? delivery.netWeight : delivery.deliveredQuantity || delivery.plannedQuantity || 0);
   // Suma totală a livrării — aceeași convenție ca pe factură:
@@ -3395,11 +3418,7 @@ async function updateDelivery(id, payload = {}) {
   // Campurile de FACTURARE se editeaza doar de contabil/manager/admin. Fara asta,
   // operatorul isi golea singur `invoiceNumber` printr-un PATCH si trecea de garda
   // "retur pe livrare facturata doar pentru contabil" — adica anula chiar regula.
-  const billingFields = [
-    "invoiceNumber", "invoiceDate", "seller", "sellerId", "priceLei", "priceForeign",
-    "currency", "exchangeRate", "vatRate", "invoicePaid", "contractPrice"
-  ];
-  const touchesBilling = billingFields.some((f) => payload[f] !== undefined);
+  const touchesBilling = DELIVERY_BILLING_FIELDS.some((f) => payload[f] !== undefined);
   if (touchesBilling && !CAN_EDIT_BILLING_ROLES.includes(normalizeRoleCode(payload.actorRole))) {
     throw forbiddenError("Datele de facturare pot fi modificate doar de contabil, manager sau administrator.");
   }
@@ -3569,6 +3588,11 @@ async function updateComplaint(id, payload = {}) {
     // tacit si ar lasa o cantitate fantoma pe un document deja stins.
     if (isVoidedDelivery(delivery)) {
       throw new Error("Livrarea este anulata sau returnata — nu se poate face corectie de stoc pe ea.");
+    }
+    // Proiectul n-a scos inca marfa: o „corectie" pe el ar muta stoc real fara cantar,
+    // fara operator si fara schimbare de status — ocolind toata separarea atributiilor.
+    if (isDeliveryPendingStockExit(delivery)) {
+      throw new Error("Livrarea e in regim de proiect — confirma-o la cantar inainte de orice corectie de stoc.");
     }
     const nextDelivered = Number(delivery.deliveredQuantity || 0) + delta;
     if (nextDelivered < 0) {
@@ -4198,6 +4222,16 @@ async function getStats() {
   };
 }
 
+function stockSummaryFromState(state) {
+  return createStockSummary(
+    state.receipts || [],
+    state.deliveries || [],
+    state.openingDocuments || [],
+    state.transfers || [],
+    state.processings || []
+  );
+}
+
 async function getStockSummary() {
   const openingDocuments = await listOpeningDocuments();
   const receipts = await listReceipts();
@@ -4214,6 +4248,8 @@ async function listTransfers() {
 
 // Transfer de produs intre cilindri (mutare stoc dintr-o locatie in alta).
 async function createTransfer(payload) {
+  // Vezi `createProcessing`: starea se citeste inainte de verificarea de stoc.
+  const state = readReceiptsState();
   const config = readConfigState();
   const fromLocation = (config.storageLocations || []).find(
     (item) => Number(item.id) === Number(payload.fromLocationId)
@@ -4243,7 +4279,7 @@ async function createTransfer(payload) {
   }
 
   // Verificam ca exista suficient stoc in cilindrul sursa pentru acest produs.
-  const summary = await getStockSummary();
+  const summary = stockSummaryFromState(state);
   const available = Number(
     (summary.byLocation.find(
       (item) => sameLocation(item.location, fromLocation.name) && item.product === product.name
@@ -4279,7 +4315,6 @@ async function createTransfer(payload) {
     );
   }
 
-  const state = readReceiptsState();
   if (!Array.isArray(state.transfers)) {
     state.transfers = [];
   }
@@ -4591,7 +4626,7 @@ async function returnDelivery(id, options = {}) {
   if (targetLocation) {
     // ATENTIE: summary-ul se calculeaza INAINTE de orice mutatie pe `state` (arrays sunt
     // partajate cu cache-ul, deci o mutatie s-ar vedea imediat in stoc).
-    const summary = await getStockSummary();
+    const summary = stockSummaryFromState(state);
     const conflict = findCylinderConflict(summary, targetLocation, delivery.product);
     if (conflict) {
       throw new Error(

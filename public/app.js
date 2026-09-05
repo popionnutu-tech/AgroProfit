@@ -2204,7 +2204,7 @@ function renderReceiptTotals(rows) {
   // (Anulatele nu intră în totaluri.)
   let totalNet = 0, totalWater = 0, totalPay = 0, totalPaid = 0, totalRest = 0;
   rows.forEach((item) => {
-    if (item.status === "Anulat") return;
+    if (!isReceiptInStock(item)) return;
     const valoare = Number(item.amountToPay ?? item.preliminaryPayableAmount ?? 0);
     const achitat = Number(item.paidAmount || 0);
     totalNet += Number(item.provisionalNetQuantity || item.quantity || 0);
@@ -2273,7 +2273,7 @@ function renderUnprocessedStock() {
   const received = {};
   const counts = {};
   receiptsCache.forEach((r) => {
-    if (r.status === "Anulat") return;
+    if (!isReceiptInStock(r)) return;
     const key = r.product || "—";
     received[key] = (received[key] || 0) + Number(r.provisionalNetQuantity ?? r.quantity ?? 0);
     counts[key] = (counts[key] || 0) + 1;
@@ -2626,8 +2626,9 @@ function canReturnInvoicedDelivery() {
 
 // Oglinda lui `isReceiptInStock` din src/local-storage.js: „Proiect" (pregătit de contabil,
 // neconfirmat la cântar) și „In descarcare" (așteaptă a doua cântărire) NU sunt marfă fizică.
+const RECEIPT_STATUSES_OUT_OF_STOCK = new Set(["Anulat", "In descarcare", "Proiect"]);
 function isReceiptInStock(item) {
-  return !["Anulat", "In descarcare", "Proiect"].includes(String((item && item.status) || ""));
+  return !RECEIPT_STATUSES_OUT_OF_STOCK.has(String((item && item.status) || ""));
 }
 
 // Oglinda lui `isDeliveryPendingStockExit`: proiectul de livrare n-a scos încă marfa.
@@ -2870,7 +2871,7 @@ function renderDeliveryTotals(rows) {
   const waterIdx = buildReceiptHumidityIndex();
   let totalWaterKg = 0;
   rows.forEach((item) => {
-    if (item.status === "Anulat" || item.status === "Returnat") return;
+    if (isVoidedDelivery(item) || isDeliveryPendingStockExit(item)) return;
     const w = deliveryWaterKg(item, waterIdx);
     if (w !== null) totalWaterKg += w;
   });
@@ -3131,7 +3132,7 @@ function renderDailyReport(report) {
   const receiptValueOf = (r) => Number(r.amountToPay ?? r.preliminaryPayableAmount ?? 0);
   // Tabelele principale arata doar operatiunile REALE (ne-anulate); cele anulate merg in
   // tabelul dedicat „Operatiuni anulate" de mai jos, ca sa nu se amestece cu cele reale.
-  const activeReceipts = report.receipts.filter((r) => r.status !== "Anulat");
+  const activeReceipts = report.receipts.filter((r) => isReceiptInStock(r));
   dailyReportReceiptsEl.innerHTML = activeReceipts
     .map(
       (item) => `
@@ -6594,7 +6595,7 @@ async function printAccountingDocument(docType, refId, companyId) {
       const from = (document.getElementById("print-doc-from") || {}).value || "";
       const to = (document.getElementById("print-doc-to") || {}).value || "";
       const receipts = (receiptsCache || [])
-        .filter((r) => Number(r.supplierId) === Number(partner.id) && r.status !== "Anulat")
+        .filter((r) => Number(r.supplierId) === Number(partner.id) && isReceiptInStock(r))
         .filter((r) => printDocInRange(r.receivedAt || r.createdAt, from, to))
         .sort((a, b) => new Date(a.receivedAt || a.createdAt) - new Date(b.receivedAt || b.createdAt));
       if (!receipts.length) { alert("Nu există recepții pentru acest furnizor în perioada aleasă."); return; }
@@ -6855,8 +6856,11 @@ function getBuyerPartner(delivery) {
   }
   return findPartnerByName(delivery.customer);
 }
+// Deleagă la sursa unică: altfel același document avea trei cantități diferite (tabel,
+// factură, CMR). Fallback-ul pe `plannedQuantity` a fost scos intenționat din
+// `deliveryDisplayQuantity` — nu-l reintroduce aici.
 function deliveryQtyTonnes(delivery) {
-  return Number(delivery.netWeight > 0 ? delivery.netWeight : delivery.deliveredQuantity || delivery.plannedQuantity || 0);
+  return deliveryDisplayQuantity(delivery);
 }
 
 function buildBonCantarHtml(delivery, company) {
@@ -7238,9 +7242,20 @@ function buildDeclaratieHtml(delivery, company) {
     <div class="doc-sign"><div>Vânzător</div><div></div></div>`;
 }
 
+// Un proiect n-are cântărire, n-are marfă plecată și n-are factură: orice document tipărit
+// pe el ar fi o hârtie fără acoperire.
+function assertPrintableDelivery(delivery) {
+  if (isDeliveryPendingStockExit(delivery)) {
+    window.alert("Livrarea e în regim de proiect. Confirmă-o la cântar înainte de a tipări documente.");
+    return false;
+  }
+  return true;
+}
+
 function printDeliveryDocument(deliveryId, docType) {
   const delivery = (deliveriesCache || []).find((d) => Number(d.id) === Number(deliveryId));
   if (!delivery) return;
+  if (!assertPrintableDelivery(delivery)) return;
   // Compania de antet aleasă în pagina Livrări (gol → AgroProfit+ implicit). Se aplică documentelor
   // „interne" cu antet de firmă (Bon, Act de achiziție, Declarație).
   const headerCompany = printHeaderCompany(document.getElementById("delivery-doc-company")?.value);
@@ -8959,7 +8974,8 @@ deliveriesBodyEl.addEventListener("click", async (event) => {
     // Stocul se reîncarcă doar la acțiunile care chiar îl mișcă („Livrat" scade marfa —
     // inclusiv la confirmarea unui „Proiect"; „Anulat"/„Redeschis" o întorc). „Confirmat" și
     // „Inchis" nu ating stocul, iar fiecare cerere aduce tot blobul de stare.
-    const movesStock = ["Livrat", "Anulat", "Redeschis"].includes(action);
+    const rowStatus = (deliveriesCache || []).find((d) => String(d.id) === String(id))?.status;
+    const movesStock = action === "Livrat" || (action === "Anulat" && rowStatus !== "Proiect");
     await Promise.all([
       loadDeliveries(), loadReceipts(), loadAuditLogs(), loadDailyReport(),
       ...(movesStock ? [loadStocks()] : [])
