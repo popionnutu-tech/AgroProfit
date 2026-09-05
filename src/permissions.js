@@ -174,7 +174,12 @@ function filterCanceledTransactionsForRole(docs, roleCode) {
   return docs.filter((doc) => canRoleViewCanceledTransaction(doc, roleCode));
 }
 
+// Rolurile care pot DOAR pregati documente in „Proiect" (nu misca stoc). Sursa unica:
+// handlerele decid regimul dupa ea, `local-storage` verifica dreptul cu ea.
+const DRAFT_ONLY_ROLES = ["accountant", "accountant-sef"];
+
 module.exports = {
+  DRAFT_ONLY_ROLES,
   canRoleViewCanceled,
   canRoleViewCanceledTransaction,
   filterCanceledForRole,

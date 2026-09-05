@@ -578,9 +578,16 @@ app.post("/api/deliveries/:id/close", requireRoles(["manager", "admin"]), async 
   return transitionDeliveryHandler(req, res, req.params.id, "Inchis");
 });
 
-app.post("/api/deliveries/:id/cancel", requireRoles(["admin"]), async (req, res) => {
-  // Override admin/manager: anuleaza din orice status (inclusiv „Livrat"), cu motiv obligatoriu.
-  try {
+// Anularea unui document REAL ramane a adminului (garda fina e in `cancelDelivery`).
+// Contabilul si managerul intra aici doar ca sa retraga un PROIECT, care n-a miscat nimic
+// dar rezerva marfa: un proiect uitat ar bloca livrarile reale pana la interventia adminului.
+app.post(
+  "/api/deliveries/:id/cancel",
+  requireRoles(["accountant", "accountant-sef", "manager", "admin"]),
+  async (req, res) => {
+    // Override: anuleaza din ORICE status (inclusiv „Livrat"), cu motiv obligatoriu.
+    // `cancelDelivery` decide pe rol: document real = doar admin; proiect = si contabil/manager.
+    try {
     const delivery = await storage.cancelDelivery(req.params.id, {
       reason: req.body && req.body.reason,
       currentUser: req.currentUser || {},
@@ -592,9 +599,11 @@ app.post("/api/deliveries/:id/cancel", requireRoles(["admin"]), async (req, res)
     return res.status(200).json(delivery);
   } catch (error) {
     console.error("Failed to cancel delivery:", error.message);
-    return res.status(400).json({ error: error.message || "Nu am putut anula livrarea." });
+    const status = error.statusCode || 400;
+    return res.status(status).json({ error: error.message || "Nu am putut anula livrarea." });
   }
-});
+  }
+);
 
 // Retur / descarcare marfa: cumparatorul a refuzat marfa dupa incarcare.
 // Body: { returnedQuantity (TONE, optional = retur integral), reason (obligatoriu) }.

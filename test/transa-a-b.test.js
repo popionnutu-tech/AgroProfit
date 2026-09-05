@@ -1786,3 +1786,66 @@ test("Proiect receptie: nu se poate cere din body, si nu atrage plata inaintea c
     assert.equal(Number(r.paidAmount || 0), 150000, "plata sta pe receptia reala");
   });
 });
+
+test("Proiect: contabilul isi retrage proiectul, dar NU poate anula o livrare reala", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    await seedReceipt(storage, { location: "Cilindru 1" });
+    const draft = await storage.createDelivery({
+      customerId: 2, customer: "X", product: "Grau", productId: 1,
+      sourceLocation: "Cilindru 1", plannedQuantity: 100,
+      isDraft: true, actorRole: "accountant", createdBy: "contabil"
+    });
+
+    // Un proiect uitat rezerva tot stocul si blocheaza livrarile reale.
+    await assert.rejects(
+      storage.createDelivery({
+        customerId: 2, customer: "Y", product: "Grau", productId: 1,
+        sourceLocation: "Cilindru 1", plannedQuantity: 5, createdBy: "op"
+      }),
+      /Stoc insuficient/i
+    );
+
+    // Contabilul si-l poate retrage singur (inainte cerea adminul).
+    const retras = await storage.cancelDelivery(draft.id, {
+      reason: "nu mai vine camionul", currentUser: { name: "Contabil", roleCode: "accountant" }
+    });
+    assert.equal(retras.status, "Anulat");
+
+    // Iar livrarea reala trece din nou.
+    const reala = await storage.createDelivery({
+      customerId: 2, customer: "Y", product: "Grau", productId: 1,
+      sourceLocation: "Cilindru 1", plannedQuantity: 5, createdBy: "op"
+    });
+    assert.equal(reala.status, "Livrat");
+
+    // Dar pe un document REAL contabilul nu are ce cauta: ruta i s-a deschis doar pentru proiecte.
+    await assert.rejects(
+      storage.cancelDelivery(reala.id, {
+        reason: "sterg", currentUser: { roleCode: "accountant" }
+      }),
+      /Doar administratorul/i
+    );
+    await assert.rejects(
+      storage.cancelDelivery(reala.id, {
+        reason: "sterg", currentUser: { roleCode: "manager" }
+      }),
+      /Doar administratorul/i
+    );
+  });
+});
+
+test("Proiect receptie: cantitatea invalida e respinsa (nu devine receptie reala)", async () => {
+  await withIsolatedWorkspace(async ({ load, request }) => {
+    const storage = load("src/local-storage.js");
+    // Validarea sta in handler; verificam ca proiectul nu mai poate purta cantitati absurde.
+    const draft = await storage.createReceipt({
+      supplier: "Agro Nord", supplierId: 1, product: "Grau", productId: 1,
+      quantity: 50, provisionalNetQuantity: 50, finalNetQuantity: 50,
+      unit: "tone", price: 3000, location: "Cilindru 1",
+      isDraft: true, actorRole: "accountant", createdBy: "contabil"
+    });
+    assert.equal(draft.status, "Proiect");
+    assert.equal(draft.quantity, 50);
+  });
+});

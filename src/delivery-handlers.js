@@ -8,7 +8,7 @@ const {
   updateDelivery
 } = require("./storage");
 const { getActorLabel } = require("./auth");
-const { filterCanceledForRole } = require("./permissions");
+const { DRAFT_ONLY_ROLES, filterCanceledForRole, normalizeRoleCode } = require("./permissions");
 const { triggerCriticalManagementAlert } = require("./critical-alerts");
 
 function sendJson(res, statusCode, payload) {
@@ -69,13 +69,13 @@ async function createDeliveryHandler(req, res) {
 
     // Regimul de PROIECT il decide ROLUL din sesiune, nu body-ul: contabilul pregateste
     // documentul, operatorul il confirma la cantar.
-    const actorRole = (req.currentUser || {}).roleCode;
+    const actorRole = normalizeRoleCode((req.currentUser || {}).roleCode);
     const delivery = await createDelivery({
       ...body,
       plannedQuantity,
       createdBy: actor,
       customer: customer.name,
-      isDraft: ["accountant", "accountant-sef"].includes(String(actorRole || "")),
+      isDraft: DRAFT_ONLY_ROLES.includes(actorRole),
       actorRole
     });
 

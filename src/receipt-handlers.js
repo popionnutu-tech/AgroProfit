@@ -10,7 +10,7 @@ const {
   updateReceiptStatusWithAudit
 } = require("./storage");
 const { getActorLabel } = require("./auth");
-const { filterCanceledForRole } = require("./permissions");
+const { DRAFT_ONLY_ROLES, filterCanceledForRole, normalizeRoleCode } = require("./permissions");
 const { triggerCriticalManagementAlert } = require("./critical-alerts");
 
 function sendJson(res, statusCode, payload) {
@@ -170,8 +170,8 @@ async function createReceiptHandler(req, res) {
   // Regimul de PROIECT nu se ia din body: il decide ROLUL din sesiune. Contabilul pregateste
   // documentul inainte ca operatorul sa apuce sa-l introduca; operatorul, care e la cantar,
   // creeaza documente reale, nu proiecte.
-  const actorRole = (req.currentUser || {}).roleCode;
-  const isDraft = ["accountant", "accountant-sef"].includes(String(actorRole || ""));
+  const actorRole = normalizeRoleCode((req.currentUser || {}).roleCode);
+  const isDraft = DRAFT_ONLY_ROLES.includes(actorRole);
 
   if (!body.productId) {
     return sendJson(res, 400, { error: "Campul productId este obligatoriu." });
@@ -223,7 +223,10 @@ async function createReceiptHandler(req, res) {
       if (!(Number(body.grossWeight) > 0)) {
         return sendJson(res, 400, { error: "Introdu masa bruta (camion plin)." });
       }
-    } else if (!isDraft && (!Number.isFinite(normalizedQuantity) || normalizedQuantity <= 0)) {
+    } else if (!Number.isFinite(normalizedQuantity) || normalizedQuantity <= 0) {
+      // Si proiectul cere cantitate valida: e cantitatea ANUNTATA de furnizor, pe care
+      // contabilul o pune in document. Fara verificare treceau valori negative si NaN, iar
+      // documentul devenea receptie reala cu acea valoare la o simpla schimbare de status.
       return sendJson(res, 400, { error: "Cantitatea trebuie sa fie mai mare ca zero." });
     }
 

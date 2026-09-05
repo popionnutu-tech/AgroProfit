@@ -4417,6 +4417,25 @@ async function cancelDelivery(id, options = {}) {
     throw new Error("Motivul anularii este obligatoriu.");
   }
   const currentUser = options.currentUser || {};
+  const cancelRole = normalizeRoleCode(currentUser.roleCode);
+  // Un PROIECT n-a miscat nimic — doar rezerva marfa. Un proiect uitat blocheaza livrarile
+  // reale, deci il poate retrage si cine il pregateste, si managerul; altfel o greseala de
+  // contabil opreste statia pana intervine adminul.
+  // Un document REAL ramane strict al adminului: ruta a fost deschisa contabilului DOAR
+  // pentru proiecte, iar fara garda de mai jos ar fi devenit o escaladare.
+  if (cancelRole) {
+    const isDraftDoc = delivery.status === "Proiect";
+    const allowed = isDraftDoc
+      ? [...CAN_CREATE_DRAFT_ROLES, "manager"]
+      : ["admin"];
+    if (!allowed.includes(cancelRole)) {
+      throw forbiddenError(
+        isDraftDoc
+          ? "Proiectul de livrare poate fi retras de contabil, manager sau administrator."
+          : "Doar administratorul poate anula o livrare."
+      );
+    }
+  }
   const now = new Date().toISOString();
   const before = { status: delivery.status, deliveredQuantity: delivery.deliveredQuantity };
   delivery.status = "Anulat";
