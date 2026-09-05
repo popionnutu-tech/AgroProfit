@@ -1,5 +1,9 @@
 const { getDailyReport, getPeriodReport } = require("./storage");
-const { filterCanceledForRole, filterCanceledTransactionsForRole } = require("./permissions");
+const {
+  canRoleViewCanceled,
+  filterCanceledForRole,
+  filterCanceledTransactionsForRole
+} = require("./permissions");
 
 // Filtreaza documentele anulate din raport dupa rol (admin toate / manager pe ale lui / restul niciuna).
 function filterReportForRole(report, roleCode) {
@@ -15,6 +19,17 @@ function filterReportForRole(report, roleCode) {
   // calculate pe tranzactii active in local-storage, deci filtrarea de aici nu le atinge.
   if (Array.isArray(report.transactions)) {
     report.transactions = filterCanceledTransactionsForRole(report.transactions, roleCode);
+  }
+  // Retururile urmeaza vizibilitatea livrarii-parinte. ATENTIE: NU se pot filtra dupa
+  // `report.deliveries` — un retur are data lui, deci parintele e adesea din ALTA zi si
+  // lipseste din raport; exact cazul pentru care returul e o miscare datata separat.
+  // Filtram dupa statusul parintelui, trimis pe fiecare miscare de `listReturnMovements`.
+  // Azi e no-op (miscarile de pe livrari anulate nu se genereaza deloc), dar tine regula
+  // explicita: fara ea era respectata doar din intamplare.
+  if (Array.isArray(report.returns)) {
+    report.returns = report.returns.filter((r) =>
+      canRoleViewCanceled({ status: r.deliveryStatus, canceledByRole: r.deliveryCanceledByRole }, roleCode)
+    );
   }
   return report;
 }

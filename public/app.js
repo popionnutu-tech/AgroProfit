@@ -341,7 +341,7 @@ function docActionsCell(kind, item) {
   }
   let html = "";
   if (canCancelDocuments()) {
-    html += `<button type="button" class="cell-btn cell-btn-danger" data-action="doc-cancel" data-kind="${kind}" data-id="${item.id}" title="Anulează (rămâne în listă, fără mișcări)">Anulează</button>`;
+    html += `<button type="button" class="cell-btn cell-btn-danger" data-action="doc-cancel" data-kind="${kind}" data-id="${item.id}" title="Anulează (rămâne în listă, fără mișcări)">${bi("Anulează")}</button>`;
   }
   if (currentSessionUser?.roleCode === "admin") {
     html += ` <button type="button" class="cell-btn" data-action="doc-note" data-kind="${kind}" data-id="${item.id}" data-note="${escapeComboHtml(item.note || "")}" title="Comentariu / data reală">💬</button>`;
@@ -1603,7 +1603,8 @@ function renderStockPeriod() {
   const procBefore = {}, procIn = {};
   const delBefore = {}, delIn = {};
   const bucket = (beforeObj, inObj, p, day, qty) => {
-    if (!(qty > 0)) return;
+    // Acceptă și valori NEGATIVE: un retur scade dintr-o ieșire, la ziua lui.
+    if (!qty) return;
     if (from && day < from) beforeObj[p] = (beforeObj[p] || 0) + qty;
     else if (inPeriod(day)) inObj[p] = (inObj[p] || 0) + qty;
   };
@@ -1620,13 +1621,26 @@ function renderStockPeriod() {
     bucket(procBefore, procIn, p, day, Math.max(provNet - finalNet, 0));
   });
 
-  // Livrari: doar ce a iesit REAL din stoc (deliveredQuantity = statut Livrat),
-  // ca sa coincida cu stocul real.
+  // Livrări: ce a ieșit REAL din stoc LA DATA LIVRĂRII — cantitatea BRUTĂ, dinainte de
+  // retururi. `deliveredQuantity` e micșorat de retur, deci singur ar rescrie retroactiv ziua
+  // livrării (marfa ar apărea ca și cum n-ar fi plecat niciodată în zilele dintre livrare și
+  // retur). Returul intră mai jos, ca intrare datată la ziua descărcării.
   (deliveriesCache || []).forEach((d) => {
-    if (isVoidedDelivery(d)) return;
+    if (!d || d.status === "Anulat") return; // anularea șterge complet mișcarea
     const p = d.product || "—";
     products.add(p);
-    bucket(delBefore, delIn, p, dayOf(d.deliveredAt || d.createdAt), Number(d.deliveredQuantity || 0));
+    const gross = Number(d.deliveredQuantity || 0) + Number(d.returnedQuantity || 0);
+    if (gross > 0) bucket(delBefore, delIn, p, dayOf(d.deliveredAt || d.createdAt), gross);
+    // Descărcările se scad din ieșiri, fiecare la ziua ei reală.
+    const entries = Array.isArray(d.returns) && d.returns.length > 0
+      ? d.returns
+      : (Number(d.returnedQuantity || 0) > 0
+          ? [{ quantity: Number(d.returnedQuantity), returnedAt: d.returnedAt || d.createdAt }]
+          : []);
+    entries.forEach((e) => {
+      const qty = Number(e.quantity || 0);
+      if (qty > 0) bucket(delBefore, delIn, p, dayOf(e.returnedAt || d.createdAt), -qty);
+    });
   });
 
   // Pierderi la procesarile noi (model miscare): intrare − iesire = deseu + apa.
@@ -2560,7 +2574,7 @@ const DELIVERY_TRANSITIONS = {
 function deliveryReturnCell(item, canWrite) {
   const returnedTons = Number(item.returnedQuantity || 0);
   const info = returnedTons > 0
-    ? `<span class="status-badge badge-retur" title="Motiv: ${escapeComboHtml(item.returnReason || "-")} · descărcat de ${escapeComboHtml(item.returnedBy || "-")}">Retur ${formatNumber(Math.round(returnedTons * 1000))} kg</span>`
+    ? `<span class="status-badge badge-retur" title="Motiv: ${escapeComboHtml(item.returnReason || "-")} · descărcat de ${escapeComboHtml(item.returnedBy || "-")}">${bi("Retur")} ${formatNumber(Math.round(returnedTons * 1000))} kg</span>`
     : "";
   // Aceleași condiții ca pe server (`returnDelivery`), ca butonul să nu ducă la un 403:
   // livrarea închisă e doar pentru manager/admin, iar cea facturată doar pentru contabil.
@@ -2575,7 +2589,7 @@ function deliveryReturnCell(item, canWrite) {
   const button = canReturn
     ? `<button type="button" class="cell-btn" data-action="delivery-return" data-id="${item.id}" title="${invoiced
         ? "Livrare facturată — returul cere storno pe factura nr. " + escapeComboHtml(item.invoiceNumber)
-        : "Descarcă marfa înapoi în stoc"}">Descărcare</button>`
+        : bi("Descarcă marfa înapoi în stoc")}">${bi("Descărcare")}</button>`
     : "";
   return `${info}${info && button ? " " : ""}${button}`;
 }
@@ -3049,7 +3063,16 @@ function renderDailyReport(report) {
     ["Brut intrat", formatNumber(report.summary.grossQuantity)],
     ["Net provizoriu", formatNumber(report.summary.provisionalNetQuantity)],
     ["Procesat", formatNumber(report.summary.processedQuantity)],
+    // „Livrat" e ieșirea BRUTĂ a zilei (cât a plecat efectiv atunci). Dacă în ziua aceea
+    // s-a și descărcat marfă înapoi, arătăm returul separat, altfel cardul și TOTAL-ul de
+    // sub tabelul de livrări (care e net) spun cifre diferite fără nicio explicație.
     ["Livrat", formatNumber(report.summary.deliveredQuantity || 0)],
+    ...(Number(report.summary.returnedQuantity || 0) > 0
+      ? [["Retur", "−" + formatNumber(report.summary.returnedQuantity)],
+         ["Livrat net", formatNumber(
+           Math.max(Number(report.summary.deliveredQuantity || 0) - Number(report.summary.returnedQuantity || 0), 0)
+         )]]
+      : []),
     ["Deseu", formatNumber(report.summary.confirmedWaste)],
     ["Plati", currency.format(report.summary.paymentsTotal || 0)],
     ["Incasari", currency.format(report.summary.collectionsTotal || 0)],
@@ -3207,18 +3230,18 @@ function renderDailyReport(report) {
       })),
     // Retururile (totale ȘI parțiale) intră în același tabel de supraveghere: marfa s-a întors
     // în stoc și creanța a scăzut, deci conducerea trebuie să le vadă, nu doar din audit.
-    ...allDeliveries
-      .filter((d) => Number(d.returnedQuantity || 0) > 0)
-      .map((d) => ({
-        tip: d.status === "Returnat" ? "Retur livrare" : "Retur parțial",
-        id: d.id,
-        date: d.returnedAt || d.createdAt,
-        partner: d.customer,
-        product: d.product,
-        qty: Number(d.returnedQuantity || 0),
-        by: d.returnedBy,
-        reason: d.returnReason
-      })),
+    // Vin de la server ca mișcări cu data lor REALĂ (ziua descărcării) — derivându-le din
+    // livrările zilei, un retur făcut în altă zi decât livrarea nu apărea deloc.
+    ...(report.returns || []).map((r) => ({
+      tip: "Retur livrare",
+      id: r.deliveryId,
+      date: r.returnedAt || r.date,
+      partner: r.customer,
+      product: r.product,
+      qty: Number(r.quantity || 0),
+      by: r.returnedBy,
+      reason: r.reason
+    })),
     ...(canSeeCanceledTx
       ? report.transactions
           .filter((t) => t.status === "Anulat")
@@ -7980,28 +8003,28 @@ document.addEventListener("click", async (event) => {
     const item = (deliveriesCache || []).find((d) => String(d.id) === String(id));
     const maxKg = Math.round(Number((item && item.deliveredQuantity) || 0) * 1000);
     if (maxKg <= 0) {
-      window.alert("Livrarea nu are marfă de descărcat.");
+      window.alert(bi("Livrarea nu are marfă de descărcat."));
       return;
     }
     const raw = window.prompt(
-      `Câte kg se descarcă înapoi în ${(item && item.location) || "locația de plecare"}?\n` +
-        `Livrat: ${maxKg} kg. Lasă valoarea completă pentru retur total.`,
+      `${bi("Câte kg se descarcă înapoi în")} ${(item && item.location) || bi("locația de plecare")}?\n` +
+        `${bi("Livrat")}: ${maxKg} kg. ${bi("Lasă valoarea completă pentru retur total.")}`,
       String(maxKg)
     );
     if (raw === null) return;
     const kg = Number(String(raw).replace(",", ".").trim());
     if (!Number.isFinite(kg) || kg <= 0) {
-      window.alert("Cantitatea trebuie să fie un număr mai mare ca zero.");
+      window.alert(bi("Cantitatea trebuie să fie un număr mai mare ca zero."));
       return;
     }
     if (kg > maxKg) {
-      window.alert(`Cantitatea depășește cât s-a livrat (${maxKg} kg).`);
+      window.alert(`${bi("Cantitatea depășește cât s-a livrat")} (${maxKg} kg).`);
       return;
     }
-    const reason = window.prompt("Motivul returului (obligatoriu) — ex.: cumpărătorul a refuzat marfa:");
+    const reason = window.prompt(bi("Motivul returului (obligatoriu) — ex.: cumpărătorul a refuzat marfa:"));
     if (reason === null) return;
     if (!reason.trim()) {
-      window.alert("Motivul este obligatoriu.");
+      window.alert(bi("Motivul este obligatoriu."));
       return;
     }
     try {

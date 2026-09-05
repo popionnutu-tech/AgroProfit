@@ -585,9 +585,12 @@ app.post("/api/deliveries/:id/cancel", requireRoles(["admin"]), async (req, res)
   }
 });
 
-// Retur / descarcare marfa (operator + manager + admin): cumparatorul a refuzat marfa dupa
-// incarcare. Body: { returnedQuantity (TONE, optional = retur integral), reason (obligatoriu) }.
+// Retur / descarcare marfa: cumparatorul a refuzat marfa dupa incarcare.
+// Body: { returnedQuantity (TONE, optional = retur integral), reason (obligatoriu) }.
 // Marfa se intoarce in locatia din care a plecat; livrarea ramane VIZIBILA in lista.
+// Impartirea rolurilor se face fin, in `returnDelivery`: livrare NEFACTURATA = operatorul
+// sau managerul (operatiune de depozit); livrare FACTURATA = doar contabilul (act contabil,
+// cere storno pe acelasi numar de factura).
 app.post(
   "/api/deliveries/:id/return",
   // Contabilii intra aici pentru livrarile DEJA FACTURATE (vezi CAN_RETURN_INVOICED_ROLES);

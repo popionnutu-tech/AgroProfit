@@ -232,8 +232,70 @@ const MAX_RETURN_REASON_LENGTH = 500;
 // Cine poate face retur pe o livrare DEJA FACTURATA: e un act contabil (cere storno / nota
 // de credit pe acelasi numar de factura), deci doar contabilii si adminul.
 const CAN_RETURN_INVOICED_ROLES = ["accountant", "accountant-sef", "admin"];
+// Cine poate scrie campurile de facturare ale unei livrari (numar/data factura, pret, curs,
+// vanzator, TVA, achitat). NU operatorul: el ar putea goli `invoiceNumber` ca sa ocoleasca
+// garda de mai sus. Managerul e inclus fiindca supervizeaza contabilitatea.
+const CAN_EDIT_BILLING_ROLES = ["accountant", "accountant-sef", "manager", "admin"];
+// Roluri pur contabile: pot face retur DOAR pe livrarile facturate (acolo e actul contabil).
+const WAREHOUSE_ONLY_RETURN_ROLES = ["accountant", "accountant-sef"];
 // Plafon pe cate descarcari partiale se pot inregistra pe o singura livrare.
 const MAX_RETURNS_PER_DELIVERY = 50;
+
+// Cantitatea care a IESIT efectiv din stoc LA DATA LIVRARII (bruta, inainte de retururi).
+// `deliveredQuantity` e micsorat de retur, deci singur ar rescrie retroactiv ziua livrarii:
+// un raport pe 3 septembrie, regenerat dupa un retur din 5 septembrie, ar arata alta cifra
+// decat cea trimisa atunci. Returul e o miscare SEPARATA, datata cand s-a descarcat marfa.
+function getDeliveryGrossQuantity(delivery) {
+  if (!delivery || delivery.status === "Anulat") return 0; // anularea sterge complet miscarea
+  return Number(delivery.deliveredQuantity || 0) + Number(delivery.returnedQuantity || 0);
+}
+
+// Retururile ca lista plata de miscari, fiecare cu data ei reala (`returnedAt`).
+// Livrarile vechi (dinainte de `returns[]`) sunt acoperite prin campurile de pe document.
+function listReturnMovements(deliveries, range = {}) {
+  const from = String(range.from || "").slice(0, 10);
+  const to = String(range.to || "").slice(0, 10);
+  const out = [];
+  for (const d of deliveries || []) {
+    if (!d || d.status === "Anulat") continue; // anularea sterge si returul
+    const entries = Array.isArray(d.returns) && d.returns.length > 0
+      ? d.returns
+      : (Number(d.returnedQuantity || 0) > 0
+          ? [{
+              quantity: Number(d.returnedQuantity),
+              location: d.location,
+              reason: d.returnReason,
+              returnedBy: d.returnedBy,
+              returnedAt: d.returnedAt || d.updatedAt || d.createdAt
+            }]
+          : []);
+    for (const e of entries) {
+      const quantity = Number(e.quantity || 0);
+      if (quantity <= 0) continue;
+      const day = String(e.returnedAt || d.createdAt || "").slice(0, 10);
+      // Fara data nu putem sti in ce zi cade: excludem, in loc sa o numaram in toate.
+      if (!day) continue;
+      if (from && day < from) continue;
+      if (to && day > to) continue;
+      // Doar campurile pe care le consuma raportul. `location` / `invoiceNumber` nu sunt
+      // citite nicaieri si ar dubla degeaba payload-ul (livrarea-parinte e adesea deja in
+      // raport). `deliveryStatus` e purtat ca sa poata fi filtrat pe rol in report-handlers.
+      out.push({
+        deliveryId: d.id,
+        date: day,
+        returnedAt: e.returnedAt || null,
+        quantity,
+        product: d.product || "",
+        customer: d.customer || "",
+        reason: e.reason || "",
+        returnedBy: e.returnedBy || "",
+        deliveryStatus: d.status || "",
+        deliveryCanceledByRole: d.canceledByRole || ""
+      });
+    }
+  }
+  return out.sort((a, b) => String(b.returnedAt || "").localeCompare(String(a.returnedAt || "")));
+}
 
 function isVoidedDelivery(delivery) {
   const status = delivery && delivery.status;
@@ -3201,6 +3263,18 @@ async function updateDelivery(id, payload = {}) {
   if (payload.photos !== undefined) {
     delivery.photos = sanitizePhotos(payload.photos);
   }
+  // Campurile de FACTURARE se editeaza doar de contabil/manager/admin. Fara asta,
+  // operatorul isi golea singur `invoiceNumber` printr-un PATCH si trecea de garda
+  // "retur pe livrare facturata doar pentru contabil" — adica anula chiar regula.
+  const billingFields = [
+    "invoiceNumber", "invoiceDate", "seller", "sellerId", "priceLei", "priceForeign",
+    "currency", "exchangeRate", "vatRate", "invoicePaid", "contractPrice"
+  ];
+  const touchesBilling = billingFields.some((f) => payload[f] !== undefined);
+  if (touchesBilling && !CAN_EDIT_BILLING_ROLES.includes(normalizeRoleCode(payload.actorRole))) {
+    throw forbiddenError("Datele de facturare pot fi modificate doar de contabil, manager sau administrator.");
+  }
+
   if (payload.invoiceNumber !== undefined) {
     delivery.invoiceNumber = String(payload.invoiceNumber || "").trim();
   }
@@ -4197,10 +4271,12 @@ async function cancelDelivery(id, options = {}) {
   if (delivery.status === "Anulat") {
     return delivery;
   }
-  // O livrare returnata a fost deja stinsa, cu marfa intoarsa in stoc. Anularea ei ar doar
-  // ascunde-o pe rol (filterCanceledForRole) si ar sterge urma returului din liste.
-  if (delivery.status === "Returnat") {
-    throw new Error("Livrarea a fost returnata. Nu mai poate fi anulata.");
+  // O livrare cu retur (total SAU partial) nu mai poate fi anulata: anularea o ascunde pe rol
+  // (filterCanceledForRole) si scoate miscarea de retur din raportul zilei in care s-a facut,
+  // adica rescrie exact istoricul pe care il pazim. Plus, daca marfa a fost descarcata in alta
+  // locatie decat cea de plecare, anularea ar muta-o retroactiv inapoi.
+  if (delivery.status === "Returnat" || Number(delivery.returnedQuantity || 0) > 0) {
+    throw new Error("Livrarea are un retur inregistrat. Nu mai poate fi anulata.");
   }
   const reason = String(options.reason || "").trim();
   if (!reason) {
@@ -4307,6 +4383,14 @@ async function returnDelivery(id, options = {}) {
       `Livrarea are factura emisa (nr. ${invoiceNumber}). Returul pe o livrare facturata il poate face doar contabilul.`
     );
   }
+  // Reciproca: contabilul a primit ruta ca sa acopere livrarile FACTURATE. Pe cele
+  // nefacturate returul e operatiune de depozit (descarcarea fizica a camionului), iar
+  // contabilul nu are `delivery-write`.
+  if (invoiceNumber === "" && WAREHOUSE_ONLY_RETURN_ROLES.includes(role)) {
+    throw forbiddenError(
+      "Livrarea nu e facturata. Returul pe ea il face operatorul sau managerul, la cantar."
+    );
+  }
 
   const deliveredNow = Number(delivery.deliveredQuantity || 0);
   if (deliveredNow <= 0) {
@@ -4403,13 +4487,11 @@ async function returnDelivery(id, options = {}) {
     // sa emita storno-ul; numarul poate fi schimbat ulterior pe document.
     invoiceNumber: invoiceNumber || "",
     returnedBy: actor,
-    returnedByUsername: currentUser.username || "",
     returnedByRole: role || "",
     returnedAt: now
   });
   delivery.returnReason = reason;
   delivery.returnedBy = actor;
-  delivery.returnedByUsername = currentUser.username || "";
   delivery.returnedByRole = role || "";
   delivery.returnedAt = now;
   if (isFullReturn) {
@@ -4432,6 +4514,8 @@ async function returnDelivery(id, options = {}) {
     action: "return",
     reason,
     user: actor,
+    // Username-ul sta DOAR aici: auditul e restrans pe rol, lista de livrari nu e.
+    username: currentUser.username || "",
     oldValue: before,
     newValue: {
       status: delivery.status,
@@ -4540,10 +4624,14 @@ async function getDailyReport(dateValue = new Date().toISOString().slice(0, 10))
   const report = createDailyReport(dateValue, receipts, processings, transactions, stockSummary);
   report.deliveries = filterByDate(deliveries, dateValue);
   report.complaints = filterByDate(complaints, dateValue);
+  // Ziua livrarii pastreaza cat a IESIT atunci din stoc. Returul e o miscare separata,
+  // trecuta la data la care marfa a fost descarcata inapoi.
   report.summary.deliveredQuantity = report.deliveries.reduce(
-    (sum, item) => sum + (isVoidedDelivery(item) ? 0 : Number(item.deliveredQuantity || 0)),
+    (sum, item) => sum + getDeliveryGrossQuantity(item),
     0
   );
+  report.returns = listReturnMovements(deliveries, { from: dateValue, to: dateValue });
+  report.summary.returnedQuantity = report.returns.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
   report.summary.openComplaints = report.complaints.filter((item) => item.status === "Deschisa").length;
   return report;
 }
@@ -4566,6 +4654,8 @@ async function getPeriodReport(from, to) {
   const periodTransactions = filterByDateRange(transactions, from, to);
   const periodDeliveries = filterByDateRange(deliveries, from, to);
   const periodComplaints = filterByDateRange(complaints, from, to);
+  // Retururile intra dupa data DESCARCARII, nu dupa data livrarii pe care o corecteaza.
+  const periodReturns = listReturnMovements(deliveries, { from, to });
   // Sumarul cantitativ exclude receptiile anulate.
   const activePeriodReceipts = periodReceipts.filter((item) => item.status !== "Anulat");
   // Plata/incasare anulata sau stornata = storno: NU intra in totalurile de plati/incasari
@@ -4590,7 +4680,9 @@ async function getPeriodReport(from, to) {
       collectionsTotal: activePeriodTransactions
         .filter((item) => item.direction === "collection")
         .reduce((sum, item) => sum + Number(item.amount || 0), 0),
-      deliveredQuantity: periodDeliveries.reduce((sum, item) => sum + (isVoidedDelivery(item) ? 0 : Number(item.deliveredQuantity || 0)), 0),
+      // Iesirea BRUTA la data livrarii; returul e numarat separat, la data lui.
+      deliveredQuantity: periodDeliveries.reduce((sum, item) => sum + getDeliveryGrossQuantity(item), 0),
+      returnedQuantity: periodReturns.reduce((sum, item) => sum + Number(item.quantity || 0), 0),
       openComplaints: periodComplaints.filter((item) => item.status === "Deschisa").length,
       stockTotal: stockSummary.totals.totalQuantity
     },
@@ -4598,7 +4690,8 @@ async function getPeriodReport(from, to) {
     processings: periodProcessings,
     transactions: periodTransactions,
     deliveries: periodDeliveries,
-    complaints: periodComplaints
+    complaints: periodComplaints,
+    returns: periodReturns
   };
 }
 
@@ -5165,6 +5258,8 @@ module.exports = {
   reopenReceipt,
   runMigrationIfNeeded,
   isVoidedDelivery,
+  getDeliveryGrossQuantity,
+  listReturnMovements,
   returnDelivery,
   transitionDelivery,
   updateComplaint,
