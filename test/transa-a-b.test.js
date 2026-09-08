@@ -1948,3 +1948,45 @@ test("Proiect: campurile de facturare nu se pot strecura la CREARE", async () =>
     assert.equal(ok.status, "Livrat");
   });
 });
+
+test("Supra-livrare mod mixt: livrarea pe receptie nu mai poate scoate marfa deja plecata", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const receipt = await seedReceipt(storage, { location: "Cilindru 1" }); // 100 t
+
+    // Livrare pe LOCATIE de 100 t -> stocul ajunge la 0.
+    await storage.createDelivery({
+      customerId: 2, customer: "A", product: "Grau", productId: 1,
+      sourceLocation: "Cilindru 1", plannedQuantity: 100, createdBy: "op"
+    });
+    let stock = await storage.getStockSummary();
+    assert.equal(stock.totals.totalQuantity, 0);
+
+    // Livrarea pe RECEPTIE vedea doar disponibilul receptiei si trecea: 200 t din 100 t.
+    await assert.rejects(
+      storage.createDelivery({
+        receiptId: receipt.id, customerId: 2, customer: "B", plannedQuantity: 50, createdBy: "op"
+      }),
+      /Stoc insuficient/i
+    );
+
+    stock = await storage.getStockSummary();
+    assert.equal(stock.totals.totalQuantity, 0, "nimic in plus nu a fost scos");
+  });
+});
+
+test("Livrarea pe receptie merge cand marfa ei a fost mutata in alt cilindru", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const receipt = await seedReceipt(storage, { location: "Cilindru 1" });
+    // 70 t mutate in Cilindru 2: marfa exista, doar ca in alta parte.
+    await storage.createTransfer({
+      productId: 1, fromLocationId: 1, toLocationId: 2, quantity: 70,
+      changeReason: "mutare", createdBy: "op"
+    });
+    const d = await storage.createDelivery({
+      receiptId: receipt.id, customerId: 2, customer: "X", plannedQuantity: 100, createdBy: "op"
+    });
+    assert.equal(d.deliveredQuantity, 100, "verificarea pe produs nu refuza marfa mutata");
+  });
+});

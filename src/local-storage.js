@@ -3045,6 +3045,18 @@ async function createDelivery(payload) {
     if (plannedQuantity > availableQuantity) {
       throw new Error("Cantitatea planificata depaseste stocul disponibil pentru receptie.");
     }
+    // ...si marfa trebuie sa existe FIZIC. Verificarea e pe PRODUS, nu pe o singura locatie:
+    // marfa receptiei poate fi mutata intre timp prin transfer/procesare, iar scaderea o
+    // urmareste cascadat. Fara asta, o livrare pe locatie si una pe receptie scoteau
+    // amandoua aceeasi marfa — 200 t dintr-un stoc de 100 t, diferenta inghitita de
+    // plafonarea la zero.
+    const physical = getProductAvailableQuantity(state, productName);
+    if (Math.round(plannedQuantity * 1000) > Math.round(physical.available * 1000)) {
+      throw new Error(
+        `Stoc insuficient pentru ${productName}: disponibil ` +
+          `${Math.round(physical.available * 1000)} kg, cerut ${Math.round(plannedQuantity * 1000)} kg.`
+      );
+    }
   } else {
     // #14: plafon pe stocul produsului in locatia sursa.
     const summary = stockSummaryFromState(state);
@@ -4220,6 +4232,55 @@ async function getStats() {
     audit: createAuditSummary(auditLogs),
     advances: createPartnerAdvanceSummary(partnerAdvances)
   };
+}
+
+// Cat se mai poate scoate FIZIC dintr-o locatie pentru un produs: stocul de acolo minus
+// rezervarile inca nelivrate. `excludeDeliveryId` scoate din calcul documentul care tocmai
+// se creeaza/confirma, ca sa nu concureze cu el insusi.
+// IMPORTANT: numara si livrarile legate de o receptie. Inainte, verificarea pe receptie si
+// cea pe locatie nu se vedeau una pe alta, deci se puteau livra 200 t dintr-un stoc de 100 t,
+// iar diferenta era inghitita de plafonarea la zero din `createStockSummary`.
+// Varianta pe PRODUS, peste toate locatiile. E masura corecta pentru livrarile legate de o
+// receptie: marfa ei poate fi intre timp mutata prin transfer/procesare in alt cilindru, iar
+// `createStockSummary` o scade cascadat din celelalte locatii. Verificarea pe o singura
+// locatie ar refuza gresit exact acest caz legitim.
+function getProductAvailableQuantity(state, product, options = {}) {
+  const excludeId = options.excludeDeliveryId != null ? Number(options.excludeDeliveryId) : null;
+  const summary = stockSummaryFromState(state);
+  const inStock = (summary.byLocation || [])
+    .filter((i) => i.product === product)
+    .reduce((sum, i) => sum + Number(i.quantity || 0), 0);
+  const reservedPending = (state.deliveries || [])
+    .filter(
+      (d) =>
+        (excludeId === null || d.id !== excludeId) &&
+        d.product === product &&
+        Number(d.deliveredQuantity || 0) === 0 &&
+        ["Proiect", "Confirmat", "Redeschis"].includes(d.status)
+    )
+    .reduce((sum, d) => sum + Number(d.plannedQuantity || 0), 0);
+  return { inStock, reservedPending, available: inStock - reservedPending };
+}
+
+function getLocationAvailableQuantity(state, product, location, options = {}) {
+  const excludeId = options.excludeDeliveryId != null ? Number(options.excludeDeliveryId) : null;
+  const summary = stockSummaryFromState(state);
+  const inStock = Number(
+    (summary.byLocation.find(
+      (i) => sameLocation(i.location, location) && i.product === product
+    ) || {}).quantity || 0
+  );
+  const reservedPending = (state.deliveries || [])
+    .filter(
+      (d) =>
+        (excludeId === null || d.id !== excludeId) &&
+        d.product === product &&
+        sameLocation(d.location, location) &&
+        Number(d.deliveredQuantity || 0) === 0 &&
+        ["Proiect", "Confirmat", "Redeschis"].includes(d.status)
+    )
+    .reduce((sum, d) => sum + Number(d.plannedQuantity || 0), 0);
+  return { inStock, reservedPending, available: inStock - reservedPending };
 }
 
 function stockSummaryFromState(state) {

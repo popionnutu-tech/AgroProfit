@@ -163,7 +163,38 @@ function clearSessionCookie(res, req) {
   res.setHeader("Set-Cookie", buildCookie("", req, 0));
 }
 
-const SESSION_SECRET = process.env.SESSION_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || "agroprofit-dev-secret";
+// Cheia cu care se semneaza tokenul de sesiune (rolul calatoreste in el, deci cine o stie
+// isi poate fabrica o sesiune de admin). Valoarea de rezerva din cod e acceptabila DOAR in
+// dezvoltare; intr-un mediu publicat, lipsa cheii opreste pornirea, in loc sa cada tacit
+// pe un secret care e scris intr-un repo public.
+const DEV_SESSION_SECRET = "agroprofit-dev-secret";
+
+function resolveSessionSecret() {
+  const explicit = String(process.env.SESSION_SECRET || "").trim();
+  if (explicit) return explicit;
+
+  const isDeployed = Boolean(process.env.VERCEL) || process.env.NODE_ENV === "production";
+  const serviceKey = String(process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim();
+
+  if (isDeployed) {
+    if (serviceKey) {
+      // Compatibilitate cu deploy-urile existente. Nu e ideal: amesteca doua chei cu
+      // cicluri de viata diferite (rotatia cheii de baza de date ar deconecta toate sesiunile).
+      console.warn(
+        "[auth] SESSION_SECRET lipseste; folosesc SUPABASE_SERVICE_ROLE_KEY. Seteaza SESSION_SECRET separat."
+      );
+      return serviceKey;
+    }
+    throw new Error(
+      "SESSION_SECRET lipseste intr-un mediu publicat. Seteaza-l in variabilele de mediu — " +
+        "fara el, tokenul de sesiune s-ar semna cu o cheie scrisa in cod."
+    );
+  }
+
+  return serviceKey || DEV_SESSION_SECRET;
+}
+
+const SESSION_SECRET = resolveSessionSecret();
 
 function signToken(payload) {
   const json = JSON.stringify(payload);

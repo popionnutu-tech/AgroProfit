@@ -857,7 +857,7 @@ function renderOpeningDrafts() {
     .map(
       (item) => `
         <tr>
-          <td>${item.product}</td>
+          <td>${escapeComboHtml(item.product)}</td>
           <td>${item.location}</td>
           <td>${formatNumber(Math.round(Number(item.quantity || 0) * 1000))} kg (${formatNumber(Number(item.quantity || 0))} t)</td>
         </tr>
@@ -869,7 +869,7 @@ function renderOpeningDrafts() {
     .map(
       (item) => `
         <tr>
-          <td>${item.partner}</td>
+          <td>${escapeComboHtml(item.partner)}</td>
           <td>${item.direction === "collection" ? "Incasare" : "Plata"}</td>
           <td>${currency.format(Number(item.amount || 0))}</td>
         </tr>
@@ -1295,7 +1295,7 @@ function renderStockSummary(summary) {
       (item) => `
         <tr>
           <td>${item.location}</td>
-          <td>${item.product}</td>
+          <td>${escapeComboHtml(item.product)}</td>
           <td>${formatNumber(item.quantity)} t</td>
           <td>${formatNumber(item.quantity * 1000)} kg</td>
         </tr>
@@ -1907,10 +1907,10 @@ function renderReceipts(receipts) {
           <td>#${item.id}</td>
           <td>${formatDateShort(item.createdAt || item.receivedAt)}</td>
           <td class="supplier-cell" data-id="${item.id}">
-            <span class="supplier-name">${item.supplier}</span>
+            <span class="supplier-name">${escapeComboHtml(item.supplier)}</span>
             ${canChangeSupplier ? `<button type="button" class="cell-btn change-supplier-btn" data-action="change-supplier" data-id="${item.id}" title="Schimbă furnizorul">✎</button>` : ""}
           </td>
-          <td>${item.product}${photosMini(item.photos)}</td>
+          <td>${escapeComboHtml(item.product)}${photosMini(item.photos)}</td>
           <td>${item.grossWeight > 0 ? formatNumber(Number(item.grossWeight)) + " kg" : "—"}</td>
           <td>${item.tareWeight > 0 ? formatNumber(Number(item.tareWeight)) + " kg" : "—"}</td>
           <td title="Apă eliminată la recepție (din umiditatea în exces)">${isPendingWeighing || !(Number(item.estimatedWaterLoss) > 0) ? "—" : formatNumber(Math.round(Number(item.estimatedWaterLoss) * 1000)) + " kg"}</td>
@@ -2324,7 +2324,7 @@ function renderProcessings(processings) {
         <tr>
           <td>#${item.id}</td>
           <td>${formatDateShort(item.createdAt || item.processedAt)}</td>
-          <td>${item.product}</td>
+          <td>${escapeComboHtml(item.product)}</td>
           <td>${item.sourceLocation || "-"}</td>
           <td>${item.destLocation || item.sourceLocation || "-"}</td>
           <td>${item.processingType}</td>
@@ -2808,9 +2808,9 @@ function renderDeliveries(deliveries) {
           <td>Nr. ${item.id}</td>
           <td>${formatDateShort(item.createdAt || item.deliveredAt)}</td>
           <td>${item.location || (item.receiptId ? `#${item.receiptId}` : "-")}</td>
-          <td>${item.customer}</td>
+          <td>${escapeComboHtml(item.customer)}</td>
           <td class="col-fin">${item.seller || "-"}</td>
-          <td>${item.product}${photosMini(item.photos)}</td>
+          <td>${escapeComboHtml(item.product)}${photosMini(item.photos)}</td>
           <td>${formatQtyByEntry(qty, item)}</td>
           <td title="Apă = cantitate × (umid. depozitare − umid. livrare)/100. Pozitiv = pierdută (uscat); negativ = livrat mai umed.">${(() => { const w = deliveryWaterKg(item, waterIdx); return w === null ? "—" : (w >= 0 ? formatNumber(w) : "−" + formatNumber(Math.abs(w))) + " kg"; })()}</td>
           <td>${escapeComboHtml(item.vehicle || "-")}${item.trailer ? ` <span class="trailer-badge">+ ${escapeComboHtml(item.trailer)}</span>` : ""}</td>
@@ -2923,7 +2923,7 @@ function renderComplaints(complaints) {
         return `
         <tr class="${deducted > 0 ? "complaint-row-minus" : ""}">
           <td>#${item.id}</td>
-          <td>${item.customer}</td>
+          <td>${escapeComboHtml(item.customer)}</td>
           <td>${item.product || "-"}</td>
           <td>${item.complaintType}</td>
           <td>${deliveryTotal > 0 ? currency.format(deliveryTotal) : "-"}</td>
@@ -3327,9 +3327,13 @@ function renderSelectOptions(select, items, mapLabel, placeholder, mapValue = (i
   const sorted = [...items].sort((a, b) =>
     String(mapLabel(a)).localeCompare(String(mapLabel(b)), "ro", { numeric: true, sensitivity: "base" })
   );
+  // Etichetele si valorile vin din nomenclator (nume de partener/produs, introduse de om),
+  // deci se escapeaza: altfel un nume cu `"` sau `<` sparge optiunea sau injecteaza markup.
   const options = [
-    `<option value="" disabled selected>${placeholder}</option>`,
-    ...sorted.map((item) => `<option value="${mapValue(item)}">${mapLabel(item)}</option>`)
+    `<option value="" disabled selected>${escapeComboHtml(placeholder)}</option>`,
+    ...sorted.map(
+      (item) => `<option value="${escapeComboHtml(mapValue(item))}">${escapeComboHtml(mapLabel(item))}</option>`
+    )
   ];
 
   select.innerHTML = options.join("");
@@ -4636,7 +4640,7 @@ function renderTransfers(transfers) {
         <tr>
           <td>#${item.id}</td>
           <td>${formatDateShort(item.createdAt)}</td>
-          <td>${item.product}</td>
+          <td>${escapeComboHtml(item.product)}</td>
           <td>${item.fromLocation}</td>
           <td>${item.toLocation}</td>
           <td>${formatNumber(Math.round(Number(item.quantity || 0) * 1000))} kg</td>
@@ -7336,7 +7340,7 @@ function renderSupplierStatement(data) {
         <tr>
           <td>#${r.id}</td>
           <td>${formatDateShort(r.date)}</td>
-          <td>${r.product}</td>
+          <td>${escapeComboHtml(r.product)}</td>
           <td>${formatNumber(r.quantity * 1000)} kg</td>
           <td>${currency.format(r.price)}/kg</td>
           <td>${currency.format(r.amount)}</td>

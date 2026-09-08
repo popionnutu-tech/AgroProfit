@@ -260,16 +260,23 @@ async function telegramLoginHandler(req, res) {
   try {
     let user = await findUserByUsername(internalUsername);
 
+    let justCreated = false;
     if (!user) {
+      // Semnatura Telegram dovedeste ca cererea e AUTENTICA, nu ca omul e AUTORIZAT.
+      // Botul e public, deci oricine il gaseste ar primi altfel un cont de operator activ,
+      // iar operatorul creeaza recepții si livrari care misca stoc real si produc datorii.
+      // Contul se creeaza INACTIV: adminul il activeaza din Utilizatori. Cine are deja cont
+      // nu e afectat.
       user = await createUser({
         name: buildTelegramDisplayName(tgUser),
         username: internalUsername,
         roleCode: "operator",
         channel: "telegram",
-        active: true,
-        changeReason: "Auto-provisioned din Telegram Mini App",
+        active: false,
+        changeReason: "Auto-provisioned din Telegram Mini App (inactiv pana la aprobare)",
         changedBy: "telegram"
       });
+      justCreated = true;
     } else if (!String(user.channel || "").includes("telegram")) {
       try {
         user = await updateUserById(user.id, {
@@ -282,6 +289,11 @@ async function telegramLoginHandler(req, res) {
       }
     }
 
+    if (justCreated) {
+      return sendJson(res, 403, {
+        error: "Contul tau a fost creat si asteapta aprobarea administratorului."
+      });
+    }
     if (!user || user.active === false) {
       return sendJson(res, 403, { error: "Contul tau este dezactivat." });
     }
