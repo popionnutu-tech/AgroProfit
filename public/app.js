@@ -858,7 +858,7 @@ function renderOpeningDrafts() {
       (item) => `
         <tr>
           <td>${escapeComboHtml(item.product)}</td>
-          <td>${item.location}</td>
+          <td>${escapeComboHtml(item.location)}</td>
           <td>${formatNumber(Math.round(Number(item.quantity || 0) * 1000))} kg (${formatNumber(Number(item.quantity || 0))} t)</td>
         </tr>
       `
@@ -1294,7 +1294,7 @@ function renderStockSummary(summary) {
     .map(
       (item) => `
         <tr>
-          <td>${item.location}</td>
+          <td>${escapeComboHtml(item.location)}</td>
           <td>${escapeComboHtml(item.product)}</td>
           <td>${formatNumber(item.quantity)} t</td>
           <td>${formatNumber(item.quantity * 1000)} kg</td>
@@ -1741,9 +1741,9 @@ function renderAutomationStatus(status) {
     .map(
       (item) => `
         <tr>
-          <td>${item.name}</td>
+          <td>${escapeComboHtml(item.name)}</td>
           <td>${item.roleCode || "-"}</td>
-          <td>${item.channel || "-"}</td>
+          <td>${escapeComboHtml(item.channel || "-")}</td>
           <td>${item.canReceiveTelegram ? "Legat" : "Lipsa legare"}</td>
           <td>${item.lastSeenAt ? new Date(item.lastSeenAt).toLocaleString("ro-RO") : "-"}</td>
         </tr>
@@ -2601,7 +2601,12 @@ function deliveryReturnCell(item, canWrite) {
   // Aceleași condiții ca pe server (`returnDelivery`), ca butonul să nu ducă la un 403:
   // livrarea închisă e doar pentru manager/admin, iar cea facturată doar pentru contabil.
   const closedForRole = item.status === "Inchis" && !canEditConfirmedStatus();
-  const invoiced = String(item.invoiceNumber || "").trim() !== "";
+  // `invoiceNumber` e filtrat pentru rolurile fara drepturi financiare; `hasInvoice` e
+  // indicatorul neutru care supravietuieste filtrarii. Fara el, butonul aparea pe livrarile
+  // facturate si ducea la un 403 derutant.
+  const invoiced = item.hasInvoice !== undefined
+    ? item.hasInvoice === true
+    : String(item.invoiceNumber || "").trim() !== "";
   const canReturn =
     canWrite &&
     !isVoidedDelivery(item) &&
@@ -2770,8 +2775,9 @@ function renderDeliveries(deliveries) {
     if (!withinDateRange(item, ["createdAt", "deliveredAt"], deliveryDateFromEl, deliveryDateToEl)) return false;
     if (custFilter && item.customer !== custFilter) return false;
     if (prodFilter && item.product !== prodFilter) return false;
-    if (paidFilter === "paid" && !item.invoicePaid) return false;
-    if (paidFilter === "unpaid" && item.invoicePaid) return false;
+    const paid = item.isPaid !== undefined ? item.isPaid === true : item.invoicePaid === true;
+    if (paidFilter === "paid" && !paid) return false;
+    if (paidFilter === "unpaid" && paid) return false;
     if (!canViewCanceled(item)) return false;
     return true;
   });
@@ -3487,8 +3493,8 @@ function renderReceiptSelectors(config) {
   const customers = config.partners
     .filter((item) => item.role === "cumparator" || item.role === "ambele")
     .sort((a, b) => String(a.name).localeCompare(String(b.name), "ro", { sensitivity: "base" }));
-  const operators = config.users.filter((item) =>
-    ["operator", "manager", "admin"].includes(item.roleCode)
+  const operators = config.users.filter(
+    (item) => ["operator", "manager", "admin"].includes(item.roleCode) && item.active !== false
   );
 
   setSupplierComboItems(suppliers);
@@ -4641,8 +4647,8 @@ function renderTransfers(transfers) {
           <td>#${item.id}</td>
           <td>${formatDateShort(item.createdAt)}</td>
           <td>${escapeComboHtml(item.product)}</td>
-          <td>${item.fromLocation}</td>
-          <td>${item.toLocation}</td>
+          <td>${escapeComboHtml(item.fromLocation)}</td>
+          <td>${escapeComboHtml(item.toLocation)}</td>
           <td>${formatNumber(Math.round(Number(item.quantity || 0) * 1000))} kg</td>
           <td>${item.operator || "-"}</td>
           <td>${docActionsCell("transfer", item) || "—"}</td>

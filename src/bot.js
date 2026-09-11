@@ -420,6 +420,11 @@ async function tryLinkTelegramAccount(ctx) {
   if (!String(user.channel || "").includes("telegram")) {
     return `Utilizatorul ${telegramUsername} nu are activ canalul Telegram in sistem.`;
   }
+  // Contul neaprobat NU se leaga: altfel isi inregistra chatId-ul si primea rapoartele de
+  // management (cu tot financiarul) fara sa fi fost activat vreodata de admin.
+  if (user.active === false) {
+    return `Contul ${telegramUsername} nu este activat. Cere administratorului activarea.`;
+  }
 
   linkTelegramUser(user.username, {
     chatId: ctx.chat?.id,

@@ -3050,7 +3050,7 @@ async function createDelivery(payload) {
     // urmareste cascadat. Fara asta, o livrare pe locatie si una pe receptie scoteau
     // amandoua aceeasi marfa — 200 t dintr-un stoc de 100 t, diferenta inghitita de
     // plafonarea la zero.
-    const physical = getProductAvailableQuantity(state, productName);
+    const physical = getDeliveryAvailableQuantity(state, { product: productName });
     if (Math.round(plannedQuantity * 1000) > Math.round(physical.available * 1000)) {
       throw new Error(
         `Stoc insuficient pentru ${productName}: disponibil ` +
@@ -3059,30 +3059,10 @@ async function createDelivery(payload) {
     }
   } else {
     // #14: plafon pe stocul produsului in locatia sursa.
-    const summary = stockSummaryFromState(state);
-    const inStock = Number(
-      (summary.byLocation.find(
-        (i) => sameLocation(i.location, sourceLocation) && i.product === productName
-      ) || {}).quantity || 0
-    );
-    // Rezervare: livrarile pe produs inca nelivrate (deliveredQuantity 0) nu au scazut
-    // inca stocul, dar sunt deja promise — le scadem ca sa nu promitem mai mult decat exista.
-    // NOTA (model "livrare imediata"): orice livrare se creeaza acum direct "Livrat" cu
-    // deliveredQuantity > 0, iar getStockSummary scade deja aceste cantitati din `inStock`.
-    // Deci reservedPending e de regula 0 — ramane ca plasa de siguranta pentru livrari
-    // ramase (legacy/edge) cu deliveredQuantity === 0. inStock proaspat la fiecare cerere
-    // previne supra-vanzarea (serverless: stare reincarcata din KV per request).
-    const reservedPending = (state.deliveries || [])
-      .filter(
-        (d) =>
-          !d.receiptId &&
-          d.product === productName &&
-          sameLocation(d.location, sourceLocation) &&
-          Number(d.deliveredQuantity || 0) === 0 &&
-          ["Proiect", "Confirmat", "Redeschis"].includes(d.status)
-      )
-      .reduce((sum, d) => sum + Number(d.plannedQuantity || 0), 0);
-    const available = inStock - reservedPending;
+    const { inStock, reservedPending, available } = getDeliveryAvailableQuantity(state, {
+      product: productName,
+      location: sourceLocation
+    });
     if (Math.round(plannedQuantity * 1000) > Math.round(available * 1000)) {
       throw new Error(
         `Stoc insuficient pentru ${productName} in ${sourceLocation}: disponibil ${Math.round(available * 1000)} kg (din ${Math.round(inStock * 1000)} kg, rezervat ${Math.round(reservedPending * 1000)} kg), cerut ${Math.round(plannedQuantity * 1000)} kg.`
@@ -3223,6 +3203,26 @@ async function transitionDelivery(id, newStatus, payload = {}) {
     const alreadyTaken = Number(delivery.deliveredQuantity || 0);
     const extraNeeded = netWeight - alreadyTaken;
     if (extraNeeded > 0) {
+      // Marfa trebuie sa existe FIZIC. Verificarea lipsea complet pe ramura cu receptie,
+      // deci se putea confirma un proiect peste marfa deja plecata printr-o livrare pe
+      // locatie — 200 t dintr-un stoc de 100 t.
+      // Pe receptie masura e pe PRODUS (marfa poate fi mutata prin transfer/procesare);
+      // pe locatie, pe cilindrul de plecare.
+      const scope = delivery.receiptId
+        ? { product: delivery.product }
+        : { product: delivery.product, location: delivery.location };
+      const physical = getDeliveryAvailableQuantity(state, {
+        ...scope,
+        excludeDeliveryId: delivery.id
+      });
+      if (Math.round(extraNeeded * 1000) > Math.round(physical.available * 1000)) {
+        const where = delivery.receiptId ? "" : ` in ${delivery.location}`;
+        throw new Error(
+          `Stoc insuficient pentru ${delivery.product}${where}: disponibil ` +
+            `${Math.round(physical.available * 1000)} kg, cerut ${Math.round(extraNeeded * 1000)} kg.`
+        );
+      }
+      // ...si, pe langa marfa fizica, plafonul documentar al receptiei.
       if (delivery.receiptId) {
         const availableOnReceipt = getReceiptAvailableQuantity(state, delivery.receiptId, {
           excludeDeliveryId: delivery.id
@@ -3231,33 +3231,6 @@ async function transitionDelivery(id, newStatus, payload = {}) {
           throw new Error(
             `Stoc insuficient pe receptia #${delivery.receiptId}: disponibil ` +
               `${Math.round(availableOnReceipt * 1000)} kg, cerut ${Math.round(extraNeeded * 1000)} kg.`
-          );
-        }
-      } else {
-        // Sincron, pe starea deja incarcata: `getStockSummary()` ar mai fi recalculat si
-        // alocarea FIFO a platilor (irelevanta aici) si ar fi introdus un `await` intre
-        // citirea si scrierea starii, adica o fereastra in care o alta cerere poate
-        // inlocui cache-ul si tranzitia s-ar pierde tacit.
-        const summary = stockSummaryFromState(state);
-        const inStock = Number(
-          (summary.byLocation.find(
-            (i) => sameLocation(i.location, delivery.location) && i.product === delivery.product
-          ) || {}).quantity || 0
-        );
-        // Rezervarile ALTOR proiecte pe aceeasi locatie+produs (nu si al nostru).
-        const reservedByOthers = (state.deliveries || [])
-          .filter((d) => d.id !== delivery.id
-            && !d.receiptId
-            && d.product === delivery.product
-            && sameLocation(d.location, delivery.location)
-            && Number(d.deliveredQuantity || 0) === 0
-            && ["Proiect", "Confirmat", "Redeschis"].includes(d.status))
-          .reduce((sum, d) => sum + Number(d.plannedQuantity || 0), 0);
-        const available = inStock - reservedByOthers;
-        if (Math.round(extraNeeded * 1000) > Math.round(available * 1000)) {
-          throw new Error(
-            `Stoc insuficient pentru ${delivery.product} in ${delivery.location}: disponibil ` +
-              `${Math.round(available * 1000)} kg, cerut ${Math.round(extraNeeded * 1000)} kg.`
           );
         }
       }
@@ -4237,49 +4210,45 @@ async function getStats() {
 // Cat se mai poate scoate FIZIC dintr-o locatie pentru un produs: stocul de acolo minus
 // rezervarile inca nelivrate. `excludeDeliveryId` scoate din calcul documentul care tocmai
 // se creeaza/confirma, ca sa nu concureze cu el insusi.
-// IMPORTANT: numara si livrarile legate de o receptie. Inainte, verificarea pe receptie si
-// cea pe locatie nu se vedeau una pe alta, deci se puteau livra 200 t dintr-un stoc de 100 t,
-// iar diferenta era inghitita de plafonarea la zero din `createStockSummary`.
-// Varianta pe PRODUS, peste toate locatiile. E masura corecta pentru livrarile legate de o
-// receptie: marfa ei poate fi intre timp mutata prin transfer/procesare in alt cilindru, iar
-// `createStockSummary` o scade cascadat din celelalte locatii. Verificarea pe o singura
-// locatie ar refuza gresit exact acest caz legitim.
-function getProductAvailableQuantity(state, product, options = {}) {
-  const excludeId = options.excludeDeliveryId != null ? Number(options.excludeDeliveryId) : null;
-  const summary = stockSummaryFromState(state);
-  const inStock = (summary.byLocation || [])
-    .filter((i) => i.product === product)
-    .reduce((sum, i) => sum + Number(i.quantity || 0), 0);
-  const reservedPending = (state.deliveries || [])
-    .filter(
-      (d) =>
-        (excludeId === null || d.id !== excludeId) &&
-        d.product === product &&
-        Number(d.deliveredQuantity || 0) === 0 &&
-        ["Proiect", "Confirmat", "Redeschis"].includes(d.status)
-    )
-    .reduce((sum, d) => sum + Number(d.plannedQuantity || 0), 0);
-  return { inStock, reservedPending, available: inStock - reservedPending };
-}
+// SURSA UNICA pentru „cat se mai poate livra". Inainte existau PATRU forme ale acestei
+// reguli, scrise separat, si se contraziceau: doua ignorau livrarile legate de o receptie
+// (`!d.receiptId`), deci un proiect pe receptie nu rezerva nimic in ochii verificarii pe
+// locatie. De acolo venea supra-livrarea (200 t dintr-un stoc de 100 t), iar diferenta era
+// inghitita de plafonarea la zero din `createStockSummary`.
+//
+//  `location` lipsa -> pe PRODUS, peste toate locatiile. Masura corecta pentru livrarile
+//                      legate de o receptie: marfa poate fi mutata prin transfer/procesare,
+//                      iar scaderea o urmareste cascadat. O verificare pe o singura locatie
+//                      ar refuza gresit exact acest caz legitim.
+//  `location` dat   -> pe acel cilindru, pentru livrarile care pleaca dintr-o locatie anume.
+//  `excludeDeliveryId` -> scoate documentul care tocmai se creeaza/confirma, ca sa nu
+//                      concureze cu el insusi.
+//  `summary`        -> stocul deja calculat de apelant (evita un recalcul complet).
+const DELIVERY_STATUSES_RESERVING = ["Proiect", "Confirmat", "Redeschis"];
 
-function getLocationAvailableQuantity(state, product, location, options = {}) {
+function getDeliveryAvailableQuantity(state, options = {}) {
+  const product = options.product;
+  const location = options.location || null;
   const excludeId = options.excludeDeliveryId != null ? Number(options.excludeDeliveryId) : null;
-  const summary = stockSummaryFromState(state);
-  const inStock = Number(
-    (summary.byLocation.find(
-      (i) => sameLocation(i.location, location) && i.product === product
-    ) || {}).quantity || 0
-  );
+  const summary = options.summary || stockSummaryFromState(state);
+
+  const inStock = (summary.byLocation || [])
+    .filter((i) => i.product === product && (!location || sameLocation(i.location, location)))
+    .reduce((sum, i) => sum + Number(i.quantity || 0), 0);
+
+  // Rezervari: documente care nu au scazut inca stocul, dar sunt deja promise.
+  // NU se filtreaza dupa `receiptId` — o livrare legata de receptie ocupa aceeasi marfa fizica.
   const reservedPending = (state.deliveries || [])
     .filter(
       (d) =>
         (excludeId === null || d.id !== excludeId) &&
         d.product === product &&
-        sameLocation(d.location, location) &&
+        (!location || sameLocation(d.location, location)) &&
         Number(d.deliveredQuantity || 0) === 0 &&
-        ["Proiect", "Confirmat", "Redeschis"].includes(d.status)
+        DELIVERY_STATUSES_RESERVING.includes(d.status)
     )
     .reduce((sum, d) => sum + Number(d.plannedQuantity || 0), 0);
+
   return { inStock, reservedPending, available: inStock - reservedPending };
 }
 

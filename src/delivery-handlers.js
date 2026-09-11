@@ -45,6 +45,10 @@ function requestCanSeeFinance(req) {
 
 function stripDeliveryFinancials(delivery) {
   const clone = { ...delivery };
+  // Indicatori NEfinanciari, pastrati ca interfata sa stie CE poate face, fara sa afle sume:
+  // butonul de retur depinde de existenta facturii, iar filtrul „Achitate" de starea platii.
+  clone.hasInvoice = String(delivery.invoiceNumber || "").trim() !== "";
+  clone.isPaid = delivery.invoicePaid === true;
   for (const field of FINANCIAL_DELIVERY_FIELDS) {
     delete clone[field];
   }
@@ -208,6 +212,8 @@ async function returnDeliveryHandler(req, res, id) {
 
 module.exports = {
   createDeliveryHandler,
+  // Exportate ca sa poata fi folosite si de rapoarte, si testate direct — la fel ca la recepții.
+  stripDeliveryFinancials,
   listDeliveriesHandler,
   returnDeliveryHandler,
   transitionDeliveryHandler,

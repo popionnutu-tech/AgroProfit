@@ -23,7 +23,7 @@ const {
   verifyPassword
 } = require("./auth");
 const { validateInitData } = require("./telegram-webapp-auth");
-const { linkTelegramUser } = require("./automation-state");
+const { getTelegramLink, linkTelegramUser } = require("./automation-state");
 
 function sendJson(res, statusCode, payload) {
   if (typeof res.status === "function" && typeof res.json === "function") {
@@ -289,13 +289,41 @@ async function telegramLoginHandler(req, res) {
       }
     }
 
-    if (justCreated) {
-      return sendJson(res, 403, {
-        error: "Contul tau a fost creat si asteapta aprobarea administratorului."
+    // Un singur mesaj pentru TOATE refuzurile: doua mesaje distincte spuneau atacatorului
+    // daca un username intern exista sau nu — exact ce ii trebuie ca sa tinteasca un cont.
+    const refuse = () =>
+      sendJson(res, 403, {
+        error: "Contul nu este autorizat pentru Telegram. Cere administratorului activarea sau legarea contului."
       });
+
+    if (justCreated || !user || user.active === false) {
+      return refuse();
     }
-    if (!user || user.active === false) {
-      return sendJson(res, 403, { error: "Contul tau este dezactivat." });
+
+    // IDENTITATEA se leaga de ID-ul de Telegram, care e imuabil — NU de handle, pe care
+    // oricine si-l poate schimba. Fara asta, cine isi punea handle-ul „admin" primea
+    // sesiune de administrator, fara parola.
+    const existingLink = getTelegramLink(user.username);
+    const linkedId = String((existingLink && existingLink.chatId) || "").trim();
+    const currentId = String(tgUser?.id || "").trim();
+
+    if (!currentId) {
+      return refuse();
+    }
+    if (linkedId) {
+      // Cont deja legat: doar acel ID de Telegram il poate folosi.
+      if (linkedId !== currentId) {
+        console.warn(
+          `[auth] Telegram: incercare de acces pe contul ${user.username} de pe alt ID de Telegram.`
+        );
+        return refuse();
+      }
+    } else if (String(user.channel || "").trim() !== "telegram") {
+      // Cont care NU s-a nascut din Telegram si nu a fost legat niciodata: nu il legam
+      // automat, fiindca handle-ul poate fi revendicat de altcineva. Legarea o face
+      // adminul (din bot, cu //start pe contul propriu) sau se face la primul acces al
+      // unui cont creat chiar prin Telegram.
+      return refuse();
     }
 
     if (tgUser?.id) {

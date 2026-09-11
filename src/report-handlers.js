@@ -2,8 +2,11 @@ const { getDailyReport, getPeriodReport } = require("./storage");
 const {
   canRoleViewCanceled,
   filterCanceledForRole,
-  filterCanceledTransactionsForRole
+  filterCanceledTransactionsForRole,
+  getRolePermissions
 } = require("./permissions");
+const { stripDeliveryFinancials } = require("./delivery-handlers");
+const { stripReceiptFinancials } = require("./receipt-handlers");
 
 // Filtreaza documentele anulate din raport dupa rol (admin toate / manager pe ale lui / restul niciuna).
 function filterReportForRole(report, roleCode) {
@@ -31,6 +34,23 @@ function filterReportForRole(report, roleCode) {
       canRoleViewCanceled({ status: r.deliveryStatus, canceledByRole: r.deliveryCanceledByRole }, roleCode)
     );
   }
+  // Banii se filtreaza dupa aceeasi regula ca pe rutele de documente: capabilitatea
+  // `finance`. Fara asta, „Control / conducere" (care are `reports` dar NU `finance`)
+  // primea prin raport exact preturile, facturile si incasarile pe care `/api/deliveries`
+  // tocmai le ascunsese — aceeasi data, alta usa.
+  // DACA rolul „Control / conducere" TREBUIE sa vada banii, solutia corecta e sa i se dea
+  // capabilitatea `finance` in permissions.js, nu sa ramana scurgerea aici.
+  const canSeeFinance = getRolePermissions(roleCode).includes("finance");
+  if (!canSeeFinance) {
+    if (Array.isArray(report.deliveries)) {
+      report.deliveries = report.deliveries.map((d) => stripDeliveryFinancials(d));
+    }
+    if (Array.isArray(report.receipts)) {
+      report.receipts = report.receipts.map((r) => stripReceiptFinancials(r));
+    }
+    report.transactions = [];
+  }
+
   return report;
 }
 

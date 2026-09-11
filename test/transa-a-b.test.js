@@ -1990,3 +1990,101 @@ test("Livrarea pe receptie merge cand marfa ei a fost mutata in alt cilindru", a
     assert.equal(d.deliveredQuantity, 100, "verificarea pe produs nu refuza marfa mutata");
   });
 });
+
+test("Supra-livrare: proiectul nu se poate confirma peste marfa deja plecata", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const receipt = await seedReceipt(storage, { location: "Cilindru 1" }); // 100 t
+
+    // 1. Contabilul pregateste un proiect pe TOATA receptia (nu scade stocul).
+    const draft = await storage.createDelivery({
+      receiptId: receipt.id, customerId: 2, customer: "A", plannedQuantity: 100,
+      isDraft: true, actorRole: "accountant", createdBy: "contabil"
+    });
+    assert.equal(draft.status, "Proiect");
+
+    // 2. Livrarea pe LOCATIE trebuie sa vada rezervarea proiectului, chiar daca e pe receptie.
+    await assert.rejects(
+      storage.createDelivery({
+        customerId: 2, customer: "B", product: "Grau", productId: 1,
+        sourceLocation: "Cilindru 1", plannedQuantity: 100, createdBy: "op"
+      }),
+      /Stoc insuficient/i
+    );
+
+    // 3. Confirmarea proiectului trece normal — marfa e a lui.
+    const ok = await storage.transitionDelivery(draft.id, "Livrat", {
+      grossWeight: 100, tareWeight: 0, changeReason: "cantarit",
+      currentUser: { roleCode: "operator" }
+    });
+    assert.equal(ok.deliveredQuantity, 100);
+    const stock = await storage.getStockSummary();
+    assert.equal(stock.totals.totalQuantity, 0);
+  });
+});
+
+test("Supra-livrare: confirmarea unui proiect dupa ce marfa a plecat e refuzata", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const receipt = await seedReceipt(storage, { location: "Cilindru 1" }); // 100 t
+    const draft = await storage.createDelivery({
+      receiptId: receipt.id, customerId: 2, customer: "A", plannedQuantity: 60,
+      isDraft: true, actorRole: "accountant", createdBy: "contabil"
+    });
+    // Restul de 40 t pleaca pe locatie (rezervarea proiectului lasa exact 40).
+    await storage.createDelivery({
+      customerId: 2, customer: "B", product: "Grau", productId: 1,
+      sourceLocation: "Cilindru 1", plannedQuantity: 40, createdBy: "op"
+    });
+    let stock = await storage.getStockSummary();
+    assert.equal(stock.totals.totalQuantity, 60, "au ramas cele 60 t rezervate");
+
+    // Confirmarea peste cat mai exista fizic e refuzata (inainte trecea: 200 din 100).
+    await assert.rejects(
+      storage.transitionDelivery(draft.id, "Livrat", {
+        grossWeight: 100, tareWeight: 0, changeReason: "cantarit",
+        currentUser: { roleCode: "operator" }
+      }),
+      /Stoc insuficient/i
+    );
+
+    // Pe cantitatea reala, trece.
+    const ok = await storage.transitionDelivery(draft.id, "Livrat", {
+      grossWeight: 60, tareWeight: 0, changeReason: "cantarit",
+      currentUser: { roleCode: "operator" }
+    });
+    assert.equal(ok.deliveredQuantity, 60);
+    stock = await storage.getStockSummary();
+    assert.equal(stock.totals.totalQuantity, 0);
+  });
+});
+
+test("Livrari: campurile financiare nu ajung la rolurile fara drept, dar indicatorii raman", () => {
+  const { stripDeliveryFinancials } = require("../src/delivery-handlers");
+  const delivery = {
+    id: 7, product: "Grau", customer: "Export Grain", location: "Cilindru 1",
+    deliveredQuantity: 25, status: "Livrat",
+    contractPrice: 4000, priceLei: 4.09, priceForeign: 175, currency: "EUR",
+    exchangeRate: 20.1, invoiceNumber: "FA-001", invoiceDate: "2026-09-01",
+    invoicePaid: true, vatRate: 20, seller: "Firma SRL", sellerId: 3,
+    collectedAmount: 50000, collectionStatus: "Incasat"
+  };
+  const stripped = stripDeliveryFinancials(delivery);
+
+  for (const f of ["contractPrice", "priceLei", "priceForeign", "currency", "exchangeRate",
+                   "invoiceNumber", "invoiceDate", "invoicePaid", "vatRate", "seller",
+                   "sellerId", "collectedAmount", "collectionStatus"]) {
+    assert.ok(!(f in stripped), `campul financiar ${f} nu trebuie sa plece`);
+  }
+  // Operationalul ramane, ca interfata sa functioneze.
+  for (const f of ["id", "product", "customer", "location", "deliveredQuantity", "status"]) {
+    assert.ok(f in stripped, `campul operational ${f} trebuie pastrat`);
+  }
+  // Indicatori NEfinanciari: butonul de retur si filtrul „Achitate" depind de ei, nu de sume.
+  assert.equal(stripped.hasInvoice, true);
+  assert.equal(stripped.isPaid, true);
+
+  const fara = stripDeliveryFinancials({ id: 8, product: "Grau" });
+  assert.equal(fara.hasInvoice, false);
+  assert.equal(fara.isPaid, false);
+});
