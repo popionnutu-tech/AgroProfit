@@ -122,6 +122,17 @@ introducă. Îl creează în status **`Proiect`**.
   peste tot unde numeri cantități sau bani; lipsa predicatului pentru livrări a fost cauza
   găurii, nu o scăpare punctuală.
 
+### 8. Stoc negativ și corecția de inventar
+- Stocul **NU se plafonează la zero**. Un minus înseamnă că s-a scos dintr-o locație mai mult
+  decât a intrat vreodată. Plafonarea a ascuns luni la rând o diferență reală: „Stoc pe locație"
+  arăta mai mult decât „Mișcarea stocului", fără ca cineva să poată spune de ce. **Nu o reintroduce.**
+- În aceeași ordine de idei, scăderea unei livrări care nu încape în stoc **nu se aruncă** —
+  se scade oricum, pe minus. Așa cele două ecrane coincid prin construcție.
+- `stockCorrections` = adminul a NUMĂRAT fizic cilindrul și așază stocul la realitate
+  (`createStockCorrection`). Diferența e o pierdere **recunoscută**: apare pe coloana
+  „Corecții inventar" din raportul de pierderi și intră în formula diferenței, deci scade din
+  „necontabilizat". Motiv obligatoriu, urmă în audit, doar admin.
+
 ## Deploy
 - **Push pe `main` → Vercel publică automat** pe agroprofit-plus.vercel.app (integrare Git activă).
 - Lucrează pe o **ramură separată** (implicit `dev`), testează pe preview, apoi fă merge în `main`.

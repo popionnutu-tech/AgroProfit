@@ -39,6 +39,9 @@ const defaultReceiptsState = {
   processings: [],
   transactions: [],
   deliveries: [],
+  // Corectii de inventar: adminul aseaza stocul la ce e FIZIC in cilindru, iar diferenta
+  // se inregistreaza ca pierdere, cu motiv si urma in audit.
+  stockCorrections: [],
   complaints: [],
   auditLogs: [],
   partnerAdvances: [],
@@ -608,6 +611,9 @@ function readReceiptsState() {
   if (!Array.isArray(state.partnerAdvances)) {
     state.partnerAdvances = [];
   }
+  if (!Array.isArray(state.stockCorrections)) {
+    state.stockCorrections = [];
+  }
   // Backfill secventele de numerotare a documentelor tiparite (Act de achizitie, Ordin de plata)
   // pe datele vechi. Idempotent.
   if (!state.documentSequences || typeof state.documentSequences !== "object") {
@@ -956,7 +962,7 @@ function listOpeningDebtItemsFromDocuments(openingDocuments = []) {
   return normalizeOpeningDocuments(openingDocuments).flatMap((item) => item.debtItems || []);
 }
 
-function createStockSummary(receipts, deliveries = [], openingDocuments = [], transfers = [], processings = []) {
+function createStockSummary(receipts, deliveries = [], openingDocuments = [], transfers = [], processings = [], stockCorrections = []) {
   const stockByLocation = new Map();
   const openingStockItems = openingDocuments.flatMap((item) => item.stockItems || []);
 
@@ -1172,6 +1178,30 @@ function createStockSummary(receipts, deliveries = [], openingDocuments = [], tr
           deliveredQuantity: 0
         });
       }
+    }
+  }
+
+  // Corectii de inventar: adminul a numarat fizic cilindrul, iar diferenta e deja
+  // inregistrata ca pierdere. Se aplica DUPA livrari si retururi, ca rezultatul final sa fie
+  // exact ce s-a numarat.
+  for (const corr of stockCorrections || []) {
+    const delta = Number(corr && corr.delta) || 0;
+    if (!delta) continue;
+    const locName = corr.location || "Fara locatie";
+    const target = byLocation.find(
+      (i) => normLoc(i.location) === normLoc(locName) && i.product === corr.product
+    );
+    if (target) {
+      target.quantity += delta;
+    } else {
+      byLocation.push({
+        location: locName,
+        product: corr.product,
+        quantity: delta,
+        unit: "tone",
+        costCategory: null,
+        deliveredQuantity: 0
+      });
     }
   }
 
@@ -4287,7 +4317,8 @@ function stockSummaryFromState(state) {
     state.deliveries || [],
     state.openingDocuments || [],
     state.transfers || [],
-    state.processings || []
+    state.processings || [],
+    state.stockCorrections || []
   );
 }
 
@@ -4297,7 +4328,8 @@ async function getStockSummary() {
   const deliveries = await listDeliveries();
   const transfers = await listTransfers();
   const processings = await listProcessings();
-  return createStockSummary(receipts, deliveries, openingDocuments, transfers, processings);
+  const stockCorrections = await listStockCorrections();
+  return createStockSummary(receipts, deliveries, openingDocuments, transfers, processings, stockCorrections);
 }
 
 async function listTransfers() {
@@ -4774,6 +4806,83 @@ async function returnDelivery(id, options = {}) {
 
   writeReceiptsState(state);
   return delivery;
+}
+
+// Corectie de inventar: adminul a NUMARAT fizic cilindrul si aseaza stocul la cat e acolo.
+// Diferenta (de regula in minus) se inregistreaza ca PIERDERE, cu motiv obligatoriu si urma
+// in audit. Nu „sterge" nimic: ramane document, se vede in raportul de pierderi.
+async function listStockCorrections() {
+  const state = readReceiptsState();
+  return (state.stockCorrections || []).sort(
+    (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
+  );
+}
+
+async function createStockCorrection(payload = {}) {
+  const state = readReceiptsState();
+  const currentUser = payload.currentUser || {};
+  const role = normalizeRoleCode(currentUser.roleCode);
+  if (role && role !== "admin") {
+    throw forbiddenError("Doar administratorul poate corecta stocul.");
+  }
+
+  const location = requiredText(payload.location, "Locatia");
+  const product = requiredText(payload.product, "Produsul");
+  const reason = requiredText(payload.changeReason || payload.reason, "Motivul corectiei");
+  if (reason.length > MAX_RETURN_REASON_LENGTH) {
+    throw new Error(`Motivul e prea lung (max ${MAX_RETURN_REASON_LENGTH} caractere).`);
+  }
+
+  // Cantitatea NUMARATA vine in TONE (formularul imparte kg la 1000, ca peste tot).
+  const counted = sanitizeNumber(payload.countedQuantity);
+  if (!(counted >= 0)) {
+    throw new Error("Cantitatea numarata trebuie sa fie un numar mai mare sau egal cu zero.");
+  }
+
+  // Cat spune aplicatia ACUM pentru acea locatie + produs.
+  const summary = stockSummaryFromState(state);
+  const current = Number(
+    (summary.byLocation.find(
+      (i) => sameLocation(i.location, location) && i.product === product
+    ) || {}).quantity || 0
+  );
+
+  const delta = Math.round((counted - current) * 1000) / 1000;
+  if (delta === 0) {
+    throw new Error("Stocul din aplicatie coincide deja cu cantitatea numarata.");
+  }
+
+  const now = new Date().toISOString();
+  const correction = {
+    id: nextId(state.stockCorrections),
+    location,
+    product,
+    systemQuantity: current,
+    countedQuantity: counted,
+    delta,
+    reason,
+    createdBy: currentUser.name || payload.changedBy || "admin",
+    createdByRole: role || "",
+    createdAt: now
+  };
+
+  if (!Array.isArray(state.stockCorrections)) {
+    state.stockCorrections = [];
+  }
+  state.stockCorrections.push(correction);
+
+  createAuditEntry(state, {
+    entityType: "stock-correction",
+    entityId: correction.id,
+    action: "create",
+    reason,
+    user: correction.createdBy,
+    oldValue: { location, product, quantity: current },
+    newValue: { location, product, quantity: counted, delta }
+  });
+
+  writeReceiptsState(state);
+  return correction;
 }
 
 // Editare comentariu (note) pe un document existent (admin). Ex.: data reala a operatiei.
@@ -5507,7 +5616,9 @@ module.exports = {
   listUsers,
   reopenReceipt,
   runMigrationIfNeeded,
+  createStockCorrection,
   isDeliveryPendingStockExit,
+  listStockCorrections,
   isReceiptInStock,
   isVoidedDelivery,
   getDeliveryGrossQuantity,

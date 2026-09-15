@@ -232,6 +232,7 @@ let receiptsCache = [];
 let processingsCache = [];
 let transactionsCache = [];
 let deliveriesCache = [];
+let stockCorrectionsCache = [];
 let complaintsCache = [];
 let auditLogsCache = [];
 let lockoutsCache = [];
@@ -1299,6 +1300,8 @@ function renderStockSummary(summary) {
   // ca să poată fi corectat, nu se ascunde.
   const stockRows = summary.byLocation.filter((item) => Math.round(Number(item.quantity || 0) * 1000) !== 0);
   const negativeRows = stockRows.filter((item) => Number(item.quantity || 0) < 0);
+  // Corecția de inventar e a adminului: el așază stocul la ce a numărat fizic în cilindru.
+  const canCorrectStock = currentSessionUser?.roleCode === "admin";
   stocksBodyEl.innerHTML = stockRows
     .map(
       (item) => `
@@ -1307,6 +1310,13 @@ function renderStockSummary(summary) {
           <td>${escapeComboHtml(item.product)}</td>
           <td>${formatNumber(item.quantity)} t</td>
           <td>${formatNumber(item.quantity * 1000)} kg</td>
+          <td>${canCorrectStock
+            ? `<button type="button" class="cell-btn" data-action="stock-correct"
+                 data-location="${escapeComboHtml(item.location)}"
+                 data-product="${escapeComboHtml(item.product)}"
+                 data-current="${Math.round(Number(item.quantity || 0) * 1000)}"
+                 title="Am numărat fizic: așază stocul la cantitatea reală, iar diferența intră la pierderi">Corectează</button>`
+            : ""}</td>
         </tr>
       `
     )
@@ -1487,7 +1497,7 @@ function renderLossesReport() {
   const byProduct = new Map();
   const bucket = (p) => {
     const key = p || "—";
-    if (!byProduct.has(key)) byProduct.set(key, { received: 0, waterRecv: 0, waste: 0, waterDry: 0, delivered: 0, waterDeliv: 0 });
+    if (!byProduct.has(key)) byProduct.set(key, { received: 0, waterRecv: 0, waste: 0, waterDry: 0, delivered: 0, waterDeliv: 0, corrected: 0 });
     return byProduct.get(key);
   };
 
@@ -1514,9 +1524,16 @@ function renderLossesReport() {
     if (w !== null) g.waterDeliv += w / 1000; // kg -> tone
   });
 
+  // Corecții de inventar: adminul a numărat fizic și a așezat stocul la realitate.
+  // Diferența e o pierdere RECUNOSCUTĂ — o arătăm separat, ca să scadă din „necontabilizat".
+  (stockCorrectionsCache || []).forEach((cr) => {
+    if ((prodFilter && cr.product !== prodFilter) || !inRange(cr.createdAt)) return;
+    bucket(cr.product).corrected += Number(cr.delta || 0);
+  });
+
   const rows = Array.from(byProduct.entries()).sort((a, b) => String(a[0]).localeCompare(String(b[0]), "ro"));
   if (!rows.length) {
-    body.innerHTML = '<tr><td colspan="9" class="empty-state">Fără date pentru filtrul ales.</td></tr>';
+    body.innerHTML = '<tr><td colspan="10" class="empty-state">Fără date pentru filtrul ales.</td></tr>';
     if (foot) foot.innerHTML = "";
     return;
   }
@@ -1527,13 +1544,16 @@ function renderLossesReport() {
     if (!p) return;
     stockByProduct[p] = (stockByProduct[p] || 0) + Number(i.quantity || 0);
   });
-  const tot = { received: 0, waterRecv: 0, waste: 0, waterDry: 0, delivered: 0, waterDeliv: 0, diff: 0, stock: 0 };
+  const tot = { received: 0, waterRecv: 0, waste: 0, waterDry: 0, delivered: 0, waterDeliv: 0, corrected: 0, diff: 0, stock: 0 };
   body.innerHTML = rows
     .map(([prod, g]) => {
-      const diff = g.received - g.waste - g.waterDry - g.delivered;
+      // Corecția e deja aplicată în stoc, deci intră și în formula diferenței: ce a fost
+      // recunoscut ca pierdere la inventar nu mai e „necontabilizat".
+      const diff = g.received - g.waste - g.waterDry - g.delivered + Number(g.corrected || 0);
       const stock = stockByProduct[prod] || 0;
       tot.received += g.received; tot.waterRecv += g.waterRecv; tot.waste += g.waste;
       tot.waterDry += g.waterDry; tot.delivered += g.delivered; tot.waterDeliv += g.waterDeliv;
+      tot.corrected += Number(g.corrected || 0);
       tot.diff += diff; tot.stock += stock;
       return `<tr>
         <td>${escapeComboHtml(prod)}</td>
@@ -1543,6 +1563,7 @@ function renderLossesReport() {
         <td>${kgNum(g.waterDry)}</td>
         <td>${kgNum(g.delivered)}</td>
         <td>${kgNum(g.waterDeliv)}</td>
+        <td>${Number(g.corrected || 0) ? `<b>${kgNum(g.corrected)}</b>` : "—"}</td>
         <td><b>${kgNum(diff)}</b></td>
         <td>${kgNum(stock)}</td>
       </tr>`;
@@ -1557,6 +1578,7 @@ function renderLossesReport() {
       <td>${kgNum(tot.waterDry)}</td>
       <td>${kgNum(tot.delivered)}</td>
       <td>${kgNum(tot.waterDeliv)}</td>
+      <td><b>${kgNum(tot.corrected)}</b></td>
       <td><b>${kgNum(tot.diff)}</b></td>
       <td>${kgNum(tot.stock)}</td>
     </tr>`;
@@ -4641,8 +4663,14 @@ async function loadStocks() {
     renderStockSummary({ byLocation: [], totals: { totalQuantity: 0, totalLocations: 0, totalProducts: 0 } });
     return;
   }
-  const response = await fetch("/api/stocks");
+  // Corecțiile de inventar se încarcă odată cu stocul: raportul de pierderi le folosește ca
+  // să arate ce parte din diferență a fost deja recunoscută.
+  const [response, corrections] = await Promise.all([
+    fetch("/api/stocks"),
+    fetch("/api/stock-corrections").then((r) => (r.ok ? r.json() : { stockCorrections: [] })).catch(() => ({ stockCorrections: [] }))
+  ]);
   const data = await response.json();
+  stockCorrectionsCache = corrections.stockCorrections || [];
   renderStockSummary(data);
   updateTransferAvailableHint();
   updateDeliverySourceOptions();
@@ -8042,6 +8070,20 @@ async function cancelDocumentRequest(kind, id, reason) {
   return res.json();
 }
 
+// Corecție de inventar. Cantitatea se trimite în TONE (formularele lucrează în kg).
+async function stockCorrectionRequest(location, product, countedTons, reason) {
+  const res = await fetch("/api/stock-corrections", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ location, product, countedQuantity: countedTons, changeReason: reason })
+  });
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({}));
+    throw new Error(e.error || "Nu am putut salva corecția de stoc.");
+  }
+  return res.json();
+}
+
 async function returnDeliveryRequest(id, returnedQuantityTons, reason) {
   const res = await fetch(`/api/deliveries/${id}/return`, {
     method: "POST",
@@ -8128,6 +8170,44 @@ document.addEventListener("click", async (event) => {
       // Reîncărcare țintită: returul atinge livrarea, stocul și recepția-sursă. Transferurile
       // nu se schimbă, iar jurnalul de audit aduce tot blob-ul pentru câteva rânduri.
       await Promise.all([loadDeliveries(), loadStocks(), loadReceipts()]);
+    } catch (e) {
+      window.alert(e.message);
+    }
+    return;
+  }
+  const correctBtn = event.target.closest('[data-action="stock-correct"]');
+  if (correctBtn) {
+    const location = correctBtn.dataset.location;
+    const product = correctBtn.dataset.product;
+    const currentKg = Number(correctBtn.dataset.current || 0);
+    const raw = window.prompt(
+      `Câte kg de ${product} sunt FIZIC în ${location}?\n` +
+        `Aplicația arată acum ${formatNumber(currentKg)} kg. Diferența intră la pierderi.`,
+      String(currentKg)
+    );
+    if (raw === null) return;
+    const kg = Number(String(raw).replace(",", ".").trim());
+    if (!Number.isFinite(kg) || kg < 0) {
+      window.alert("Cantitatea numărată trebuie să fie un număr mai mare sau egal cu zero.");
+      return;
+    }
+    if (Math.round(kg) === Math.round(currentKg)) {
+      window.alert("Cantitatea numărată coincide cu ce arată aplicația — nu e nimic de corectat.");
+      return;
+    }
+    const diff = kg - currentKg;
+    const reason = window.prompt(
+      `Diferența: ${diff > 0 ? "+" : "−"}${formatNumber(Math.abs(diff))} kg ` +
+        `(${diff < 0 ? "pierdere" : "plus la inventar"}).\nMotivul (obligatoriu):`
+    );
+    if (reason === null) return;
+    if (!reason.trim()) {
+      window.alert("Motivul este obligatoriu.");
+      return;
+    }
+    try {
+      await stockCorrectionRequest(location, product, kg / 1000, reason.trim());
+      await Promise.all([loadStocks(), loadAuditLogs()]);
     } catch (e) {
       window.alert(e.message);
     }
