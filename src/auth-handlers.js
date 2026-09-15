@@ -297,27 +297,41 @@ async function telegramLoginHandler(req, res) {
     // IDENTITATEA se leaga de ID-ul de Telegram, care e imuabil — NU de handle, pe care
     // oricine si-l poate schimba. Fara asta, cine isi punea handle-ul „admin" primea
     // sesiune de administrator, fara parola.
-    const existingLink = getTelegramLink(user.username);
-    const linkedId = String((existingLink && existingLink.chatId) || "").trim();
+    //
+    // Sursa de adevar e `user.telegramUserId`, de pe CONTUL din `config` — care se reincarca
+    // din KV la fiecare cerere. NU `automation-state`, care nu se reincarca si pe care botul
+    // il putea rescrie printr-un simplu /start (asa se putea fura legatura altcuiva).
     const currentId = String(tgUser?.id || "").trim();
-
     if (!currentId) {
       return refuse();
     }
-    if (linkedId) {
-      // Cont deja legat: doar acel ID de Telegram il poate folosi.
-      if (linkedId !== currentId) {
-        console.warn(
-          `[auth] Telegram: incercare de acces pe contul ${user.username} de pe alt ID de Telegram.`
-        );
+
+    const boundId = String(user.telegramUserId || "").trim();
+    if (boundId) {
+      if (boundId !== currentId) {
+        console.warn(`[auth] Telegram: acces respins pe ${user.username} — alt ID de Telegram.`);
         return refuse();
       }
-    } else if (String(user.channel || "").trim() !== "telegram") {
-      // Cont care NU s-a nascut din Telegram si nu a fost legat niciodata: nu il legam
-      // automat, fiindca handle-ul poate fi revendicat de altcineva. Legarea o face
-      // adminul (din bot, cu //start pe contul propriu) sau se face la primul acces al
-      // unui cont creat chiar prin Telegram.
-      return refuse();
+    } else {
+      // Cont fara ID legat inca. Il acceptam DOAR daca exista deja o legatura veche
+      // (utilizatorii care foloseau botul inainte de aceasta regula) si aceea coincide.
+      // Orice alt cont — inclusiv cele web — cere legarea explicita de catre admin.
+      const legacyLink = getTelegramLink(user.username);
+      const legacyId = String((legacyLink && legacyLink.chatId) || "").trim();
+      if (!legacyId || legacyId !== currentId) {
+        return refuse();
+      }
+      // Mutam legatura pe cont, ca sa nu mai depindem de tabelul rescriibil.
+      try {
+        user = await updateUserById(user.id, {
+          telegramUserId: currentId,
+          changeReason: "Legare cont Telegram (migrare din legatura veche)",
+          changedBy: "telegram"
+        });
+      } catch (bindError) {
+        console.error("Failed to bind Telegram id:", bindError.message);
+        return refuse();
+      }
     }
 
     if (tgUser?.id) {

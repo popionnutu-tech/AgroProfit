@@ -4339,6 +4339,12 @@ function getEditorSchema(entity) {
             { value: "telegram", label: "telegram" }
           ]
         },
+        {
+          name: "telegramUserId",
+          label: "ID Telegram (legare cont)",
+          type: "text",
+          hint: "Utilizatorul scrie /start botului, care îi răspunde cu ID-ul. Fără el nu poate intra din Telegram. Handle-ul (@nume) NU e suficient: oricine și-l poate schimba."
+        },
         commonActiveField,
         { name: "password", label: "Parola noua", type: "password" }
       ]
@@ -4433,6 +4439,7 @@ function renderEditorField(field, item) {
         ${passwordAttrs}
         ${field.step ? `step="${field.step}"` : ""}
       />
+      ${field.hint ? `<small class="field-hint">${escapeComboHtml(field.hint)}</small>` : ""}
     </label>
   `;
 }
