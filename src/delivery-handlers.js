@@ -8,7 +8,7 @@ const {
   updateDelivery
 } = require("./storage");
 const { getActorLabel } = require("./auth");
-const { filterCanceledForRole } = require("./permissions");
+const { DRAFT_ONLY_ROLES, filterCanceledForRole, normalizeRoleCode } = require("./permissions");
 const { triggerCriticalManagementAlert } = require("./critical-alerts");
 
 function sendJson(res, statusCode, payload) {
@@ -25,11 +25,46 @@ function getBody(req) {
   return req.body || {};
 }
 
+// Campurile financiare ale unei livrari. Pana acum plecau catre TOATE rolurile care pot citi
+// livrari (inclusiv operator si control): interfata doar ascundea coloanele `col-fin`, dar
+// datele ajungeau in browser. Acelasi tipar ca `stripReceiptFinancials` de la recepții.
+const FINANCIAL_DELIVERY_FIELDS = [
+  "contractPrice", "priceLei", "priceForeign", "currency", "exchangeRate",
+  "invoiceNumber", "invoiceDate", "invoicePaid", "vatRate",
+  "seller", "sellerId", "collectedAmount", "collectionStatus"
+];
+
+// Fail-closed: daca nu putem confirma capabilitatea „finance", nu trimitem nimic financiar.
+function requestCanSeeFinance(req) {
+  const permissions =
+    req && req.currentUser && Array.isArray(req.currentUser.permissions)
+      ? req.currentUser.permissions
+      : [];
+  return permissions.includes("finance");
+}
+
+function stripDeliveryFinancials(delivery) {
+  const clone = { ...delivery };
+  // Indicatori NEfinanciari, pastrati ca interfata sa stie CE poate face, fara sa afle sume:
+  // butonul de retur depinde de existenta facturii, iar filtrul „Achitate" de starea platii.
+  clone.hasInvoice = String(delivery.invoiceNumber || "").trim() !== "";
+  clone.isPaid = delivery.invoicePaid === true;
+  for (const field of FINANCIAL_DELIVERY_FIELDS) {
+    delete clone[field];
+  }
+  return clone;
+}
+
+function deliveryForRequest(req, delivery) {
+  return requestCanSeeFinance(req) ? delivery : stripDeliveryFinancials(delivery);
+}
+
 async function listDeliveriesHandler(req, res) {
   try {
     const deliveries = await listDeliveries();
     // Livrarile anulate sunt filtrate dupa rol (server-side).
-    const visible = filterCanceledForRole(deliveries, req && req.currentUser && req.currentUser.roleCode);
+    const visible = filterCanceledForRole(deliveries, req && req.currentUser && req.currentUser.roleCode)
+      .map((item) => deliveryForRequest(req, item));
     return sendJson(res, 200, { deliveries: visible });
   } catch (error) {
     console.error("Failed to load deliveries:", error.message);
@@ -67,14 +102,19 @@ async function createDeliveryHandler(req, res) {
       }
     }
 
+    // Regimul de PROIECT il decide ROLUL din sesiune, nu body-ul: contabilul pregateste
+    // documentul, operatorul il confirma la cantar.
+    const actorRole = normalizeRoleCode((req.currentUser || {}).roleCode);
     const delivery = await createDelivery({
       ...body,
       plannedQuantity,
       createdBy: actor,
-      customer: customer.name
+      customer: customer.name,
+      isDraft: DRAFT_ONLY_ROLES.includes(actorRole),
+      actorRole
     });
 
-    const response = sendJson(res, 201, delivery);
+    const response = sendJson(res, 201, deliveryForRequest(req, delivery));
     triggerCriticalManagementAlert({
       trigger: "delivery-created",
       actor
@@ -99,7 +139,7 @@ async function updateDeliveryHandler(req, res, id) {
       return sendJson(res, 404, { error: "Livrarea nu a fost gasita." });
     }
 
-    const response = sendJson(res, 200, delivery);
+    const response = sendJson(res, 200, deliveryForRequest(req, delivery));
     triggerCriticalManagementAlert({
       trigger: "delivery-updated",
       actor: getActorLabel(req)
@@ -126,7 +166,7 @@ async function transitionDeliveryHandler(req, res, id, newStatus) {
       return sendJson(res, 404, { error: "Livrarea nu a fost gasita." });
     }
 
-    const response = sendJson(res, 200, delivery);
+    const response = sendJson(res, 200, deliveryForRequest(req, delivery));
     triggerCriticalManagementAlert({
       trigger: `delivery-${newStatus.toLowerCase()}`,
       actor
@@ -157,7 +197,7 @@ async function returnDeliveryHandler(req, res, id) {
       return sendJson(res, 404, { error: "Livrarea nu a fost gasita." });
     }
 
-    const response = sendJson(res, 200, delivery);
+    const response = sendJson(res, 200, deliveryForRequest(req, delivery));
     triggerCriticalManagementAlert({
       trigger: "delivery-returned",
       actor
@@ -172,6 +212,8 @@ async function returnDeliveryHandler(req, res, id) {
 
 module.exports = {
   createDeliveryHandler,
+  // Exportate ca sa poata fi folosite si de rapoarte, si testate direct — la fel ca la recepții.
+  stripDeliveryFinancials,
   listDeliveriesHandler,
   returnDeliveryHandler,
   transitionDeliveryHandler,

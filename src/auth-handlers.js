@@ -23,7 +23,7 @@ const {
   verifyPassword
 } = require("./auth");
 const { validateInitData } = require("./telegram-webapp-auth");
-const { linkTelegramUser } = require("./automation-state");
+const { getTelegramLink, linkTelegramUser } = require("./automation-state");
 
 function sendJson(res, statusCode, payload) {
   if (typeof res.status === "function" && typeof res.json === "function") {
@@ -260,30 +260,78 @@ async function telegramLoginHandler(req, res) {
   try {
     let user = await findUserByUsername(internalUsername);
 
+    let justCreated = false;
     if (!user) {
+      // Semnatura Telegram dovedeste ca cererea e AUTENTICA, nu ca omul e AUTORIZAT.
+      // Botul e public, deci oricine il gaseste ar primi altfel un cont de operator activ,
+      // iar operatorul creeaza recepții si livrari care misca stoc real si produc datorii.
+      // Contul se creeaza INACTIV: adminul il activeaza din Utilizatori. Cine are deja cont
+      // nu e afectat.
       user = await createUser({
         name: buildTelegramDisplayName(tgUser),
         username: internalUsername,
         roleCode: "operator",
         channel: "telegram",
-        active: true,
-        changeReason: "Auto-provisioned din Telegram Mini App",
+        // Legam ID-ul din prima clipa: altfel contul ar sta „nascut din Telegram, nelegat"
+        // pana la prima intrare dupa aprobare, iar in fereastra aceea oricine ia handle-ul
+        // il poate revendica.
+        telegramUserId: String(tgUser?.id || ""),
+        active: false,
+        changeReason: "Auto-provisioned din Telegram Mini App (inactiv pana la aprobare)",
         changedBy: "telegram"
       });
-    } else if (!String(user.channel || "").includes("telegram")) {
-      try {
-        user = await updateUserById(user.id, {
-          channel: user.channel ? `${user.channel}+telegram` : "telegram",
-          changeReason: "Adaugat canal Telegram din Mini App",
-          changedBy: "telegram"
-        });
-      } catch {
-        // ignore if update fails (e.g. user inactive) — fallthrough handled below
-      }
+      justCreated = true;
     }
 
-    if (!user || user.active === false) {
-      return sendJson(res, 403, { error: "Contul tau este dezactivat." });
+    // Un singur mesaj pentru TOATE refuzurile: doua mesaje distincte spuneau atacatorului
+    // daca un username intern exista sau nu — exact ce ii trebuie ca sa tinteasca un cont.
+    const refuse = () =>
+      sendJson(res, 403, {
+        error: "Contul nu este autorizat pentru Telegram. Cere administratorului activarea sau legarea contului."
+      });
+
+    if (justCreated || !user || user.active === false) {
+      return refuse();
+    }
+
+    // IDENTITATEA se leaga de ID-ul de Telegram, care e imuabil — NU de handle, pe care
+    // oricine si-l poate schimba. Fara asta, cine isi punea handle-ul „admin" primea
+    // sesiune de administrator, fara parola.
+    //
+    // Sursa de adevar e `user.telegramUserId`, de pe CONTUL din `config` — care se reincarca
+    // din KV la fiecare cerere. NU `automation-state`, care nu se reincarca si pe care botul
+    // il putea rescrie printr-un simplu /start (asa se putea fura legatura altcuiva).
+    const currentId = String(tgUser?.id || "").trim();
+    if (!currentId) {
+      return refuse();
+    }
+
+    const boundId = String(user.telegramUserId || "").trim();
+    if (boundId) {
+      if (boundId !== currentId) {
+        console.warn(`[auth] Telegram: acces respins pe ${user.username} — alt ID de Telegram.`);
+        return refuse();
+      }
+    } else {
+      // Cont fara ID legat inca. Il acceptam DOAR daca exista deja o legatura veche
+      // (utilizatorii care foloseau botul inainte de aceasta regula) si aceea coincide.
+      // Orice alt cont — inclusiv cele web — cere legarea explicita de catre admin.
+      const legacyLink = getTelegramLink(user.username);
+      const legacyId = String((legacyLink && legacyLink.chatId) || "").trim();
+      if (!legacyId || legacyId !== currentId) {
+        return refuse();
+      }
+      // Mutam legatura pe cont, ca sa nu mai depindem de tabelul rescriibil.
+      try {
+        user = await updateUserById(user.id, {
+          telegramUserId: currentId,
+          changeReason: "Legare cont Telegram (migrare din legatura veche)",
+          changedBy: "telegram"
+        });
+      } catch (bindError) {
+        console.error("Failed to bind Telegram id:", bindError.message);
+        return refuse();
+      }
     }
 
     if (tgUser?.id) {

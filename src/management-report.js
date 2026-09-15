@@ -19,6 +19,13 @@ function formatCurrency(value) {
 // Oglinda lui `isVoidedDelivery` din src/local-storage.js: livrarea anulata sau returnata
 // integral nu mai produce miscare de stoc si nu mai e de facturat/incasat.
 // (Modulul e intentionat pur — fara require-uri — de aceea regula e oglindita, nu importata.)
+// Oglinda lui `isReceiptInStock` din src/local-storage.js (modulul e intentionat pur).
+// Proiectul contabilului nu e marfa primita: nu e document deschis, nu e datorie si nu e
+// „receptie fara pret" — altfel un proiect declanseaza alerta critica la management.
+function isReceiptInStock(item) {
+  return !["Anulat", "In descarcare", "Proiect"].includes(String((item && item.status) || ""));
+}
+
 function isVoidedDelivery(item) {
   const status = String((item && item.status) || "");
   return status === "Anulat" || status === "Returnat";
@@ -30,7 +37,9 @@ function sameDay(value, dateValue) {
 
 function getOpenDocuments(receipts, deliveries) {
   return {
-    receipts: receipts.filter((item) => !["Inchis", "Anulat", "Finalizata"].includes(String(item.status || ""))),
+    receipts: receipts.filter(
+      (item) => isReceiptInStock(item) && !["Inchis", "Finalizata"].includes(String(item.status || ""))
+    ),
     deliveries: deliveries.filter(
       (item) => !isVoidedDelivery(item) && !["Inchis", "Finalizata"].includes(String(item.status || ""))
     )
@@ -39,6 +48,9 @@ function getOpenDocuments(receipts, deliveries) {
 
 function getOutstandingFinancials(receipts, deliveries, openingDebtItems) {
   const receiptPayables = receipts
+    // Se plateste doar marfa chiar primita. Nu exista niciun filtru aici pana acum —
+    // nici macar pe „Anulat".
+    .filter((item) => isReceiptInStock(item))
     .map((item) => {
       const targetAmount = Number(item.preliminaryPayableAmount || 0);
       const paidAmount = Number(item.paidAmount || 0);
@@ -115,7 +127,10 @@ function getOutstandingFinancials(receipts, deliveries, openingDebtItems) {
 }
 
 function getOperationalProblems(report, receipts, deliveries, complaints, auditLogs, openDocuments, financials, dateValue) {
-  const receiptsWithoutPrice = receipts.filter((item) => Number(item.price || 0) <= 0);
+  // Proiectul contabilului n-are inca pret negociat: nu e „problema operationala".
+  const receiptsWithoutPrice = receipts.filter(
+    (item) => isReceiptInStock(item) && Number(item.price || 0) <= 0
+  );
   const qualityDeviationReceipts = receipts.filter(
     (item) => Number(item.excessHumidity || 0) > 0 || Number(item.excessImpurity || 0) > 0
   );

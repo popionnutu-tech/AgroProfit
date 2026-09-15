@@ -10,7 +10,7 @@ const {
   updateReceiptStatusWithAudit
 } = require("./storage");
 const { getActorLabel } = require("./auth");
-const { filterCanceledForRole } = require("./permissions");
+const { DRAFT_ONLY_ROLES, filterCanceledForRole, normalizeRoleCode } = require("./permissions");
 const { triggerCriticalManagementAlert } = require("./critical-alerts");
 
 function sendJson(res, statusCode, payload) {
@@ -167,6 +167,11 @@ async function createReceiptHandler(req, res) {
   // Cantar in 2 pasi: la intrare se salveaza doar masa bruta (status "In descarcare");
   // cantitatea (net) ramane necunoscuta pana la a doua cantarire (tara).
   const isPendingWeighing = body.status === "In descarcare";
+  // Regimul de PROIECT nu se ia din body: il decide ROLUL din sesiune. Contabilul pregateste
+  // documentul inainte ca operatorul sa apuce sa-l introduca; operatorul, care e la cantar,
+  // creeaza documente reale, nu proiecte.
+  const actorRole = normalizeRoleCode((req.currentUser || {}).roleCode);
+  const isDraft = DRAFT_ONLY_ROLES.includes(actorRole);
 
   if (!body.productId) {
     return sendJson(res, 400, { error: "Campul productId este obligatoriu." });
@@ -219,6 +224,9 @@ async function createReceiptHandler(req, res) {
         return sendJson(res, 400, { error: "Introdu masa bruta (camion plin)." });
       }
     } else if (!Number.isFinite(normalizedQuantity) || normalizedQuantity <= 0) {
+      // Si proiectul cere cantitate valida: e cantitatea ANUNTATA de furnizor, pe care
+      // contabilul o pune in document. Fara verificare treceau valori negative si NaN, iar
+      // documentul devenea receptie reala cu acea valoare la o simpla schimbare de status.
       return sendJson(res, 400, { error: "Cantitatea trebuie sa fie mai mare ca zero." });
     }
 
@@ -255,7 +263,10 @@ async function createReceiptHandler(req, res) {
       ...estimate,
       createdBy: actor,
       source: body.source || "dashboard",
-      status: body.status || "Draft"
+      // La proiect NU trimitem status: `createReceipt` refuza combinatia isDraft + status.
+      status: isDraft ? undefined : (body.status || "Draft"),
+      isDraft,
+      actorRole
     });
 
     const response = sendJson(res, 201, receiptForRequest(req, receipt));

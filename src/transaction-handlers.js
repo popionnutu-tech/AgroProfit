@@ -1,5 +1,7 @@
 const {
   applyAdvanceCredit,
+  isDeliveryPendingStockExit,
+  isReceiptInStock,
   createTransaction,
   getConfig,
   listDeliveries,
@@ -98,6 +100,15 @@ async function createTransactionHandler(req, res) {
       if (!receipt) {
         return sendJson(res, 404, { error: "Receptia nu a fost gasita." });
       }
+      // Marfa care nu a intrat inca in stoc nu are datorie: o plata pe ea ar iesi din TOATE
+      // evidentele (alocarea FIFO o sare, dashboard-ul o exclude) — bani platiti fara sa
+      // apara nicaieri, nici macar ca avans.
+      if (!isReceiptInStock(receipt)) {
+        return sendJson(res, 400, {
+          error: `Receptia #${receipt.id} are statusul "${receipt.status}" — nu are inca datorie. ` +
+            "Confirma-o la cantar inainte de plata."
+        });
+      }
 
       referencePayload = {
         referenceType,
@@ -110,6 +121,13 @@ async function createTransactionHandler(req, res) {
 
       if (!delivery) {
         return sendJson(res, 404, { error: "Livrarea nu a fost gasita." });
+      }
+      // Proiectul are tinta de incasat 0 (marfa n-a plecat), deci ORICE suma l-ar marca
+      // „Incasat" — iar creanta reala, de dupa confirmare, ar disparea din filtre.
+      if (isDeliveryPendingStockExit(delivery)) {
+        return sendJson(res, 400, {
+          error: `Livrarea #${delivery.id} e in regim de proiect — confirma-o la cantar inainte de incasare.`
+        });
       }
 
       referencePayload = {

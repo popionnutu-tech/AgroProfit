@@ -28,6 +28,7 @@ const SYSTEM_ROLE_CAPABILITIES = {
   ],
   accountant: [
     "receipts-read",
+    "document-draft",
     "processings-read",
     "stocks-read",
     "deliveries-read",
@@ -44,6 +45,7 @@ const SYSTEM_ROLE_CAPABILITIES = {
   ],
   "accountant-sef": [
     "receipts-read",
+    "document-draft",
     "processings-read",
     "stocks-read",
     "deliveries-read",
@@ -72,6 +74,7 @@ const SYSTEM_ROLE_CAPABILITIES = {
   ],
   admin: [
     "receipts-read",
+    "document-draft",
     "receipt-write",
     "processings-read",
     "processing-write",
@@ -171,7 +174,12 @@ function filterCanceledTransactionsForRole(docs, roleCode) {
   return docs.filter((doc) => canRoleViewCanceledTransaction(doc, roleCode));
 }
 
+// Rolurile care pot DOAR pregati documente in „Proiect" (nu misca stoc). Sursa unica:
+// handlerele decid regimul dupa ea, `local-storage` verifica dreptul cu ea.
+const DRAFT_ONLY_ROLES = ["accountant", "accountant-sef"];
+
 module.exports = {
+  DRAFT_ONLY_ROLES,
   canRoleViewCanceled,
   canRoleViewCanceledTransaction,
   filterCanceledForRole,

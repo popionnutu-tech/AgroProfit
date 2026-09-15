@@ -97,6 +97,31 @@ descarcă înapoi în locația de plecare (`returnDelivery`, buton „Descărcar
   `listReturnMovements()`. Regula: **ziua livrării păstrează ieșirea brută; ziua descărcării
   primește intrarea.** Livrarea `Anulat` face excepție — n-a existat, deci zero pe ambele.
 
+### 7. „Proiect" — documentul pregătit de contabil
+Contabilul are nevoie de document înainte ca operatorul (care e la cântar) să apuce să-l
+introducă. Îl creează în status **`Proiect`**.
+- Regimul NU se ia din body: îl decide **rolul din sesiune** (`CAN_CREATE_DRAFT_ROLES`).
+  Capabilitatea de interfață e `document-draft` — NU e drept de scriere pe stoc.
+- Un proiect **nu intră în stoc, nu creează datorie, nu intră în KPI și nu e livrabil**.
+  Sursa unică: `isReceiptInStock()` / `RECEIPT_STATUSES_OUT_OF_STOCK`. Folosește-o oriunde
+  filtrai doar pe `"Anulat"` la recepții — altfel marfa nedescărcată apare ca fiind în depozit.
+- **Regula care ține totul:** ce nu e în stoc nu se poate livra. `getReceiptAvailableQuantity`
+  întoarce 0 pentru astfel de recepții, iar `createDelivery` dă eroare explicită. Fără asta,
+  scăderea ar fi consumat marfa ALTOR recepții prin cascada pe locații, ascunsă de `Math.max(…,0)`.
+- `Proiect` se setează **doar la creare**. Un document existent nu se întoarce în proiect —
+  altfel oricine cu drept de status ar scoate marfă din stoc lăsând documentul să pară în regulă.
+- Livrarea-proiect are `deliveredQuantity = 0` **și `netWeight = 0`** (doar rezervare). Nu pune
+  cantitate în `netWeight`: toate fallback-urile de tip `deliveredQuantity || netWeight` (facturi,
+  creanțe, totaluri) ar reactiva-o și proiectul ar apărea ca marfă livrată.
+- Operatorul o confirmă la cântar prin `Proiect → Livrat`, **direct**. `Proiect → Confirmat` e
+  interzis intenționat: scotea documentul din verificarea de stoc și îl bloca pentru operator.
+- **Verificarea de stoc se leagă de STAREA documentului, nu de tranziție.** Se compară cât mai
+  iese acum (`netWeight − deliveredQuantity`) cu disponibilul. Dacă o legi de `currentStatus`,
+  orice pas intermediar devine o poartă deschisă — exact așa s-a redeschis gaura o dată.
+- `isDeliveryPendingStockExit()` e perechea lui `isReceiptInStock()` pentru livrări. Folosește-le
+  peste tot unde numeri cantități sau bani; lipsa predicatului pentru livrări a fost cauza
+  găurii, nu o scăpare punctuală.
+
 ## Deploy
 - **Push pe `main` → Vercel publică automat** pe agroprofit-plus.vercel.app (integrare Git activă).
 - Lucrează pe o **ramură separată** (implicit `dev`), testează pe preview, apoi fă merge în `main`.

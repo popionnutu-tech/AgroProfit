@@ -420,6 +420,29 @@ async function tryLinkTelegramAccount(ctx) {
   if (!String(user.channel || "").includes("telegram")) {
     return `Utilizatorul ${telegramUsername} nu are activ canalul Telegram in sistem.`;
   }
+  // Contul neaprobat NU se leaga: altfel isi inregistra chatId-ul si primea rapoartele de
+  // management (cu tot financiarul) fara sa fi fost activat vreodata de admin.
+  if (user.active === false) {
+    return `Contul ${telegramUsername} nu este activat. Cere administratorului activarea.`;
+  }
+  // Legarea NU se poate FURA. Inainte, /start rescria legatura pe baza handle-ului: cine isi
+  // punea handle-ul unui manager rebinda contul pe el si intra apoi in aplicatie cu rolul
+  // victimei, fara parola. O legatura existenta pe alt ID de Telegram nu se suprascrie —
+  // relegarea o face adminul, deliberat.
+  const boundId = String(user.telegramUserId || "").trim();
+  const currentChatId = String(ctx.chat?.id || "").trim();
+  if (boundId && currentChatId && boundId !== currentChatId) {
+    return `Contul ${telegramUsername} este deja legat de alt cont Telegram. Cere administratorului relegarea.`;
+  }
+  // Contul nu e legat inca: NU il legam automat (cine ia handle-ul primul l-ar revendica).
+  // Ii dam omului ID-ul lui, ca adminul sa-l scrie pe cont, in Utilizatori.
+  if (!boundId) {
+    return (
+      `Contul ${telegramUsername} nu e legat inca de Telegram.\n` +
+      `ID-ul tau de Telegram este: ${currentChatId}\n` +
+      `Da-i-l administratorului, ca sa-l scrie in Utilizatori -> ID Telegram.`
+    );
+  }
 
   linkTelegramUser(user.username, {
     chatId: ctx.chat?.id,

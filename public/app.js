@@ -288,12 +288,27 @@ function setCurrentUser(user) {
   if (uaPanel) uaPanel.hidden = true;
 }
 
+// Accepta si o lista "a,b" = ORICARE dintre capabilitati. Folosit acolo unde acelasi ecran
+// serveste doua roluri diferite: ex. formularul de recepție e al operatorului
+// (`receipt-write`), dar contabilul intra in el ca sa pregateasca un „Proiect"
+// (`document-draft`) — proiectul nu misca stoc, deci nu e acelasi drept.
 function canAccess(capability) {
   if (!currentSessionUser?.roleCode) {
     return false;
   }
+  if (!Array.isArray(currentSessionUser.permissions)) {
+    return false;
+  }
+  return String(capability || "")
+    .split(",")
+    .map((c) => c.trim())
+    .filter(Boolean)
+    .some((c) => currentSessionUser.permissions.includes(c));
+}
 
-  return Array.isArray(currentSessionUser.permissions) && currentSessionUser.permissions.includes(capability);
+// Contabilul poate DOAR pregati documente („Proiect"), nu poate misca stoc.
+function isDraftOnlyUser() {
+  return canAccess("document-draft") && !canAccess("receipt-write");
 }
 
 // Vizibilitatea documentelor ANULATE:
@@ -386,6 +401,10 @@ function canAccessView(view) {
 }
 
 function applyRoleAccess() {
+  // Avertismentul „regim de proiect" apare doar celor care NU pot scrie documente reale.
+  document.querySelectorAll("[data-draft-hint]").forEach((el) => {
+    el.hidden = !isDraftOnlyUser();
+  });
   document.querySelectorAll("[data-access]").forEach((element) => {
     const capability = element.dataset.access;
     element.hidden = !canAccess(capability);
@@ -838,8 +857,8 @@ function renderOpeningDrafts() {
     .map(
       (item) => `
         <tr>
-          <td>${item.product}</td>
-          <td>${item.location}</td>
+          <td>${escapeComboHtml(item.product)}</td>
+          <td>${escapeComboHtml(item.location)}</td>
           <td>${formatNumber(Math.round(Number(item.quantity || 0) * 1000))} kg (${formatNumber(Number(item.quantity || 0))} t)</td>
         </tr>
       `
@@ -850,7 +869,7 @@ function renderOpeningDrafts() {
     .map(
       (item) => `
         <tr>
-          <td>${item.partner}</td>
+          <td>${escapeComboHtml(item.partner)}</td>
           <td>${item.direction === "collection" ? "Incasare" : "Plata"}</td>
           <td>${currency.format(Number(item.amount || 0))}</td>
         </tr>
@@ -1126,12 +1145,17 @@ function renderSilosGrid(summary) {
       const palette = getProductPalette(dominantProduct);
       const fillH = Math.max(0, Math.min(120, (pct / 100) * 120));
       const fillY = 28 + (120 - fillH);
+      const deficit = filled < -1e-6; // s-a scos mai mult decât a intrat aici
       const isEmpty = filled <= 0;
-      const ringClass = over ? " is-over-ring" : pct >= 95 ? " is-crit-ring" : pct >= 80 ? " is-warn-ring" : "";
+      const ringClass = deficit
+        ? " is-deficit-ring"
+        : over ? " is-over-ring" : pct >= 95 ? " is-crit-ring" : pct >= 80 ? " is-warn-ring" : "";
       const tonsLabel = filled.toFixed(3).replace(".", ",");
       const productHead = dominantProduct
         ? `<span class="silo-product" style="color:${palette.edge};" title="${productsTooltip}"><span class="silo-product-dot" style="background:${palette.fill};border-color:${palette.edge};"></span>${productsLabel}</span>`
-        : '<span class="silo-product silo-product-empty">gol</span>';
+        : (deficit
+            ? '<span class="silo-product silo-deficit-label" title="Deficit: s-a scos mai mult decât a intrat în acest cilindru.">⚠️ deficit</span>'
+            : '<span class="silo-product silo-product-empty">gol</span>');
 
       // Gropile de primire (orice locație care nu e cilindru) primesc un aspect distinct:
       // verzi (clasa silo-card--pit). Gropile propriu-zise (fără „Cilindru 7") sunt și mai mici, ~80%
@@ -1270,19 +1294,40 @@ function renderStockSummary(summary) {
     )
     .join("");
 
-  stocksBodyEl.innerHTML = summary.byLocation
-    .filter((item) => Number(item.quantity || 0) > 0)
+  // Arătăm și liniile NEGATIVE (înainte se filtra `> 0`, deci un deficit rămânea invizibil).
+  // Un minus înseamnă că s-a scos din cilindru mai mult decât a intrat vreodată — se vede,
+  // ca să poată fi corectat, nu se ascunde.
+  const stockRows = summary.byLocation.filter((item) => Math.round(Number(item.quantity || 0) * 1000) !== 0);
+  const negativeRows = stockRows.filter((item) => Number(item.quantity || 0) < 0);
+  stocksBodyEl.innerHTML = stockRows
     .map(
       (item) => `
-        <tr>
-          <td>${item.location}</td>
-          <td>${item.product}</td>
+        <tr${Number(item.quantity || 0) < 0 ? ' class="stock-negative" title="Deficit: s-a scos mai mult decât a intrat în această locație."' : ""}>
+          <td>${escapeComboHtml(item.location)}</td>
+          <td>${escapeComboHtml(item.product)}</td>
           <td>${formatNumber(item.quantity)} t</td>
           <td>${formatNumber(item.quantity * 1000)} kg</td>
         </tr>
       `
     )
     .join("");
+
+  const warnEl = document.getElementById("stock-deficit-warning");
+  if (warnEl) {
+    if (negativeRows.length) {
+      const total = negativeRows.reduce((s, i) => s + Number(i.quantity || 0), 0);
+      warnEl.innerHTML =
+        `<b>Atenție: deficit de stoc.</b> ${negativeRows.length} ` +
+        `${negativeRows.length === 1 ? "locație are" : "locații au"} cantitate negativă ` +
+        `(total ${formatNumber(Math.abs(total) * 1000)} kg). Înseamnă că s-a scos mai mult ` +
+        `decât a intrat acolo — verifică descărcările și corecțiile, apoi așază stocul la ` +
+        `realitatea din cilindru.`;
+      warnEl.hidden = false;
+    } else {
+      warnEl.hidden = true;
+      warnEl.innerHTML = "";
+    }
+  }
 
   renderTransferStockTable(summary);
 }
@@ -1449,7 +1494,7 @@ function renderLossesReport() {
   // Câmpul de dată prioritar = `createdAt` (ca ecranele Recepții/Procesări/Livrări), ca raportul
   // să se reconcilieze cu ele; fallback pe data reală a operației.
   (receiptsCache || []).forEach((r) => {
-    if (r.status === "Anulat" || (prodFilter && r.product !== prodFilter) || !inRange(r.createdAt || r.receivedAt)) return;
+    if (!isReceiptInStock(r) || (prodFilter && r.product !== prodFilter) || !inRange(r.createdAt || r.receivedAt)) return;
     const g = bucket(r.product);
     g.received += Number(r.provisionalNetQuantity || r.quantity || 0);
     g.waterRecv += Number(r.estimatedWaterLoss || 0);
@@ -1611,7 +1656,7 @@ function renderStockPeriod() {
 
   // Receptii (cantitate bruta de intrare) + pierderi de la procesarile vechi (receptie procesata)
   (receiptsCache || []).forEach((r) => {
-    if (r.status === "Anulat") return;
+    if (!isReceiptInStock(r)) return;
     const p = r.product || "—";
     products.add(p);
     const provNet = Number(r.provisionalNetQuantity || r.quantity || 0);
@@ -1722,9 +1767,9 @@ function renderAutomationStatus(status) {
     .map(
       (item) => `
         <tr>
-          <td>${item.name}</td>
+          <td>${escapeComboHtml(item.name)}</td>
           <td>${item.roleCode || "-"}</td>
-          <td>${item.channel || "-"}</td>
+          <td>${escapeComboHtml(item.channel || "-")}</td>
           <td>${item.canReceiveTelegram ? "Legat" : "Lipsa legare"}</td>
           <td>${item.lastSeenAt ? new Date(item.lastSeenAt).toLocaleString("ro-RO") : "-"}</td>
         </tr>
@@ -1787,8 +1832,11 @@ function renderCriticalAlertsStatus(status) {
 function statusOptions(current, allowCancel = canCancelDocuments()) {
   // „Anulat" apare doar pentru cine poate anula (admin). Pastram „Anulat" daca documentul
   // e deja anulat, ca sa nu se piarda valoarea curenta din select.
-  return ["Draft", "Confirmat", "Procesata", "Inchis", "Anulat", "Redeschis", "Noua", "Verificata", "Finalizata"]
+  return ["Proiect", "Draft", "Confirmat", "Procesata", "Inchis", "Anulat", "Redeschis", "Noua", "Verificata", "Finalizata"]
     .filter((status) => status !== "Anulat" || allowCancel || current === "Anulat")
+    // „Proiect" se setează doar la creare (de contabil): apare în listă doar ca să se vadă
+    // valoarea curentă, nu ca destinație posibilă.
+    .filter((status) => status !== "Proiect" || current === "Proiect")
     .map((status) => {
       const selected = current === status ? "selected" : "";
       return `<option value="${status}" ${selected}>${bi(status)}</option>`;
@@ -1885,10 +1933,10 @@ function renderReceipts(receipts) {
           <td>#${item.id}</td>
           <td>${formatDateShort(item.createdAt || item.receivedAt)}</td>
           <td class="supplier-cell" data-id="${item.id}">
-            <span class="supplier-name">${item.supplier}</span>
+            <span class="supplier-name">${escapeComboHtml(item.supplier)}</span>
             ${canChangeSupplier ? `<button type="button" class="cell-btn change-supplier-btn" data-action="change-supplier" data-id="${item.id}" title="Schimbă furnizorul">✎</button>` : ""}
           </td>
-          <td>${item.product}${photosMini(item.photos)}</td>
+          <td>${escapeComboHtml(item.product)}${photosMini(item.photos)}</td>
           <td>${item.grossWeight > 0 ? formatNumber(Number(item.grossWeight)) + " kg" : "—"}</td>
           <td>${item.tareWeight > 0 ? formatNumber(Number(item.tareWeight)) + " kg" : "—"}</td>
           <td title="Apă eliminată la recepție (din umiditatea în exces)">${isPendingWeighing || !(Number(item.estimatedWaterLoss) > 0) ? "—" : formatNumber(Math.round(Number(item.estimatedWaterLoss) * 1000)) + " kg"}</td>
@@ -2073,7 +2121,7 @@ function renderCloseDayStatus() {
   const todayEl = document.getElementById("today-received");
   if (todayEl) {
     const todayDone = receiptsCache.filter(
-      (r) => isToday(r) && r.status !== "Anulat" && r.status !== "In descarcare"
+      (r) => isToday(r) && isReceiptInStock(r)
     );
     const totalTons = todayDone.reduce(
       (s, r) => s + Number(r.finalNetQuantity ?? r.provisionalNetQuantity ?? r.quantity ?? 0),
@@ -2182,7 +2230,7 @@ function renderReceiptTotals(rows) {
   // (Anulatele nu intră în totaluri.)
   let totalNet = 0, totalWater = 0, totalPay = 0, totalPaid = 0, totalRest = 0;
   rows.forEach((item) => {
-    if (item.status === "Anulat") return;
+    if (!isReceiptInStock(item)) return;
     const valoare = Number(item.amountToPay ?? item.preliminaryPayableAmount ?? 0);
     const achitat = Number(item.paidAmount || 0);
     totalNet += Number(item.provisionalNetQuantity || item.quantity || 0);
@@ -2236,7 +2284,7 @@ function checkEndOfDayProcessing() {
     dismissed = false;
   }
   const todaysReceipts = receiptsCache.filter(
-    (r) => String(r.createdAt || r.receivedAt || "").slice(0, 10) === today && r.status !== "Anulat"
+    (r) => String(r.createdAt || r.receivedAt || "").slice(0, 10) === today && isReceiptInStock(r)
   );
   const todaysProcessings = processingsCache.filter(
     (p) => String(p.createdAt || p.processedAt || "").slice(0, 10) === today
@@ -2251,7 +2299,7 @@ function renderUnprocessedStock() {
   const received = {};
   const counts = {};
   receiptsCache.forEach((r) => {
-    if (r.status === "Anulat") return;
+    if (!isReceiptInStock(r)) return;
     const key = r.product || "—";
     received[key] = (received[key] || 0) + Number(r.provisionalNetQuantity ?? r.quantity ?? 0);
     counts[key] = (counts[key] || 0) + 1;
@@ -2302,7 +2350,7 @@ function renderProcessings(processings) {
         <tr>
           <td>#${item.id}</td>
           <td>${formatDateShort(item.createdAt || item.processedAt)}</td>
-          <td>${item.product}</td>
+          <td>${escapeComboHtml(item.product)}</td>
           <td>${item.sourceLocation || "-"}</td>
           <td>${item.destLocation || item.sourceLocation || "-"}</td>
           <td>${item.processingType}</td>
@@ -2559,7 +2607,7 @@ function renderTransactionTotals(rows) {
 }
 
 const DELIVERY_TRANSITIONS = {
-  Proiect: ["Confirmat", "Anulat"],
+  Proiect: ["Livrat", "Anulat"],
   Confirmat: ["Livrat", "Anulat"],
   Livrat: ["Inchis", "Redeschis"],
   Inchis: ["Redeschis"],
@@ -2579,7 +2627,12 @@ function deliveryReturnCell(item, canWrite) {
   // Aceleași condiții ca pe server (`returnDelivery`), ca butonul să nu ducă la un 403:
   // livrarea închisă e doar pentru manager/admin, iar cea facturată doar pentru contabil.
   const closedForRole = item.status === "Inchis" && !canEditConfirmedStatus();
-  const invoiced = String(item.invoiceNumber || "").trim() !== "";
+  // `invoiceNumber` e filtrat pentru rolurile fara drepturi financiare; `hasInvoice` e
+  // indicatorul neutru care supravietuieste filtrarii. Fara el, butonul aparea pe livrarile
+  // facturate si ducea la un 403 derutant.
+  const invoiced = item.hasInvoice !== undefined
+    ? item.hasInvoice === true
+    : String(item.invoiceNumber || "").trim() !== "";
   const canReturn =
     canWrite &&
     !isVoidedDelivery(item) &&
@@ -2600,6 +2653,18 @@ function deliveryReturnCell(item, canWrite) {
 // deja facturată e act contabil (cere storno pe același număr de factură), nu de depozit.
 function canReturnInvoicedDelivery() {
   return ["accountant", "accountant-sef", "admin"].includes(currentSessionUser?.roleCode);
+}
+
+// Oglinda lui `isReceiptInStock` din src/local-storage.js: „Proiect" (pregătit de contabil,
+// neconfirmat la cântar) și „In descarcare" (așteaptă a doua cântărire) NU sunt marfă fizică.
+const RECEIPT_STATUSES_OUT_OF_STOCK = new Set(["Anulat", "In descarcare", "Proiect"]);
+function isReceiptInStock(item) {
+  return !RECEIPT_STATUSES_OUT_OF_STOCK.has(String((item && item.status) || ""));
+}
+
+// Oglinda lui `isDeliveryPendingStockExit`: proiectul de livrare n-a scos încă marfa.
+function isDeliveryPendingStockExit(item) {
+  return String((item && item.status) || "") === "Proiect";
 }
 
 function isVoidedDelivery(item) {
@@ -2638,6 +2703,8 @@ function deliveryDisplayQuantity(item) {
   // Retur integral: marfa s-a întors în stoc, livrarea nu mai are cantitate. Fără această
   // gardă, fallback-ul pe `plannedQuantity` ar afișa cantitatea (și factura) inițială.
   if (item && item.status === "Returnat") return 0;
+  // Proiectul contabilului n-a scos încă marfa: nu are cantitate livrată.
+  if (isDeliveryPendingStockExit(item)) return 0;
   if (Number(item.netWeight) > 0) return Number(item.netWeight);
   if (Number(item.deliveredQuantity) > 0) return Number(item.deliveredQuantity);
   return Number(item.plannedQuantity || 0);
@@ -2734,8 +2801,9 @@ function renderDeliveries(deliveries) {
     if (!withinDateRange(item, ["createdAt", "deliveredAt"], deliveryDateFromEl, deliveryDateToEl)) return false;
     if (custFilter && item.customer !== custFilter) return false;
     if (prodFilter && item.product !== prodFilter) return false;
-    if (paidFilter === "paid" && !item.invoicePaid) return false;
-    if (paidFilter === "unpaid" && item.invoicePaid) return false;
+    const paid = item.isPaid !== undefined ? item.isPaid === true : item.invoicePaid === true;
+    if (paidFilter === "paid" && !paid) return false;
+    if (paidFilter === "unpaid" && paid) return false;
     if (!canViewCanceled(item)) return false;
     return true;
   });
@@ -2772,9 +2840,9 @@ function renderDeliveries(deliveries) {
           <td>Nr. ${item.id}</td>
           <td>${formatDateShort(item.createdAt || item.deliveredAt)}</td>
           <td>${item.location || (item.receiptId ? `#${item.receiptId}` : "-")}</td>
-          <td>${item.customer}</td>
+          <td>${escapeComboHtml(item.customer)}</td>
           <td class="col-fin">${item.seller || "-"}</td>
-          <td>${item.product}${photosMini(item.photos)}</td>
+          <td>${escapeComboHtml(item.product)}${photosMini(item.photos)}</td>
           <td>${formatQtyByEntry(qty, item)}</td>
           <td title="Apă = cantitate × (umid. depozitare − umid. livrare)/100. Pozitiv = pierdută (uscat); negativ = livrat mai umed.">${(() => { const w = deliveryWaterKg(item, waterIdx); return w === null ? "—" : (w >= 0 ? formatNumber(w) : "−" + formatNumber(Math.abs(w))) + " kg"; })()}</td>
           <td>${escapeComboHtml(item.vehicle || "-")}${item.trailer ? ` <span class="trailer-badge">+ ${escapeComboHtml(item.trailer)}</span>` : ""}</td>
@@ -2824,7 +2892,8 @@ function renderDeliveryTotals(rows) {
   let totalLei = 0;
   const totalForeignByCur = {};
   rows.forEach((item) => {
-    if (item.status === "Anulat" || item.status === "Returnat") return; // anulată/returnată — nu intră în totaluri
+    // Anulată / returnată / proiect neconfirmat — nu intră în totaluri.
+    if (isVoidedDelivery(item) || isDeliveryPendingStockExit(item)) return;
     const money = deliveryInvoiceTotals(item);
     totalQty += money.tonnes;
     totalLei += money.totalLei;
@@ -2834,7 +2903,7 @@ function renderDeliveryTotals(rows) {
   const waterIdx = buildReceiptHumidityIndex();
   let totalWaterKg = 0;
   rows.forEach((item) => {
-    if (item.status === "Anulat" || item.status === "Returnat") return;
+    if (isVoidedDelivery(item) || isDeliveryPendingStockExit(item)) return;
     const w = deliveryWaterKg(item, waterIdx);
     if (w !== null) totalWaterKg += w;
   });
@@ -2886,7 +2955,7 @@ function renderComplaints(complaints) {
         return `
         <tr class="${deducted > 0 ? "complaint-row-minus" : ""}">
           <td>#${item.id}</td>
-          <td>${item.customer}</td>
+          <td>${escapeComboHtml(item.customer)}</td>
           <td>${item.product || "-"}</td>
           <td>${item.complaintType}</td>
           <td>${deliveryTotal > 0 ? currency.format(deliveryTotal) : "-"}</td>
@@ -2954,7 +3023,8 @@ function renderOpenJournal() {
     });
 
   const openDeliveries = deliveriesCache.filter((item) => {
-    if (isVoidedDelivery(item)) return false; // livrarea anulată/returnată nu mai e de încasat
+    // Anulată/returnată nu mai e de încasat; proiectul nu e încă marfă plecată.
+    if (isVoidedDelivery(item) || isDeliveryPendingStockExit(item)) return false;
     const status = item.collectionStatus || "Neincasat";
     const statusMatch = !deliveryStatusFilter || status === deliveryStatusFilter;
     const partnerMatch = !partnerFilter || String(item.customer || "").toLowerCase().includes(partnerFilter);
@@ -3094,7 +3164,7 @@ function renderDailyReport(report) {
   const receiptValueOf = (r) => Number(r.amountToPay ?? r.preliminaryPayableAmount ?? 0);
   // Tabelele principale arata doar operatiunile REALE (ne-anulate); cele anulate merg in
   // tabelul dedicat „Operatiuni anulate" de mai jos, ca sa nu se amestece cu cele reale.
-  const activeReceipts = report.receipts.filter((r) => r.status !== "Anulat");
+  const activeReceipts = report.receipts.filter((r) => isReceiptInStock(r));
   dailyReportReceiptsEl.innerHTML = activeReceipts
     .map(
       (item) => `
@@ -3289,9 +3359,13 @@ function renderSelectOptions(select, items, mapLabel, placeholder, mapValue = (i
   const sorted = [...items].sort((a, b) =>
     String(mapLabel(a)).localeCompare(String(mapLabel(b)), "ro", { numeric: true, sensitivity: "base" })
   );
+  // Etichetele si valorile vin din nomenclator (nume de partener/produs, introduse de om),
+  // deci se escapeaza: altfel un nume cu `"` sau `<` sparge optiunea sau injecteaza markup.
   const options = [
-    `<option value="" disabled selected>${placeholder}</option>`,
-    ...sorted.map((item) => `<option value="${mapValue(item)}">${mapLabel(item)}</option>`)
+    `<option value="" disabled selected>${escapeComboHtml(placeholder)}</option>`,
+    ...sorted.map(
+      (item) => `<option value="${escapeComboHtml(mapValue(item))}">${escapeComboHtml(mapLabel(item))}</option>`
+    )
   ];
 
   select.innerHTML = options.join("");
@@ -3445,8 +3519,8 @@ function renderReceiptSelectors(config) {
   const customers = config.partners
     .filter((item) => item.role === "cumparator" || item.role === "ambele")
     .sort((a, b) => String(a.name).localeCompare(String(b.name), "ro", { sensitivity: "base" }));
-  const operators = config.users.filter((item) =>
-    ["operator", "manager", "admin"].includes(item.roleCode)
+  const operators = config.users.filter(
+    (item) => ["operator", "manager", "admin"].includes(item.roleCode) && item.active !== false
   );
 
   setSupplierComboItems(suppliers);
@@ -4265,6 +4339,12 @@ function getEditorSchema(entity) {
             { value: "telegram", label: "telegram" }
           ]
         },
+        {
+          name: "telegramUserId",
+          label: "ID Telegram (legare cont)",
+          type: "text",
+          hint: "Utilizatorul scrie /start botului, care îi răspunde cu ID-ul. Fără el nu poate intra din Telegram. Handle-ul (@nume) NU e suficient: oricine și-l poate schimba."
+        },
         commonActiveField,
         { name: "password", label: "Parola noua", type: "password" }
       ]
@@ -4359,6 +4439,7 @@ function renderEditorField(field, item) {
         ${passwordAttrs}
         ${field.step ? `step="${field.step}"` : ""}
       />
+      ${field.hint ? `<small class="field-hint">${escapeComboHtml(field.hint)}</small>` : ""}
     </label>
   `;
 }
@@ -4598,9 +4679,9 @@ function renderTransfers(transfers) {
         <tr>
           <td>#${item.id}</td>
           <td>${formatDateShort(item.createdAt)}</td>
-          <td>${item.product}</td>
-          <td>${item.fromLocation}</td>
-          <td>${item.toLocation}</td>
+          <td>${escapeComboHtml(item.product)}</td>
+          <td>${escapeComboHtml(item.fromLocation)}</td>
+          <td>${escapeComboHtml(item.toLocation)}</td>
           <td>${formatNumber(Math.round(Number(item.quantity || 0) * 1000))} kg</td>
           <td>${item.operator || "-"}</td>
           <td>${docActionsCell("transfer", item) || "—"}</td>
@@ -6557,7 +6638,7 @@ async function printAccountingDocument(docType, refId, companyId) {
       const from = (document.getElementById("print-doc-from") || {}).value || "";
       const to = (document.getElementById("print-doc-to") || {}).value || "";
       const receipts = (receiptsCache || [])
-        .filter((r) => Number(r.supplierId) === Number(partner.id) && r.status !== "Anulat")
+        .filter((r) => Number(r.supplierId) === Number(partner.id) && isReceiptInStock(r))
         .filter((r) => printDocInRange(r.receivedAt || r.createdAt, from, to))
         .sort((a, b) => new Date(a.receivedAt || a.createdAt) - new Date(b.receivedAt || b.createdAt));
       if (!receipts.length) { alert("Nu există recepții pentru acest furnizor în perioada aleasă."); return; }
@@ -6818,8 +6899,11 @@ function getBuyerPartner(delivery) {
   }
   return findPartnerByName(delivery.customer);
 }
+// Deleagă la sursa unică: altfel același document avea trei cantități diferite (tabel,
+// factură, CMR). Fallback-ul pe `plannedQuantity` a fost scos intenționat din
+// `deliveryDisplayQuantity` — nu-l reintroduce aici.
 function deliveryQtyTonnes(delivery) {
-  return Number(delivery.netWeight > 0 ? delivery.netWeight : delivery.deliveredQuantity || delivery.plannedQuantity || 0);
+  return deliveryDisplayQuantity(delivery);
 }
 
 function buildBonCantarHtml(delivery, company) {
@@ -7201,9 +7285,20 @@ function buildDeclaratieHtml(delivery, company) {
     <div class="doc-sign"><div>Vânzător</div><div></div></div>`;
 }
 
+// Un proiect n-are cântărire, n-are marfă plecată și n-are factură: orice document tipărit
+// pe el ar fi o hârtie fără acoperire.
+function assertPrintableDelivery(delivery) {
+  if (isDeliveryPendingStockExit(delivery)) {
+    window.alert("Livrarea e în regim de proiect. Confirmă-o la cântar înainte de a tipări documente.");
+    return false;
+  }
+  return true;
+}
+
 function printDeliveryDocument(deliveryId, docType) {
   const delivery = (deliveriesCache || []).find((d) => Number(d.id) === Number(deliveryId));
   if (!delivery) return;
+  if (!assertPrintableDelivery(delivery)) return;
   // Compania de antet aleasă în pagina Livrări (gol → AgroProfit+ implicit). Se aplică documentelor
   // „interne" cu antet de firmă (Bon, Act de achiziție, Declarație).
   const headerCompany = printHeaderCompany(document.getElementById("delivery-doc-company")?.value);
@@ -7284,7 +7379,7 @@ function renderSupplierStatement(data) {
         <tr>
           <td>#${r.id}</td>
           <td>${formatDateShort(r.date)}</td>
-          <td>${r.product}</td>
+          <td>${escapeComboHtml(r.product)}</td>
           <td>${formatNumber(r.quantity * 1000)} kg</td>
           <td>${currency.format(r.price)}/kg</td>
           <td>${currency.format(r.amount)}</td>
@@ -8919,7 +9014,15 @@ deliveriesBodyEl.addEventListener("click", async (event) => {
       payload.changeReason = `Tranzitie ${action}`;
     }
     await transitionDelivery(id, action, payload);
-    await Promise.all([loadDeliveries(), loadReceipts(), loadAuditLogs(), loadDailyReport()]);
+    // Stocul se reîncarcă doar la acțiunile care chiar îl mișcă („Livrat" scade marfa —
+    // inclusiv la confirmarea unui „Proiect"; „Anulat"/„Redeschis" o întorc). „Confirmat" și
+    // „Inchis" nu ating stocul, iar fiecare cerere aduce tot blobul de stare.
+    const rowStatus = (deliveriesCache || []).find((d) => String(d.id) === String(id))?.status;
+    const movesStock = action === "Livrat" || (action === "Anulat" && rowStatus !== "Proiect");
+    await Promise.all([
+      loadDeliveries(), loadReceipts(), loadAuditLogs(), loadDailyReport(),
+      ...(movesStock ? [loadStocks()] : [])
+    ]);
   } catch (error) {
     window.alert(error.message);
     await loadDeliveries();
