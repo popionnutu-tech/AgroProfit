@@ -1126,6 +1126,19 @@ function createStockSummary(receipts, deliveries = [], openingDocuments = [], tr
         remaining -= take;
       }
     }
+    // Ce nu s-a putut scadea de nicaieri NU se arunca: se scade din locatia livrarii, chiar
+    // daca iese pe minus. Altfel cantitatea dispare in tacere si stocul pe locatii ajunge
+    // MAI MARE decat realitatea — exact cazul „marfa descarcata, apoi livrata din nou":
+    // a doua livrare cauta marfa inainte ca descarcarea sa fie creditata (creditul vine mai
+    // jos), nu o gaseste, restul se pierdea, iar creditul adauga apoi un stoc fantoma egal
+    // cu cantitatea descarcata. Pe minus, cele doua ecrane coincid intotdeauna.
+    if (remaining > 0) {
+      const target = primary || byLocation.find((i) => i.product === product);
+      if (target) {
+        target.quantity -= remaining;
+        target.deliveredQuantity += remaining;
+      }
+    }
   }
 
   // Retur / descărcare: marfa se întoarce EXACT în locația unde a fost pusă fizic — cea
@@ -1162,8 +1175,11 @@ function createStockSummary(receipts, deliveries = [], openingDocuments = [], tr
     }
   }
 
+  // NU plafonam la zero. Plafonarea ascundea deficitul: „Stoc pe locatie" arata mai mult
+  // decat exista, iar „Miscarea stocului" (aritmetica pura) arata adevarul — cele doua nu
+  // se potriveau, fara ca nimeni sa poata spune de ce. Un minus se VEDE si se corecteaza.
   byLocation
-    .forEach((item) => { item.quantity = Math.max(Number(item.quantity || 0), 0); });
+    .forEach((item) => { item.quantity = Number(item.quantity || 0); });
   byLocation.sort((a, b) => {
     if (a.location === b.location) {
       return a.product.localeCompare(b.product, "ro");
@@ -1610,6 +1626,11 @@ function normalizeEntityPayload(entity, payload) {
         roleCode: normalizeRoleCode(requiredText(payload.roleCode, "Rolul utilizatorului")),
         channel: requiredText(payload.channel || "web", "Canalul utilizatorului"),
         active: sanitizeBoolean(payload.active ?? true),
+        // ID-ul de Telegram al utilizatorului. IMUABIL (spre deosebire de @handle, pe care
+        // oricine si-l schimba) — e SINGURA identitate acceptata la autentificarea prin
+        // Telegram. Sta pe contul din `config`, care se reincarca din KV la fiecare cerere,
+        // nu in `automation-state`, care nu se reincarca si pe care botul il putea rescrie.
+        telegramUserId: String(payload.telegramUserId || "").trim(),
         password: String(payload.password || "").trim()
       };
     case "tariffs":
@@ -4237,19 +4258,27 @@ function getDeliveryAvailableQuantity(state, options = {}) {
     .reduce((sum, i) => sum + Number(i.quantity || 0), 0);
 
   // Rezervari: documente care nu au scazut inca stocul, dar sunt deja promise.
-  // NU se filtreaza dupa `receiptId` — o livrare legata de receptie ocupa aceeasi marfa fizica.
+  //
+  // Pe scopul LOCATIE numaram doar livrarile libere. O livrare legata de receptie isi tine
+  // `location` inghetat pe cilindrul receptiei si nu-l actualizeaza niciodata — daca marfa
+  // e mutata prin transfer/procesare, rezervarea ar ramane pironita pe cilindrul vechi si ar
+  // bloca marfa ALTEI receptii ajunsa acolo intre timp.
+  // Supra-livrarea nu se redeschide: poarta care conteaza e cea de la CONFIRMARE (acolo
+  // pleaca marfa efectiv), iar acolo livrarile pe receptie se verifica pe PRODUS, peste
+  // toate locatiile. Verificarea de la creare ramane o avertizare timpurie, nu garda finala.
   const reservedPending = (state.deliveries || [])
     .filter(
       (d) =>
         (excludeId === null || d.id !== excludeId) &&
         d.product === product &&
-        (!location || sameLocation(d.location, location)) &&
+        (location ? !d.receiptId && sameLocation(d.location, location) : true) &&
         Number(d.deliveredQuantity || 0) === 0 &&
         DELIVERY_STATUSES_RESERVING.includes(d.status)
     )
     .reduce((sum, d) => sum + Number(d.plannedQuantity || 0), 0);
 
-  return { inStock, reservedPending, available: inStock - reservedPending };
+  // Niciodata negativ: un „disponibil -50000 kg" nu spune nimic operatorului de la cantar.
+  return { inStock, reservedPending, available: Math.max(inStock - reservedPending, 0) };
 }
 
 function stockSummaryFromState(state) {

@@ -272,21 +272,15 @@ async function telegramLoginHandler(req, res) {
         username: internalUsername,
         roleCode: "operator",
         channel: "telegram",
+        // Legam ID-ul din prima clipa: altfel contul ar sta „nascut din Telegram, nelegat"
+        // pana la prima intrare dupa aprobare, iar in fereastra aceea oricine ia handle-ul
+        // il poate revendica.
+        telegramUserId: String(tgUser?.id || ""),
         active: false,
         changeReason: "Auto-provisioned din Telegram Mini App (inactiv pana la aprobare)",
         changedBy: "telegram"
       });
       justCreated = true;
-    } else if (!String(user.channel || "").includes("telegram")) {
-      try {
-        user = await updateUserById(user.id, {
-          channel: user.channel ? `${user.channel}+telegram` : "telegram",
-          changeReason: "Adaugat canal Telegram din Mini App",
-          changedBy: "telegram"
-        });
-      } catch {
-        // ignore if update fails (e.g. user inactive) — fallthrough handled below
-      }
     }
 
     // Un singur mesaj pentru TOATE refuzurile: doua mesaje distincte spuneau atacatorului

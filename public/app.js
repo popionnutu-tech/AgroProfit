@@ -1145,12 +1145,17 @@ function renderSilosGrid(summary) {
       const palette = getProductPalette(dominantProduct);
       const fillH = Math.max(0, Math.min(120, (pct / 100) * 120));
       const fillY = 28 + (120 - fillH);
+      const deficit = filled < -1e-6; // s-a scos mai mult decât a intrat aici
       const isEmpty = filled <= 0;
-      const ringClass = over ? " is-over-ring" : pct >= 95 ? " is-crit-ring" : pct >= 80 ? " is-warn-ring" : "";
+      const ringClass = deficit
+        ? " is-deficit-ring"
+        : over ? " is-over-ring" : pct >= 95 ? " is-crit-ring" : pct >= 80 ? " is-warn-ring" : "";
       const tonsLabel = filled.toFixed(3).replace(".", ",");
       const productHead = dominantProduct
         ? `<span class="silo-product" style="color:${palette.edge};" title="${productsTooltip}"><span class="silo-product-dot" style="background:${palette.fill};border-color:${palette.edge};"></span>${productsLabel}</span>`
-        : '<span class="silo-product silo-product-empty">gol</span>';
+        : (deficit
+            ? '<span class="silo-product silo-deficit-label" title="Deficit: s-a scos mai mult decât a intrat în acest cilindru.">⚠️ deficit</span>'
+            : '<span class="silo-product silo-product-empty">gol</span>');
 
       // Gropile de primire (orice locație care nu e cilindru) primesc un aspect distinct:
       // verzi (clasa silo-card--pit). Gropile propriu-zise (fără „Cilindru 7") sunt și mai mici, ~80%
@@ -1289,11 +1294,15 @@ function renderStockSummary(summary) {
     )
     .join("");
 
-  stocksBodyEl.innerHTML = summary.byLocation
-    .filter((item) => Number(item.quantity || 0) > 0)
+  // Arătăm și liniile NEGATIVE (înainte se filtra `> 0`, deci un deficit rămânea invizibil).
+  // Un minus înseamnă că s-a scos din cilindru mai mult decât a intrat vreodată — se vede,
+  // ca să poată fi corectat, nu se ascunde.
+  const stockRows = summary.byLocation.filter((item) => Math.round(Number(item.quantity || 0) * 1000) !== 0);
+  const negativeRows = stockRows.filter((item) => Number(item.quantity || 0) < 0);
+  stocksBodyEl.innerHTML = stockRows
     .map(
       (item) => `
-        <tr>
+        <tr${Number(item.quantity || 0) < 0 ? ' class="stock-negative" title="Deficit: s-a scos mai mult decât a intrat în această locație."' : ""}>
           <td>${escapeComboHtml(item.location)}</td>
           <td>${escapeComboHtml(item.product)}</td>
           <td>${formatNumber(item.quantity)} t</td>
@@ -1302,6 +1311,23 @@ function renderStockSummary(summary) {
       `
     )
     .join("");
+
+  const warnEl = document.getElementById("stock-deficit-warning");
+  if (warnEl) {
+    if (negativeRows.length) {
+      const total = negativeRows.reduce((s, i) => s + Number(i.quantity || 0), 0);
+      warnEl.innerHTML =
+        `<b>Atenție: deficit de stoc.</b> ${negativeRows.length} ` +
+        `${negativeRows.length === 1 ? "locație are" : "locații au"} cantitate negativă ` +
+        `(total ${formatNumber(Math.abs(total) * 1000)} kg). Înseamnă că s-a scos mai mult ` +
+        `decât a intrat acolo — verifică descărcările și corecțiile, apoi așază stocul la ` +
+        `realitatea din cilindru.`;
+      warnEl.hidden = false;
+    } else {
+      warnEl.hidden = true;
+      warnEl.innerHTML = "";
+    }
+  }
 
   renderTransferStockTable(summary);
 }
