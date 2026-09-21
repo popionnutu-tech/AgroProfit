@@ -5167,6 +5167,15 @@ function validateReceiptForm(formData) {
   }
 
   const supplierId = formData.get("supplierId");
+  // Numele TASTAT in casuta de furnizor, dar fara ca vreo optiune sa fie aleasa.
+  // Fara garda de mai jos, textul se pierdea si receptia se salva FARA furnizor, in tacere —
+  // omul crede ca a introdus furnizorul si nu se salveaza nimic.
+  const typedSupplier = String((supplierSearchInput && supplierSearchInput.value) || "").trim();
+  if (!supplierId && typedSupplier) {
+    return `Furnizorul „${typedSupplier}" nu e ales din listă. Apasă pe el în listă, ` +
+      `sau pe „➕ Adaugă «${typedSupplier}» ca persoană fizică". ` +
+      `Dacă vrei să completeze contabilul mai târziu, alege „Lasă gol".`;
+  }
   // Furnizorul e OPTIONAL: poate fi lasat gol (contabilul completeaza ulterior).
   if (supplierId === "__new__") {
     // Furnizor nou (persoana fizica) introdus pe loc de operator
@@ -7669,7 +7678,25 @@ supplierSearchInput.addEventListener("focus", () => {
 });
 supplierSearchInput.addEventListener("blur", () => {
   // mic delay ca pointerdown/mousedown pe sugestie sa apuce sa ruleze
-  window.setTimeout(closeSupplierSuggestions, 120);
+  window.setTimeout(() => {
+    closeSupplierSuggestions();
+    // Nume tastat care nu e in lista si nicio optiune aleasa: il tratam ca furnizor NOU.
+    // Inainte, textul se pierdea la trimitere si receptia se salva fara furnizor, in tacere.
+    // Nu „ghicim" nimic ascuns: campul „Nume furnizor nou" devine vizibil, cu numele in el,
+    // deci omul vede ce s-a intamplat si poate schimba.
+    const typed = String(supplierSearchInput.value || "").trim();
+    if (!typed || supplierIdInput.value) return;
+    if (!canAccess("receipt-write")) return;
+    const match = supplierComboItems.find(
+      (s) => normalizeComboText(s.name) === normalizeComboText(typed)
+    );
+    if (match) {
+      // Numele tastat e exact un furnizor existent: il alegem pe acela, nu cream un duplicat.
+      chooseSupplier({ id: match.id, name: match.name });
+      return;
+    }
+    chooseSupplier({ isNew: true, name: typed });
+  }, 120);
 });
 supplierSearchInput.addEventListener("keydown", (event) => {
   if (supplierSuggestionsEl.hidden) return;
