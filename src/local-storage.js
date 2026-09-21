@@ -962,7 +962,12 @@ function listOpeningDebtItemsFromDocuments(openingDocuments = []) {
   return normalizeOpeningDocuments(openingDocuments).flatMap((item) => item.debtItems || []);
 }
 
-function createStockSummary(receipts, deliveries = [], openingDocuments = [], transfers = [], processings = [], stockCorrections = []) {
+function createStockSummary(receipts, deliveries = [], openingDocuments = [], transfers = [], processings = [], stockCorrections) {
+  if (!Array.isArray(stockCorrections)) {
+    // Intentionat fara default: un apelant care uita parametrul pierdea TACIT corectiile de
+    // inventar, iar ecranele incepeau sa arate cifre diferite fara ca nimic sa semnaleze.
+    throw new Error("createStockSummary: lipseste `stockCorrections` (paseaza state.stockCorrections).");
+  }
   const stockByLocation = new Map();
   const openingStockItems = openingDocuments.flatMap((item) => item.stockItems || []);
 
@@ -4243,8 +4248,11 @@ async function getStats() {
   const auditLogs = await listAuditLogs();
   const partnerAdvances = await listPartnerAdvances();
   const transfers = await listTransfers();
+  const stockCorrections = await listStockCorrections();
   // Stoc curent (la momentul de fata), nu suma istorica a receptiilor.
-  const stockSummary = createStockSummary(receipts, deliveries, openingDocuments, transfers, processings);
+  const stockSummary = createStockSummary(
+    receipts, deliveries, openingDocuments, transfers, processings, stockCorrections
+  );
   return {
     ...createReceiptSummary(receipts),
     stockTotal: stockSummary.totals.totalQuantity,
@@ -4822,7 +4830,9 @@ async function createStockCorrection(payload = {}) {
   const state = readReceiptsState();
   const currentUser = payload.currentUser || {};
   const role = normalizeRoleCode(currentUser.roleCode);
-  if (role && role !== "admin") {
+  // FAIL-CLOSED, spre deosebire de restul codului: aici se rescrie stocul fizic, deci lipsa
+  // rolului NU dezactiveaza regula. Un apelant intern legitim trece explicit `internal: true`.
+  if (payload.internal !== true && role !== "admin") {
     throw forbiddenError("Doar administratorul poate corecta stocul.");
   }
 
@@ -4834,18 +4844,48 @@ async function createStockCorrection(payload = {}) {
   }
 
   // Cantitatea NUMARATA vine in TONE (formularul imparte kg la 1000, ca peste tot).
-  const counted = sanitizeNumber(payload.countedQuantity);
-  if (!(counted >= 0)) {
-    throw new Error("Cantitatea numarata trebuie sa fie un numar mai mare sau egal cu zero.");
+  // ATENTIE: NU folosim `sanitizeNumber` aici. Acela transforma orice gunoi in 0 — iar 0
+  // inseamna „goleste cilindrul". Un camp lipsa dintr-un client ar fi sters tot stocul unei
+  // locatii si ar fi raspuns „salvat". Zero trebuie sa fie o intentie explicita.
+  const rawCounted = payload.countedQuantity;
+  if (rawCounted === undefined || rawCounted === null || String(rawCounted).trim() === "") {
+    throw new Error("Cantitatea numarata este obligatorie.");
+  }
+  const counted = Number(String(rawCounted).replace(",", ".").trim());
+  if (!Number.isFinite(counted) || counted < 0) {
+    throw new Error("Cantitatea numarata trebuie sa fie un numar finit, mai mare sau egal cu zero.");
   }
 
-  // Cat spune aplicatia ACUM pentru acea locatie + produs.
+  // Corectia ASEAZA o linie existenta la realitate — nu inventeaza stoc. Daca perechea
+  // locatie+produs nu exista, o greseala de scriere ar crea stoc fantoma in loc sa corecteze
+  // randul real. Potrivirea pe produs e case-insensitive (ca la locatie), iar valorile
+  // canonice se preiau din stoc, ca sa se potriveasca sigur la recalcul.
   const summary = stockSummaryFromState(state);
-  const current = Number(
-    (summary.byLocation.find(
-      (i) => sameLocation(i.location, location) && i.product === product
-    ) || {}).quantity || 0
+  const line = summary.byLocation.find(
+    (i) =>
+      sameLocation(i.location, location) &&
+      String(i.product || "").trim().toLowerCase() === product.trim().toLowerCase()
   );
+  if (!line) {
+    throw new Error(
+      `Nu exista stoc inregistrat pentru ${product} in ${location}. ` +
+        "Corectia aseaza un rand existent la realitate, nu creeaza stoc nou."
+    );
+  }
+  const canonicalLocation = line.location;
+  const canonicalProduct = line.product;
+  const current = Number(line.quantity || 0);
+
+  // Plafon sanitar: o corectie nu poate depasi capacitatea declarata a locatiei.
+  const config = readConfigState();
+  const locationEntry = (config.storageLocations || []).find((l) => sameLocation(l.name, canonicalLocation));
+  const capacityTons = Number((locationEntry || {}).capacity || 0) / 1000;
+  if (capacityTons > 0 && counted > capacityTons) {
+    throw new Error(
+      `Cantitatea numarata (${Math.round(counted * 1000)} kg) depaseste capacitatea ` +
+        `locatiei ${canonicalLocation} (${Math.round(capacityTons * 1000)} kg).`
+    );
+  }
 
   const delta = Math.round((counted - current) * 1000) / 1000;
   if (delta === 0) {
@@ -4855,8 +4895,8 @@ async function createStockCorrection(payload = {}) {
   const now = new Date().toISOString();
   const correction = {
     id: nextId(state.stockCorrections),
-    location,
-    product,
+    location: canonicalLocation,
+    product: canonicalProduct,
     systemQuantity: current,
     countedQuantity: counted,
     delta,
@@ -4877,8 +4917,8 @@ async function createStockCorrection(payload = {}) {
     action: "create",
     reason,
     user: correction.createdBy,
-    oldValue: { location, product, quantity: current },
-    newValue: { location, product, quantity: counted, delta }
+    oldValue: { location: canonicalLocation, product: canonicalProduct, quantity: current },
+    newValue: { location: canonicalLocation, product: canonicalProduct, quantity: counted, delta }
   });
 
   writeReceiptsState(state);

@@ -130,8 +130,20 @@ introducă. Îl creează în status **`Proiect`**.
   se scade oricum, pe minus. Așa cele două ecrane coincid prin construcție.
 - `stockCorrections` = adminul a NUMĂRAT fizic cilindrul și așază stocul la realitate
   (`createStockCorrection`). Diferența e o pierdere **recunoscută**: apare pe coloana
-  „Corecții inventar" din raportul de pierderi și intră în formula diferenței, deci scade din
-  „necontabilizat". Motiv obligatoriu, urmă în audit, doar admin.
+  „Corecții inventar" **în ambele ecrane** (raportul de pierderi ȘI „Mișcarea stocului pe
+  perioadă") și intră în formulele lor. Motiv obligatoriu, urmă în audit, doar admin.
+- **Orice ecran care numără stocul trebuie să numere și corecțiile.** Dacă adaugi un calcul
+  nou și îl uiți, cele două ecrane încep să arate cifre diferite — exact ce interzice regula
+  de mai sus. De aceea `createStockSummary` **aruncă** dacă nu primește `stockCorrections`:
+  un apelant uitat trebuie să cadă zgomotos, nu să piardă tăcut datele.
+- Corecția e **o pierdere recunoscută la o dată**, nu o „setare" permanentă. `delta` se
+  calculează o singură dată, la creare, și rămâne un offset constant. Dacă introduci ulterior
+  un document RETROACTIV pentru aceeași locație (o livrare uitată, o anulare, o editare de
+  cantitate), pierderea se numără de două ori — corecția nu „se mută" sub el. În acel caz se
+  face o a doua corecție, care se calculează față de stocul de atunci.
+- Corecția nu inventează stoc: perechea locație+produs trebuie să existe deja, cantitatea
+  numărată nu poate depăși capacitatea locației, iar o valoare lipsă sau invalidă e RESPINSĂ
+  (nu tratată ca zero — zero înseamnă „golește cilindrul" și trebuie să fie o intenție).
 
 ## Deploy
 - **Push pe `main` → Vercel publică automat** pe agroprofit-plus.vercel.app (integrare Git activă).

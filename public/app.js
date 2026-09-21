@@ -1669,6 +1669,7 @@ function renderStockPeriod() {
   const recBefore = {}, recIn = {};
   const procBefore = {}, procIn = {};
   const delBefore = {}, delIn = {};
+  const corrBefore = {}, corrIn = {};
   const bucket = (beforeObj, inObj, p, day, qty) => {
     // Acceptă și valori NEGATIVE: un retur scade dintr-o ieșire, la ziua lui.
     if (!qty) return;
@@ -1710,6 +1711,16 @@ function renderStockPeriod() {
     });
   });
 
+  // Corecții de inventar: adminul a numărat fizic și a așezat stocul la realitate.
+  // FĂRĂ ele, acest tabel ar arăta alt total decât „Stoc pe locații" de deasupra — exact
+  // divergența pe care regula 8 din CLAUDE.md o interzice. Semnul e al deltei: negativ =
+  // pierdere recunoscută, pozitiv = plus la inventar.
+  (stockCorrectionsCache || []).forEach((cr) => {
+    const p = cr.product || "—";
+    products.add(p);
+    bucket(corrBefore, corrIn, p, dayOf(cr.createdAt), Number(cr.delta || 0));
+  });
+
   // Pierderi la procesarile noi (model miscare): intrare − iesire = deseu + apa.
   (processingsCache || []).forEach((pr) => {
     if (!pr || pr.movement !== true) return;
@@ -1726,23 +1737,26 @@ function renderStockPeriod() {
     .filter((p) => !prodFilter || p === prodFilter)
     .sort((a, b) => String(a).localeCompare(String(b), "ro"));
   if (!rows.length) {
-    body.innerHTML = '<tr><td colspan="6" class="empty-state">Nu există date pentru perioada aleasă.</td></tr>';
+    body.innerHTML = '<tr><td colspan="7" class="empty-state">Nu există date pentru perioada aleasă.</td></tr>';
     return;
   }
-  let tInit = 0, tRec = 0, tProc = 0, tDel = 0, tFin = 0;
+  let tInit = 0, tRec = 0, tProc = 0, tDel = 0, tCorr = 0, tFin = 0;
   body.innerHTML = rows.map((p) => {
-    const init = (opening[p] || 0) + (recBefore[p] || 0) - (delBefore[p] || 0) - (procBefore[p] || 0);
+    const init = (opening[p] || 0) + (recBefore[p] || 0) - (delBefore[p] || 0)
+      - (procBefore[p] || 0) + (corrBefore[p] || 0);
     const rec = recIn[p] || 0;
     const proc = procIn[p] || 0;
     const del = delIn[p] || 0;
-    const fin = init + rec - proc - del;
-    tInit += init; tRec += rec; tProc += proc; tDel += del; tFin += fin;
+    const corr = corrIn[p] || 0;
+    const fin = init + rec - proc - del + corr;
+    tInit += init; tRec += rec; tProc += proc; tDel += del; tCorr += corr; tFin += fin;
     return `<tr>
       <td>${p}</td>
       <td>${kgNum(init)}</td>
       <td>${kgNum(rec)}</td>
       <td>${kgNum(proc)}</td>
       <td>${kgNum(del)}</td>
+      <td>${corr ? `<b>${kgNum(corr)}</b>` : "—"}</td>
       <td><b>${kgNum(fin)}</b></td>
     </tr>`;
   }).join("") + `
@@ -1752,6 +1766,7 @@ function renderStockPeriod() {
       <td>${kgNum(tRec)}</td>
       <td>${kgNum(tProc)}</td>
       <td>${kgNum(tDel)}</td>
+      <td><b>${kgNum(tCorr)}</b></td>
       <td>${kgNum(tFin)}</td>
     </tr>`;
 }
@@ -4663,14 +4678,11 @@ async function loadStocks() {
     renderStockSummary({ byLocation: [], totals: { totalQuantity: 0, totalLocations: 0, totalProducts: 0 } });
     return;
   }
-  // Corecțiile de inventar se încarcă odată cu stocul: raportul de pierderi le folosește ca
-  // să arate ce parte din diferență a fost deja recunoscută.
-  const [response, corrections] = await Promise.all([
-    fetch("/api/stocks"),
-    fetch("/api/stock-corrections").then((r) => (r.ok ? r.json() : { stockCorrections: [] })).catch(() => ({ stockCorrections: [] }))
-  ]);
+  // Corecțiile vin în ACELAȘI răspuns cu stocul — o cerere separată ar fi adus încă o dată
+  // tot blobul de stare, pentru câteva zeci de KB.
+  const response = await fetch("/api/stocks");
   const data = await response.json();
-  stockCorrectionsCache = corrections.stockCorrections || [];
+  stockCorrectionsCache = data.stockCorrections || [];
   renderStockSummary(data);
   updateTransferAvailableHint();
   updateDeliverySourceOptions();
@@ -5172,9 +5184,14 @@ function validateReceiptForm(formData) {
   // omul crede ca a introdus furnizorul si nu se salveaza nimic.
   const typedSupplier = String((supplierSearchInput && supplierSearchInput.value) || "").trim();
   if (!supplierId && typedSupplier) {
-    return `Furnizorul „${typedSupplier}" nu e ales din listă. Apasă pe el în listă, ` +
-      `sau pe „➕ Adaugă «${typedSupplier}» ca persoană fizică". ` +
-      `Dacă vrei să completeze contabilul mai târziu, alege „Lasă gol".`;
+    // Rolurile fara `receipt-write` (ex. contabilul care pregateste un Proiect) nu au randul
+    // „➕ Adauga" — mesajul nu trebuie sa-i trimita spre un buton pe care nu-l vad.
+    return canAccess("receipt-write")
+      ? `Furnizorul „${typedSupplier}" nu e ales din listă. Apasă pe el în listă, ` +
+        `sau pe „➕ Adaugă «${typedSupplier}» ca persoană fizică". ` +
+        `Dacă vrei să completeze contabilul mai târziu, alege „Lasă gol".`
+      : `Furnizorul „${typedSupplier}" nu e ales din listă. Alege-l din listă ` +
+        `sau lasă câmpul gol, ca să-l completeze mai târziu cine face recepția.`;
   }
   // Furnizorul e OPTIONAL: poate fi lasat gol (contabilul completeaza ulterior).
   if (supplierId === "__new__") {
@@ -7676,6 +7693,13 @@ supplierSearchInput.addEventListener("input", () => {
 supplierSearchInput.addEventListener("focus", () => {
   renderSupplierSuggestions();
 });
+// Escape = renunț: golește textul, ca ieșirea din câmp să nu mai creeze un furnizor nou.
+supplierSearchInput.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !supplierIdInput.value) {
+    supplierSearchInput.value = "";
+  }
+});
+
 supplierSearchInput.addEventListener("blur", () => {
   // mic delay ca pointerdown/mousedown pe sugestie sa apuce sa ruleze
   window.setTimeout(() => {
@@ -7687,14 +7711,19 @@ supplierSearchInput.addEventListener("blur", () => {
     const typed = String(supplierSearchInput.value || "").trim();
     if (!typed || supplierIdInput.value) return;
     if (!canAccess("receipt-write")) return;
-    const match = supplierComboItems.find(
-      (s) => normalizeComboText(s.name) === normalizeComboText(typed)
-    );
+    const typedNorm = normalizeComboText(typed);
+    const match = supplierComboItems.find((s) => normalizeComboText(s.name) === typedNorm);
     if (match) {
-      // Numele tastat e exact un furnizor existent: il alegem pe acela, nu cream un duplicat.
+      // Numele tastat e exact un furnizor existent: îl alegem pe acela, fără duplicat.
       chooseSupplier({ id: match.id, name: match.name });
       return;
     }
+    // Text care se potrivește PARȚIAL cu furnizori existenți = e o filtrare în curs
+    // („Ion" ca să găsească „Ionescu Vasile"), nu un nume nou. Nu creăm nimic: garda de la
+    // salvare îi va spune să aleagă. Altfel, un click alături ar fi creat un furnizor „Ion"
+    // lângă „Ionescu Vasile", tăcut.
+    const looksLikeFilter = supplierComboItems.some((s) => normalizeComboText(s.name).includes(typedNorm));
+    if (looksLikeFilter) return;
     chooseSupplier({ isNew: true, name: typed });
   }, 120);
 });
