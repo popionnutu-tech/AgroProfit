@@ -1731,7 +1731,16 @@ function renderStockPeriod() {
     if (pr.status === "Anulat" || pr.status === "In lucru") return;
     const p = pr.product || "—";
     products.add(p);
-    const loss = Math.max(Number(pr.processedQuantity || 0) - Number(pr.outputQuantity ?? pr.finalNetQuantity ?? 0), 0);
+    // ACEEAȘI formulă ca în `createStockSummary` (backend). Erau două lanțuri de rezervă
+    // diferite pentru aceeași mărime: aici `outputQuantity ?? finalNetQuantity ?? 0`, acolo
+    // `outputQuantity ?? (intrare − deșeu − apă)`. Când `outputQuantity` lipsea, cele două
+    // ecrane calculau pierderi diferite pentru același document.
+    const input = Number(pr.processedQuantity || 0);
+    const output = Number(
+      pr.outputQuantity ??
+        Math.max(input - Number(pr.confirmedWaste || 0) - Number(pr.waterRemoved || 0), 0)
+    );
+    const loss = Math.max(input - output, 0);
     bucket(procBefore, procIn, p, dayOf(pr.createdAt), loss);
   });
 
