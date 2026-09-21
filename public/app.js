@@ -1146,7 +1146,7 @@ function renderSilosGrid(summary) {
       const palette = getProductPalette(dominantProduct);
       const fillH = Math.max(0, Math.min(120, (pct / 100) * 120));
       const fillY = 28 + (120 - fillH);
-      const deficit = filled <= -0.001; // sub −1 kg = deficit real, nu rest de cântar
+      const deficit = filled < 0; // stocul e deja rotunjit la kg, deci orice minus e real
       const isEmpty = filled <= 0;
       const ringClass = deficit
         ? " is-deficit-ring"
@@ -1298,19 +1298,18 @@ function renderStockSummary(summary) {
   // Arătăm și liniile NEGATIVE (înainte se filtra `> 0`, deci un deficit rămânea invizibil).
   // Un minus înseamnă că s-a scos din cilindru mai mult decât a intrat vreodată — se vede,
   // ca să poată fi corectat, nu se ascunde.
-  // Sub 1 kg nu e nici stoc, nici deficit — e rest de cântar. Un cilindru cu −0,4 kg nu
-  // trebuie să apară roșu, la fel cum +0,4 kg nu e marfă. Pragul e în TONE (0,001 t = 1 kg).
-  const STOCK_NOISE_TONS = 0.001;
-  const stockRows = summary.byLocation.filter(
-    (item) => Math.abs(Number(item.quantity || 0)) >= STOCK_NOISE_TONS
-  );
-  const negativeRows = stockRows.filter((item) => Number(item.quantity || 0) <= -STOCK_NOISE_TONS);
+  // Stocul vine deja rotunjit la KILOGRAM din backend, deci „sub 1 kg" e curat 0 și dispare
+  // singur. Aici arătăm TOT ce nu e zero — inclusiv minusurile: dacă am ascunde un rând
+  // negativ, ar rămâne fără butonul „Corectează", adică vizibil în „Mișcarea stocului" dar
+  // imposibil de închis.
+  const stockRows = summary.byLocation.filter((item) => Number(item.quantity || 0) !== 0);
+  const negativeRows = stockRows.filter((item) => Number(item.quantity || 0) < 0);
   // Corecția de inventar e a adminului: el așază stocul la ce a numărat fizic în cilindru.
   const canCorrectStock = currentSessionUser?.roleCode === "admin";
   stocksBodyEl.innerHTML = stockRows
     .map(
       (item) => `
-        <tr${Number(item.quantity || 0) <= -STOCK_NOISE_TONS ? ' class="stock-negative" title="Deficit: s-a scos mai mult decât a intrat în această locație."' : ""}>
+        <tr${Number(item.quantity || 0) < 0 ? ' class="stock-negative" title="Deficit: s-a scos mai mult decât a intrat în această locație."' : ""}>
           <td>${escapeComboHtml(item.location)}</td>
           <td>${escapeComboHtml(item.product)}</td>
           <td>${formatNumber(item.quantity)} t</td>
