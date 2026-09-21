@@ -2437,3 +2437,48 @@ test("Corectie la zero: nu ramane un deficit fantoma de sub un kilogram", async 
     assert.ok(linie.quantity >= 0, "nu ramane pe minus");
   });
 });
+
+test("Stoc: un minus ramane VIZIBIL (rotunjit la kg), ca sa poata fi corectat", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    await seedReceipt(storage, { location: "Cilindru 1" }); // 100 t
+    const d = await storage.createDelivery({
+      customerId: 2, customer: "A", product: "Grau", productId: 1,
+      sourceLocation: "Cilindru 1", plannedQuantity: 100, createdBy: "op"
+    });
+    // Corectie de stoc dintr-o reclamatie, cu o cantitate FRACTIONARA: scoate mai mult
+    // decat exista si lasa un rest negativ sub-kilogramic.
+    const complaint = await storage.createComplaint({
+      deliveryId: d.id, complaintType: "Calitate", contestedQuantity: 1, createdBy: "contabil"
+    });
+    await storage.updateComplaint(complaint.id, {
+      status: "Acceptata", changeReason: "acceptata",
+      stockCorrection: { deliveryId: d.id, deltaQuantity: 0.0006, note: "rest" },
+      currentUser: { roleCode: "accountant-sef" }
+    });
+
+    const stock = await storage.getStockSummary();
+    const linie = stock.byLocation.find((i) => i.location === "Cilindru 1" && i.product === "Grau");
+    assert.ok(linie, "linia exista in stoc");
+    // -0,6 kg se rotunjeste la -1 kg: tabelul de miscare il arata tot ca -1, deci cele doua
+    // ecrane coincid, iar randul ramane vizibil ca sa aiba buton de corectie.
+    assert.equal(linie.quantity, -0.001, `asteptat -0.001 t (-1 kg), am ${linie.quantity}`);
+    assert.ok(linie.quantity !== 0, "nu dispare din tabel");
+  });
+});
+
+test("Stoc: cantitatile sunt rotunjite la KILOGRAM, ca ambele ecrane sa arate acelasi numar", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    await seedReceipt(storage, {
+      location: "Cilindru 1", quantity: 10.00049,
+      provisionalNetQuantity: 10.00049, finalNetQuantity: 10.00049
+    });
+    const stock = await storage.getStockSummary();
+    const linie = stock.byLocation.find((i) => i.location === "Cilindru 1");
+    // 10,00049 t = 10000,49 kg -> rotunjit la 10000 kg. Tabelul de miscare afiseaza tot
+    // 10000 kg (rotunjeste la afisare), deci cele doua coincid.
+    assert.equal(linie.quantity, 10.0);
+    assert.equal(Math.round(linie.quantity * 1000), 10000);
+  });
+});

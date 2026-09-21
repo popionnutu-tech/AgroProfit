@@ -147,9 +147,14 @@ introducă. Îl creează în status **`Proiect`**.
 - `delta` **nu se rotunjește**. Corecția trebuie să așeze stocul FIX pe cantitatea numărată.
   Rotunjirea la kg lăsa un rest (0,6 kg în cilindru, admin pune 0 → rămâneau −0,4 kg), adică
   un deficit fantomă, roșu pe ecran, exact pe instrumentul făcut ca să închidă deficite.
-- Sub **1 kg** nu e nici stoc, nici deficit — e rest de cântar. Rândul nu se afișează și nu se
-  marchează roșu (`STOCK_NOISE_TONS` în `public/app.js`). Cantitățile din stoc se rotunjesc la
-  gram, ca zgomotul de virgulă mobilă (1e-13) să nu treacă drept minus.
+- Cantitățile din stoc se rotunjesc la **KILOGRAM**, la sursă (`createStockSummary`), nu la
+  gram. Cântarul lucrează în kg și ambele ecrane afișează kg: dacă stocul păstrează fracțiuni,
+  „Mișcarea stocului" (care rotunjește la afișare) arată −1 kg acolo unde „Stoc pe locații"
+  arată −0,6 — aceeași realitate, două numere. Rotunjind la sursă, un rest sub jumătate de
+  kilogram devine **zero curat** (inclusiv `-0`, normalizat cu `+ 0`), iar restul e identic
+  în ambele tabele.
+- **Nu ascunde un rând negativ.** Se afișează tot ce nu e zero. Un minus ascuns rămâne fără
+  butonul „Corectează" — vizibil în „Mișcarea stocului", imposibil de închis din „Stoc".
 
 ## Deploy
 - **Push pe `main` → Vercel publică automat** pe agroprofit-plus.vercel.app (integrare Git activă).

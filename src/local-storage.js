@@ -1213,10 +1213,17 @@ function createStockSummary(receipts, deliveries = [], openingDocuments = [], tr
   // NU plafonam la zero. Plafonarea ascundea deficitul: „Stoc pe locatie" arata mai mult
   // decat exista, iar „Miscarea stocului" (aritmetica pura) arata adevarul — cele doua nu
   // se potriveau, fara ca nimeni sa poata spune de ce. Un minus se VEDE si se corecteaza.
-  // Rotunjim la GRAM: pastreaza toata precizia reala (cantarul da kg, uneori cu zecimale),
-  // dar taie zgomotul de virgula mobila (1e-13) care ar face un cilindru sa apara pe minus.
+  // Rotunjim la KILOGRAM, nu la gram. Cantarul lucreaza in kg, iar ecranele afiseaza tot in
+  // kg — daca stocul pastreaza fractiuni de kg, cele doua tabele ajung sa arate numere
+  // diferite pentru aceeasi realitate: „Miscarea stocului" rotunjeste la afisare (-0,6 kg
+  // devine -1 kg), iar „Stoc pe locatii" pastra fractiunea. Rotunjind la sursa, ambele
+  // pornesc de la acelasi numar, iar un rest sub jumatate de kilogram devine curat 0.
   byLocation
-    .forEach((item) => { item.quantity = Math.round(Number(item.quantity || 0) * 1e6) / 1e6; });
+    .forEach((item) => {
+      // `+ 0` normalizeaza -0 (rezultatul rotunjirii unui rest negativ mic) la 0 curat:
+      // altfel `-0 !== 0` in JS si ar trece drept valoare nenula, afisata „-0".
+      item.quantity = Math.round(Number(item.quantity || 0) * 1000) / 1000 + 0;
+    });
   byLocation.sort((a, b) => {
     if (a.location === b.location) {
       return a.product.localeCompare(b.product, "ro");
