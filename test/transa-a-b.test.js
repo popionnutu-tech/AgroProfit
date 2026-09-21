@@ -2395,3 +2395,45 @@ test("Corectie: nu poate depasi capacitatea locatiei", async () => {
     );
   });
 });
+
+test("Corectie: stocul ajunge FIX pe cantitatea numarata, chiar cu zecimale ascunse", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    // In cilindru raman 0,6 kg (0,0006 t) — sub pragul pe care omul il vede.
+    await seedReceipt(storage, {
+      location: "Cilindru 1", quantity: 100.0006,
+      provisionalNetQuantity: 100.0006, finalNetQuantity: 100.0006
+    });
+
+    // Adminul numara si pune un numar INTREG, fara zecimale.
+    await storage.createStockCorrection({
+      location: "Cilindru 1", product: "Grau", countedQuantity: 100,
+      changeReason: "inventar", currentUser: { roleCode: "admin" }
+    });
+
+    const stock = await storage.getStockSummary();
+    const linie = stock.byLocation.find((i) => i.location === "Cilindru 1" && i.product === "Grau");
+    assert.equal(
+      linie.quantity, 100,
+      `stocul trebuie sa fie exact 100 t, nu ${linie.quantity} (rotunjirea deltei lasa un rest)`
+    );
+  });
+});
+
+test("Corectie la zero: nu ramane un deficit fantoma de sub un kilogram", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    await seedReceipt(storage, {
+      location: "Cilindru 1", quantity: 0.0006,
+      provisionalNetQuantity: 0.0006, finalNetQuantity: 0.0006
+    });
+    await storage.createStockCorrection({
+      location: "Cilindru 1", product: "Grau", countedQuantity: 0,
+      changeReason: "cilindru golit", currentUser: { roleCode: "admin" }
+    });
+    const stock = await storage.getStockSummary();
+    const linie = stock.byLocation.find((i) => i.location === "Cilindru 1" && i.product === "Grau");
+    assert.equal(linie.quantity, 0, `trebuie 0, nu ${linie.quantity}`);
+    assert.ok(linie.quantity >= 0, "nu ramane pe minus");
+  });
+});
