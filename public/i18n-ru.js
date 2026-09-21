@@ -78,6 +78,9 @@
 
     // --- Etichete formular: recepție ---
     "Furnizor": "Поставщик",
+    "Lasă gol (completează contabilul)": "Оставить пустым (заполнит бухгалтер)",
+    "Adaugă": "Добавить",
+    "ca persoană fizică": "как физ. лицо",
     "(tastează, alege din listă sau lasă gol)": "(введите, выберите из списка или оставьте пустым)",
     "Nume furnizor nou (persoană fizică)": "Имя нового поставщика (физ. лицо)",
     "Produs": "Продукт",

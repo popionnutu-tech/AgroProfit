@@ -3464,7 +3464,7 @@ function renderSupplierSuggestions() {
   const exact = q && supplierComboItems.some((s) => normalizeComboText(s.name) === q);
 
   const rows = [
-    '<li class="combobox-item combobox-empty" role="option" data-action="clear">Lasă gol (completează contabilul)</li>'
+    `<li class="combobox-item combobox-empty" role="option" data-action="clear">${bi("Lasă gol (completează contabilul)")}</li>`
   ];
   matches.forEach((s) => {
     rows.push(`<li class="combobox-item" role="option" data-id="${s.id}">${escapeComboHtml(s.name)}</li>`);
@@ -3472,7 +3472,7 @@ function renderSupplierSuggestions() {
   if (raw.trim() && !exact && canAccess("receipt-write")) {
     const safe = escapeComboHtml(raw.trim());
     rows.push(
-      `<li class="combobox-item combobox-new" role="option" data-action="new" data-name="${safe}">➕ Adaugă «${safe}» ca persoană fizică</li>`
+      `<li class="combobox-item combobox-new" role="option" data-action="new" data-name="${safe}">➕ ${bi("Adaugă")} «${safe}» ${bi("ca persoană fizică")}</li>`
     );
   }
 
