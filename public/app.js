@@ -232,6 +232,7 @@ let receiptsCache = [];
 let processingsCache = [];
 let transactionsCache = [];
 let deliveriesCache = [];
+let stockCorrectionsCache = [];
 let complaintsCache = [];
 let auditLogsCache = [];
 let lockoutsCache = [];
@@ -1299,6 +1300,8 @@ function renderStockSummary(summary) {
   // ca să poată fi corectat, nu se ascunde.
   const stockRows = summary.byLocation.filter((item) => Math.round(Number(item.quantity || 0) * 1000) !== 0);
   const negativeRows = stockRows.filter((item) => Number(item.quantity || 0) < 0);
+  // Corecția de inventar e a adminului: el așază stocul la ce a numărat fizic în cilindru.
+  const canCorrectStock = currentSessionUser?.roleCode === "admin";
   stocksBodyEl.innerHTML = stockRows
     .map(
       (item) => `
@@ -1307,6 +1310,13 @@ function renderStockSummary(summary) {
           <td>${escapeComboHtml(item.product)}</td>
           <td>${formatNumber(item.quantity)} t</td>
           <td>${formatNumber(item.quantity * 1000)} kg</td>
+          <td>${canCorrectStock
+            ? `<button type="button" class="cell-btn" data-action="stock-correct"
+                 data-location="${escapeComboHtml(item.location)}"
+                 data-product="${escapeComboHtml(item.product)}"
+                 data-current="${Math.round(Number(item.quantity || 0) * 1000)}"
+                 title="Am numărat fizic: așază stocul la cantitatea reală, iar diferența intră la pierderi">Corectează</button>`
+            : ""}</td>
         </tr>
       `
     )
@@ -1487,7 +1497,7 @@ function renderLossesReport() {
   const byProduct = new Map();
   const bucket = (p) => {
     const key = p || "—";
-    if (!byProduct.has(key)) byProduct.set(key, { received: 0, waterRecv: 0, waste: 0, waterDry: 0, delivered: 0, waterDeliv: 0 });
+    if (!byProduct.has(key)) byProduct.set(key, { received: 0, waterRecv: 0, waste: 0, waterDry: 0, delivered: 0, waterDeliv: 0, corrected: 0 });
     return byProduct.get(key);
   };
 
@@ -1514,9 +1524,16 @@ function renderLossesReport() {
     if (w !== null) g.waterDeliv += w / 1000; // kg -> tone
   });
 
+  // Corecții de inventar: adminul a numărat fizic și a așezat stocul la realitate.
+  // Diferența e o pierdere RECUNOSCUTĂ — o arătăm separat, ca să scadă din „necontabilizat".
+  (stockCorrectionsCache || []).forEach((cr) => {
+    if ((prodFilter && cr.product !== prodFilter) || !inRange(cr.createdAt)) return;
+    bucket(cr.product).corrected += Number(cr.delta || 0);
+  });
+
   const rows = Array.from(byProduct.entries()).sort((a, b) => String(a[0]).localeCompare(String(b[0]), "ro"));
   if (!rows.length) {
-    body.innerHTML = '<tr><td colspan="9" class="empty-state">Fără date pentru filtrul ales.</td></tr>';
+    body.innerHTML = '<tr><td colspan="10" class="empty-state">Fără date pentru filtrul ales.</td></tr>';
     if (foot) foot.innerHTML = "";
     return;
   }
@@ -1527,13 +1544,16 @@ function renderLossesReport() {
     if (!p) return;
     stockByProduct[p] = (stockByProduct[p] || 0) + Number(i.quantity || 0);
   });
-  const tot = { received: 0, waterRecv: 0, waste: 0, waterDry: 0, delivered: 0, waterDeliv: 0, diff: 0, stock: 0 };
+  const tot = { received: 0, waterRecv: 0, waste: 0, waterDry: 0, delivered: 0, waterDeliv: 0, corrected: 0, diff: 0, stock: 0 };
   body.innerHTML = rows
     .map(([prod, g]) => {
-      const diff = g.received - g.waste - g.waterDry - g.delivered;
+      // Corecția e deja aplicată în stoc, deci intră și în formula diferenței: ce a fost
+      // recunoscut ca pierdere la inventar nu mai e „necontabilizat".
+      const diff = g.received - g.waste - g.waterDry - g.delivered + Number(g.corrected || 0);
       const stock = stockByProduct[prod] || 0;
       tot.received += g.received; tot.waterRecv += g.waterRecv; tot.waste += g.waste;
       tot.waterDry += g.waterDry; tot.delivered += g.delivered; tot.waterDeliv += g.waterDeliv;
+      tot.corrected += Number(g.corrected || 0);
       tot.diff += diff; tot.stock += stock;
       return `<tr>
         <td>${escapeComboHtml(prod)}</td>
@@ -1543,6 +1563,7 @@ function renderLossesReport() {
         <td>${kgNum(g.waterDry)}</td>
         <td>${kgNum(g.delivered)}</td>
         <td>${kgNum(g.waterDeliv)}</td>
+        <td>${Number(g.corrected || 0) ? `<b>${kgNum(g.corrected)}</b>` : "—"}</td>
         <td><b>${kgNum(diff)}</b></td>
         <td>${kgNum(stock)}</td>
       </tr>`;
@@ -1557,6 +1578,7 @@ function renderLossesReport() {
       <td>${kgNum(tot.waterDry)}</td>
       <td>${kgNum(tot.delivered)}</td>
       <td>${kgNum(tot.waterDeliv)}</td>
+      <td><b>${kgNum(tot.corrected)}</b></td>
       <td><b>${kgNum(tot.diff)}</b></td>
       <td>${kgNum(tot.stock)}</td>
     </tr>`;
@@ -1647,6 +1669,7 @@ function renderStockPeriod() {
   const recBefore = {}, recIn = {};
   const procBefore = {}, procIn = {};
   const delBefore = {}, delIn = {};
+  const corrBefore = {}, corrIn = {};
   const bucket = (beforeObj, inObj, p, day, qty) => {
     // Acceptă și valori NEGATIVE: un retur scade dintr-o ieșire, la ziua lui.
     if (!qty) return;
@@ -1688,6 +1711,16 @@ function renderStockPeriod() {
     });
   });
 
+  // Corecții de inventar: adminul a numărat fizic și a așezat stocul la realitate.
+  // FĂRĂ ele, acest tabel ar arăta alt total decât „Stoc pe locații" de deasupra — exact
+  // divergența pe care regula 8 din CLAUDE.md o interzice. Semnul e al deltei: negativ =
+  // pierdere recunoscută, pozitiv = plus la inventar.
+  (stockCorrectionsCache || []).forEach((cr) => {
+    const p = cr.product || "—";
+    products.add(p);
+    bucket(corrBefore, corrIn, p, dayOf(cr.createdAt), Number(cr.delta || 0));
+  });
+
   // Pierderi la procesarile noi (model miscare): intrare − iesire = deseu + apa.
   (processingsCache || []).forEach((pr) => {
     if (!pr || pr.movement !== true) return;
@@ -1704,23 +1737,26 @@ function renderStockPeriod() {
     .filter((p) => !prodFilter || p === prodFilter)
     .sort((a, b) => String(a).localeCompare(String(b), "ro"));
   if (!rows.length) {
-    body.innerHTML = '<tr><td colspan="6" class="empty-state">Nu există date pentru perioada aleasă.</td></tr>';
+    body.innerHTML = '<tr><td colspan="7" class="empty-state">Nu există date pentru perioada aleasă.</td></tr>';
     return;
   }
-  let tInit = 0, tRec = 0, tProc = 0, tDel = 0, tFin = 0;
+  let tInit = 0, tRec = 0, tProc = 0, tDel = 0, tCorr = 0, tFin = 0;
   body.innerHTML = rows.map((p) => {
-    const init = (opening[p] || 0) + (recBefore[p] || 0) - (delBefore[p] || 0) - (procBefore[p] || 0);
+    const init = (opening[p] || 0) + (recBefore[p] || 0) - (delBefore[p] || 0)
+      - (procBefore[p] || 0) + (corrBefore[p] || 0);
     const rec = recIn[p] || 0;
     const proc = procIn[p] || 0;
     const del = delIn[p] || 0;
-    const fin = init + rec - proc - del;
-    tInit += init; tRec += rec; tProc += proc; tDel += del; tFin += fin;
+    const corr = corrIn[p] || 0;
+    const fin = init + rec - proc - del + corr;
+    tInit += init; tRec += rec; tProc += proc; tDel += del; tCorr += corr; tFin += fin;
     return `<tr>
       <td>${p}</td>
       <td>${kgNum(init)}</td>
       <td>${kgNum(rec)}</td>
       <td>${kgNum(proc)}</td>
       <td>${kgNum(del)}</td>
+      <td>${corr ? `<b>${kgNum(corr)}</b>` : "—"}</td>
       <td><b>${kgNum(fin)}</b></td>
     </tr>`;
   }).join("") + `
@@ -1730,6 +1766,7 @@ function renderStockPeriod() {
       <td>${kgNum(tRec)}</td>
       <td>${kgNum(tProc)}</td>
       <td>${kgNum(tDel)}</td>
+      <td><b>${kgNum(tCorr)}</b></td>
       <td>${kgNum(tFin)}</td>
     </tr>`;
 }
@@ -3427,7 +3464,7 @@ function renderSupplierSuggestions() {
   const exact = q && supplierComboItems.some((s) => normalizeComboText(s.name) === q);
 
   const rows = [
-    '<li class="combobox-item combobox-empty" role="option" data-action="clear">Lasă gol (completează contabilul)</li>'
+    `<li class="combobox-item combobox-empty" role="option" data-action="clear">${bi("Lasă gol (completează contabilul)")}</li>`
   ];
   matches.forEach((s) => {
     rows.push(`<li class="combobox-item" role="option" data-id="${s.id}">${escapeComboHtml(s.name)}</li>`);
@@ -3435,7 +3472,7 @@ function renderSupplierSuggestions() {
   if (raw.trim() && !exact && canAccess("receipt-write")) {
     const safe = escapeComboHtml(raw.trim());
     rows.push(
-      `<li class="combobox-item combobox-new" role="option" data-action="new" data-name="${safe}">➕ Adaugă «${safe}» ca persoană fizică</li>`
+      `<li class="combobox-item combobox-new" role="option" data-action="new" data-name="${safe}">➕ ${bi("Adaugă")} «${safe}» ${bi("ca persoană fizică")}</li>`
     );
   }
 
@@ -4641,8 +4678,11 @@ async function loadStocks() {
     renderStockSummary({ byLocation: [], totals: { totalQuantity: 0, totalLocations: 0, totalProducts: 0 } });
     return;
   }
+  // Corecțiile vin în ACELAȘI răspuns cu stocul — o cerere separată ar fi adus încă o dată
+  // tot blobul de stare, pentru câteva zeci de KB.
   const response = await fetch("/api/stocks");
   const data = await response.json();
+  stockCorrectionsCache = data.stockCorrections || [];
   renderStockSummary(data);
   updateTransferAvailableHint();
   updateDeliverySourceOptions();
@@ -5139,6 +5179,20 @@ function validateReceiptForm(formData) {
   }
 
   const supplierId = formData.get("supplierId");
+  // Numele TASTAT in casuta de furnizor, dar fara ca vreo optiune sa fie aleasa.
+  // Fara garda de mai jos, textul se pierdea si receptia se salva FARA furnizor, in tacere —
+  // omul crede ca a introdus furnizorul si nu se salveaza nimic.
+  const typedSupplier = String((supplierSearchInput && supplierSearchInput.value) || "").trim();
+  if (!supplierId && typedSupplier) {
+    // Rolurile fara `receipt-write` (ex. contabilul care pregateste un Proiect) nu au randul
+    // „➕ Adauga" — mesajul nu trebuie sa-i trimita spre un buton pe care nu-l vad.
+    return canAccess("receipt-write")
+      ? `Furnizorul „${typedSupplier}" nu e ales din listă. Apasă pe el în listă, ` +
+        `sau pe „➕ Adaugă «${typedSupplier}» ca persoană fizică". ` +
+        `Dacă vrei să completeze contabilul mai târziu, alege „Lasă gol".`
+      : `Furnizorul „${typedSupplier}" nu e ales din listă. Alege-l din listă ` +
+        `sau lasă câmpul gol, ca să-l completeze mai târziu cine face recepția.`;
+  }
   // Furnizorul e OPTIONAL: poate fi lasat gol (contabilul completeaza ulterior).
   if (supplierId === "__new__") {
     // Furnizor nou (persoana fizica) introdus pe loc de operator
@@ -7639,9 +7693,39 @@ supplierSearchInput.addEventListener("input", () => {
 supplierSearchInput.addEventListener("focus", () => {
   renderSupplierSuggestions();
 });
+// Escape = renunț: golește textul, ca ieșirea din câmp să nu mai creeze un furnizor nou.
+supplierSearchInput.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !supplierIdInput.value) {
+    supplierSearchInput.value = "";
+  }
+});
+
 supplierSearchInput.addEventListener("blur", () => {
   // mic delay ca pointerdown/mousedown pe sugestie sa apuce sa ruleze
-  window.setTimeout(closeSupplierSuggestions, 120);
+  window.setTimeout(() => {
+    closeSupplierSuggestions();
+    // Nume tastat care nu e in lista si nicio optiune aleasa: il tratam ca furnizor NOU.
+    // Inainte, textul se pierdea la trimitere si receptia se salva fara furnizor, in tacere.
+    // Nu „ghicim" nimic ascuns: campul „Nume furnizor nou" devine vizibil, cu numele in el,
+    // deci omul vede ce s-a intamplat si poate schimba.
+    const typed = String(supplierSearchInput.value || "").trim();
+    if (!typed || supplierIdInput.value) return;
+    if (!canAccess("receipt-write")) return;
+    const typedNorm = normalizeComboText(typed);
+    const match = supplierComboItems.find((s) => normalizeComboText(s.name) === typedNorm);
+    if (match) {
+      // Numele tastat e exact un furnizor existent: îl alegem pe acela, fără duplicat.
+      chooseSupplier({ id: match.id, name: match.name });
+      return;
+    }
+    // Text care se potrivește PARȚIAL cu furnizori existenți = e o filtrare în curs
+    // („Ion" ca să găsească „Ionescu Vasile"), nu un nume nou. Nu creăm nimic: garda de la
+    // salvare îi va spune să aleagă. Altfel, un click alături ar fi creat un furnizor „Ion"
+    // lângă „Ionescu Vasile", tăcut.
+    const looksLikeFilter = supplierComboItems.some((s) => normalizeComboText(s.name).includes(typedNorm));
+    if (looksLikeFilter) return;
+    chooseSupplier({ isNew: true, name: typed });
+  }, 120);
 });
 supplierSearchInput.addEventListener("keydown", (event) => {
   if (supplierSuggestionsEl.hidden) return;
@@ -8042,6 +8126,20 @@ async function cancelDocumentRequest(kind, id, reason) {
   return res.json();
 }
 
+// Corecție de inventar. Cantitatea se trimite în TONE (formularele lucrează în kg).
+async function stockCorrectionRequest(location, product, countedTons, reason) {
+  const res = await fetch("/api/stock-corrections", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ location, product, countedQuantity: countedTons, changeReason: reason })
+  });
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({}));
+    throw new Error(e.error || "Nu am putut salva corecția de stoc.");
+  }
+  return res.json();
+}
+
 async function returnDeliveryRequest(id, returnedQuantityTons, reason) {
   const res = await fetch(`/api/deliveries/${id}/return`, {
     method: "POST",
@@ -8128,6 +8226,44 @@ document.addEventListener("click", async (event) => {
       // Reîncărcare țintită: returul atinge livrarea, stocul și recepția-sursă. Transferurile
       // nu se schimbă, iar jurnalul de audit aduce tot blob-ul pentru câteva rânduri.
       await Promise.all([loadDeliveries(), loadStocks(), loadReceipts()]);
+    } catch (e) {
+      window.alert(e.message);
+    }
+    return;
+  }
+  const correctBtn = event.target.closest('[data-action="stock-correct"]');
+  if (correctBtn) {
+    const location = correctBtn.dataset.location;
+    const product = correctBtn.dataset.product;
+    const currentKg = Number(correctBtn.dataset.current || 0);
+    const raw = window.prompt(
+      `Câte kg de ${product} sunt FIZIC în ${location}?\n` +
+        `Aplicația arată acum ${formatNumber(currentKg)} kg. Diferența intră la pierderi.`,
+      String(currentKg)
+    );
+    if (raw === null) return;
+    const kg = Number(String(raw).replace(",", ".").trim());
+    if (!Number.isFinite(kg) || kg < 0) {
+      window.alert("Cantitatea numărată trebuie să fie un număr mai mare sau egal cu zero.");
+      return;
+    }
+    if (Math.round(kg) === Math.round(currentKg)) {
+      window.alert("Cantitatea numărată coincide cu ce arată aplicația — nu e nimic de corectat.");
+      return;
+    }
+    const diff = kg - currentKg;
+    const reason = window.prompt(
+      `Diferența: ${diff > 0 ? "+" : "−"}${formatNumber(Math.abs(diff))} kg ` +
+        `(${diff < 0 ? "pierdere" : "plus la inventar"}).\nMotivul (obligatoriu):`
+    );
+    if (reason === null) return;
+    if (!reason.trim()) {
+      window.alert("Motivul este obligatoriu.");
+      return;
+    }
+    try {
+      await stockCorrectionRequest(location, product, kg / 1000, reason.trim());
+      await Promise.all([loadStocks(), loadAuditLogs()]);
     } catch (e) {
       window.alert(e.message);
     }

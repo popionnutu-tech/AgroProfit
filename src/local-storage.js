@@ -39,6 +39,9 @@ const defaultReceiptsState = {
   processings: [],
   transactions: [],
   deliveries: [],
+  // Corectii de inventar: adminul aseaza stocul la ce e FIZIC in cilindru, iar diferenta
+  // se inregistreaza ca pierdere, cu motiv si urma in audit.
+  stockCorrections: [],
   complaints: [],
   auditLogs: [],
   partnerAdvances: [],
@@ -608,6 +611,9 @@ function readReceiptsState() {
   if (!Array.isArray(state.partnerAdvances)) {
     state.partnerAdvances = [];
   }
+  if (!Array.isArray(state.stockCorrections)) {
+    state.stockCorrections = [];
+  }
   // Backfill secventele de numerotare a documentelor tiparite (Act de achizitie, Ordin de plata)
   // pe datele vechi. Idempotent.
   if (!state.documentSequences || typeof state.documentSequences !== "object") {
@@ -956,7 +962,12 @@ function listOpeningDebtItemsFromDocuments(openingDocuments = []) {
   return normalizeOpeningDocuments(openingDocuments).flatMap((item) => item.debtItems || []);
 }
 
-function createStockSummary(receipts, deliveries = [], openingDocuments = [], transfers = [], processings = []) {
+function createStockSummary(receipts, deliveries = [], openingDocuments = [], transfers = [], processings = [], stockCorrections) {
+  if (!Array.isArray(stockCorrections)) {
+    // Intentionat fara default: un apelant care uita parametrul pierdea TACIT corectiile de
+    // inventar, iar ecranele incepeau sa arate cifre diferite fara ca nimic sa semnaleze.
+    throw new Error("createStockSummary: lipseste `stockCorrections` (paseaza state.stockCorrections).");
+  }
   const stockByLocation = new Map();
   const openingStockItems = openingDocuments.flatMap((item) => item.stockItems || []);
 
@@ -1172,6 +1183,30 @@ function createStockSummary(receipts, deliveries = [], openingDocuments = [], tr
           deliveredQuantity: 0
         });
       }
+    }
+  }
+
+  // Corectii de inventar: adminul a numarat fizic cilindrul, iar diferenta e deja
+  // inregistrata ca pierdere. Se aplica DUPA livrari si retururi, ca rezultatul final sa fie
+  // exact ce s-a numarat.
+  for (const corr of stockCorrections || []) {
+    const delta = Number(corr && corr.delta) || 0;
+    if (!delta) continue;
+    const locName = corr.location || "Fara locatie";
+    const target = byLocation.find(
+      (i) => normLoc(i.location) === normLoc(locName) && i.product === corr.product
+    );
+    if (target) {
+      target.quantity += delta;
+    } else {
+      byLocation.push({
+        location: locName,
+        product: corr.product,
+        quantity: delta,
+        unit: "tone",
+        costCategory: null,
+        deliveredQuantity: 0
+      });
     }
   }
 
@@ -4213,8 +4248,11 @@ async function getStats() {
   const auditLogs = await listAuditLogs();
   const partnerAdvances = await listPartnerAdvances();
   const transfers = await listTransfers();
+  const stockCorrections = await listStockCorrections();
   // Stoc curent (la momentul de fata), nu suma istorica a receptiilor.
-  const stockSummary = createStockSummary(receipts, deliveries, openingDocuments, transfers, processings);
+  const stockSummary = createStockSummary(
+    receipts, deliveries, openingDocuments, transfers, processings, stockCorrections
+  );
   return {
     ...createReceiptSummary(receipts),
     stockTotal: stockSummary.totals.totalQuantity,
@@ -4287,7 +4325,8 @@ function stockSummaryFromState(state) {
     state.deliveries || [],
     state.openingDocuments || [],
     state.transfers || [],
-    state.processings || []
+    state.processings || [],
+    state.stockCorrections || []
   );
 }
 
@@ -4297,7 +4336,8 @@ async function getStockSummary() {
   const deliveries = await listDeliveries();
   const transfers = await listTransfers();
   const processings = await listProcessings();
-  return createStockSummary(receipts, deliveries, openingDocuments, transfers, processings);
+  const stockCorrections = await listStockCorrections();
+  return createStockSummary(receipts, deliveries, openingDocuments, transfers, processings, stockCorrections);
 }
 
 async function listTransfers() {
@@ -4774,6 +4814,115 @@ async function returnDelivery(id, options = {}) {
 
   writeReceiptsState(state);
   return delivery;
+}
+
+// Corectie de inventar: adminul a NUMARAT fizic cilindrul si aseaza stocul la cat e acolo.
+// Diferenta (de regula in minus) se inregistreaza ca PIERDERE, cu motiv obligatoriu si urma
+// in audit. Nu „sterge" nimic: ramane document, se vede in raportul de pierderi.
+async function listStockCorrections() {
+  const state = readReceiptsState();
+  return (state.stockCorrections || []).sort(
+    (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
+  );
+}
+
+async function createStockCorrection(payload = {}) {
+  const state = readReceiptsState();
+  const currentUser = payload.currentUser || {};
+  const role = normalizeRoleCode(currentUser.roleCode);
+  // FAIL-CLOSED, spre deosebire de restul codului: aici se rescrie stocul fizic, deci lipsa
+  // rolului NU dezactiveaza regula. Un apelant intern legitim trece explicit `internal: true`.
+  if (payload.internal !== true && role !== "admin") {
+    throw forbiddenError("Doar administratorul poate corecta stocul.");
+  }
+
+  const location = requiredText(payload.location, "Locatia");
+  const product = requiredText(payload.product, "Produsul");
+  const reason = requiredText(payload.changeReason || payload.reason, "Motivul corectiei");
+  if (reason.length > MAX_RETURN_REASON_LENGTH) {
+    throw new Error(`Motivul e prea lung (max ${MAX_RETURN_REASON_LENGTH} caractere).`);
+  }
+
+  // Cantitatea NUMARATA vine in TONE (formularul imparte kg la 1000, ca peste tot).
+  // ATENTIE: NU folosim `sanitizeNumber` aici. Acela transforma orice gunoi in 0 — iar 0
+  // inseamna „goleste cilindrul". Un camp lipsa dintr-un client ar fi sters tot stocul unei
+  // locatii si ar fi raspuns „salvat". Zero trebuie sa fie o intentie explicita.
+  const rawCounted = payload.countedQuantity;
+  if (rawCounted === undefined || rawCounted === null || String(rawCounted).trim() === "") {
+    throw new Error("Cantitatea numarata este obligatorie.");
+  }
+  const counted = Number(String(rawCounted).replace(",", ".").trim());
+  if (!Number.isFinite(counted) || counted < 0) {
+    throw new Error("Cantitatea numarata trebuie sa fie un numar finit, mai mare sau egal cu zero.");
+  }
+
+  // Corectia ASEAZA o linie existenta la realitate — nu inventeaza stoc. Daca perechea
+  // locatie+produs nu exista, o greseala de scriere ar crea stoc fantoma in loc sa corecteze
+  // randul real. Potrivirea pe produs e case-insensitive (ca la locatie), iar valorile
+  // canonice se preiau din stoc, ca sa se potriveasca sigur la recalcul.
+  const summary = stockSummaryFromState(state);
+  const line = summary.byLocation.find(
+    (i) =>
+      sameLocation(i.location, location) &&
+      String(i.product || "").trim().toLowerCase() === product.trim().toLowerCase()
+  );
+  if (!line) {
+    throw new Error(
+      `Nu exista stoc inregistrat pentru ${product} in ${location}. ` +
+        "Corectia aseaza un rand existent la realitate, nu creeaza stoc nou."
+    );
+  }
+  const canonicalLocation = line.location;
+  const canonicalProduct = line.product;
+  const current = Number(line.quantity || 0);
+
+  // Plafon sanitar: o corectie nu poate depasi capacitatea declarata a locatiei.
+  const config = readConfigState();
+  const locationEntry = (config.storageLocations || []).find((l) => sameLocation(l.name, canonicalLocation));
+  const capacityTons = Number((locationEntry || {}).capacity || 0) / 1000;
+  if (capacityTons > 0 && counted > capacityTons) {
+    throw new Error(
+      `Cantitatea numarata (${Math.round(counted * 1000)} kg) depaseste capacitatea ` +
+        `locatiei ${canonicalLocation} (${Math.round(capacityTons * 1000)} kg).`
+    );
+  }
+
+  const delta = Math.round((counted - current) * 1000) / 1000;
+  if (delta === 0) {
+    throw new Error("Stocul din aplicatie coincide deja cu cantitatea numarata.");
+  }
+
+  const now = new Date().toISOString();
+  const correction = {
+    id: nextId(state.stockCorrections),
+    location: canonicalLocation,
+    product: canonicalProduct,
+    systemQuantity: current,
+    countedQuantity: counted,
+    delta,
+    reason,
+    createdBy: currentUser.name || payload.changedBy || "admin",
+    createdByRole: role || "",
+    createdAt: now
+  };
+
+  if (!Array.isArray(state.stockCorrections)) {
+    state.stockCorrections = [];
+  }
+  state.stockCorrections.push(correction);
+
+  createAuditEntry(state, {
+    entityType: "stock-correction",
+    entityId: correction.id,
+    action: "create",
+    reason,
+    user: correction.createdBy,
+    oldValue: { location: canonicalLocation, product: canonicalProduct, quantity: current },
+    newValue: { location: canonicalLocation, product: canonicalProduct, quantity: counted, delta }
+  });
+
+  writeReceiptsState(state);
+  return correction;
 }
 
 // Editare comentariu (note) pe un document existent (admin). Ex.: data reala a operatiei.
@@ -5507,7 +5656,9 @@ module.exports = {
   listUsers,
   reopenReceipt,
   runMigrationIfNeeded,
+  createStockCorrection,
   isDeliveryPendingStockExit,
+  listStockCorrections,
   isReceiptInStock,
   isVoidedDelivery,
   getDeliveryGrossQuantity,

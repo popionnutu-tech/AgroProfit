@@ -1063,6 +1063,7 @@
                   <th>Produs</th>
                   <th>Tone</th>
                   <th>Kg</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody id="stocks-body"></tbody>
@@ -1089,6 +1090,7 @@
                   <th>Recepții (kg)</th>
                   <th>Pierderi proc. (kg)</th>
                   <th>Livrări (kg)</th>
+                  <th>Corecții inventar (kg)</th>
                   <th>Stoc final (kg)</th>
                 </tr>
               </thead>
@@ -1957,6 +1959,7 @@
                       <th>Apă uscare (kg)</th>
                       <th>Livrat (kg)</th>
                       <th>Apă livrare (kg)</th>
+                      <th>Corecții inventar (kg)</th>
                       <th>Diferență (kg)</th>
                       <th>Stoc curent (kg)</th>
                     </tr>
@@ -1965,7 +1968,7 @@
                   <tfoot id="losses-report-foot"></tfoot>
                 </table>
               </div>
-              <p class="field-hint">Diferență = Primit − Deșeu − Apă uscare − Livrat (necontabilizat). „Apă recepție/livrare" sunt informative (apa e deja exclusă din net la recepție).</p>
+              <p class="field-hint">Diferență = Primit − Deșeu − Apă uscare − Livrat + Corecții (necontabilizat). „Corecții inventar" = ce a numărat administratorul fizic în cilindru; e o pierdere <b>recunoscută</b>, deci scade din diferența necontabilizată. „Apă recepție/livrare" sunt informative (apa e deja exclusă din net la recepție).</p>
             </details>
           </div>
         </section>

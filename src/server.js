@@ -70,6 +70,10 @@ const {
   updateComplaintHandler
 } = require("./complaint-handlers");
 const { listAuditLogsHandler } = require("./audit-handlers");
+const {
+  createStockCorrectionHandler,
+  listStockCorrectionsHandler
+} = require("./stock-correction-handlers");
 const { listLockoutsHandler, unlockUsernameHandler } = require("./security-handlers");
 const {
   createOpeningDocumentHandler,
@@ -415,6 +419,16 @@ app.get(
   requireRoles(["operator", "manager", "accountant", "accountant-sef", "admin", "control"]),
   getStockSummaryHandler
 );
+
+// Corectii de inventar: adminul aseaza stocul la ce a numarat fizic in cilindru, iar
+// diferenta se inregistreaza ca pierdere. Citirea e pentru toti cei cu drept de stoc, ca
+// diferenta sa fie vizibila; scrierea e strict a adminului (garda repetata in `storage`).
+app.get(
+  "/api/stock-corrections",
+  requireRoles(["operator", "manager", "accountant", "accountant-sef", "admin", "control"]),
+  listStockCorrectionsHandler
+);
+app.post("/api/stock-corrections", requireRoles(["admin"]), createStockCorrectionHandler);
 
 // Transfer de produs intre cilindri (mutare stoc).
 app.get(

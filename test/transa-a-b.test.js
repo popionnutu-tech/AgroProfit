@@ -2207,3 +2207,191 @@ test("Stoc: deficitul se VEDE pe minus, nu se plafoneaza la zero", async () => {
     assert.ok(linie.quantity < 0, `deficitul trebuie sa se vada pe minus, nu plafonat (are ${linie.quantity})`);
   });
 });
+
+test("Corectie de inventar: aseaza stocul la cat s-a numarat fizic", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    await seedReceipt(storage, { location: "Cilindru 1" }); // 100 t
+
+    // Adminul numara fizic: sunt doar 97,5 t.
+    const corr = await storage.createStockCorrection({
+      location: "Cilindru 1", product: "Grau", countedQuantity: 97.5,
+      changeReason: "inventar lunar", currentUser: { name: "Admin", roleCode: "admin" }
+    });
+    assert.equal(corr.systemQuantity, 100);
+    assert.equal(corr.countedQuantity, 97.5);
+    assert.equal(corr.delta, -2.5);
+
+    const stock = await storage.getStockSummary();
+    assert.equal(stock.totals.totalQuantity, 97.5, "stocul e acum cat s-a numarat");
+
+    // Ramane document, cu urma in audit.
+    const logs = await storage.listAuditLogs();
+    const entry = logs.find((l) => l.entityType === "stock-correction");
+    assert.ok(entry, "corectia lasa urma in audit");
+    assert.equal(entry.reason, "inventar lunar");
+  });
+});
+
+test("Corectie de inventar: doar adminul, cu motiv, si doar daca schimba ceva", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    await seedReceipt(storage, { location: "Cilindru 1" });
+
+    for (const roleCode of ["operator", "manager", "accountant", "accountant-sef"]) {
+      await assert.rejects(
+        storage.createStockCorrection({
+          location: "Cilindru 1", product: "Grau", countedQuantity: 90,
+          changeReason: "test", currentUser: { roleCode }
+        }),
+        /Doar administratorul/i,
+        `rolul ${roleCode} nu are voie`
+      );
+    }
+
+    await assert.rejects(
+      storage.createStockCorrection({
+        location: "Cilindru 1", product: "Grau", countedQuantity: 90,
+        changeReason: "  ", currentUser: { roleCode: "admin" }
+      }),
+      /Motivul/i
+    );
+
+    // Cantitatea negativa nu are sens.
+    await assert.rejects(
+      storage.createStockCorrection({
+        location: "Cilindru 1", product: "Grau", countedQuantity: -5,
+        changeReason: "test", currentUser: { roleCode: "admin" }
+      }),
+      /mai mare sau egal/i
+    );
+
+    // Fara diferenta nu se creeaza document degeaba.
+    await assert.rejects(
+      storage.createStockCorrection({
+        location: "Cilindru 1", product: "Grau", countedQuantity: 100,
+        changeReason: "test", currentUser: { roleCode: "admin" }
+      }),
+      /coincide deja/i
+    );
+  });
+});
+
+test("Corectie de inventar: aduce la zero un deficit si il face vizibil ca pierdere", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    await seedReceipt(storage, { location: "Cilindru 1" }); // 100 t
+    const d = await storage.createDelivery({
+      customerId: 2, customer: "A", product: "Grau", productId: 1,
+      sourceLocation: "Cilindru 1", plannedQuantity: 100, createdBy: "op"
+    });
+    await storage.returnDelivery(d.id, {
+      returnedQuantity: 30, reason: "refuz", currentUser: { roleCode: "operator" }
+    });
+    await storage.createDelivery({
+      customerId: 2, customer: "B", product: "Grau", productId: 1,
+      sourceLocation: "Cilindru 1", plannedQuantity: 30, createdBy: "op"
+    });
+    let stock = await storage.getStockSummary();
+    assert.equal(stock.totals.totalQuantity, 0);
+
+    // In cilindru sunt fizic 1,2 t ramase — adminul le inregistreaza.
+    await storage.createStockCorrection({
+      location: "Cilindru 1", product: "Grau", countedQuantity: 1.2,
+      changeReason: "numarat la inventar", currentUser: { roleCode: "admin" }
+    });
+    stock = await storage.getStockSummary();
+    assert.equal(stock.totals.totalQuantity, 1.2);
+
+    const list = await storage.listStockCorrections();
+    assert.equal(list.length, 1);
+    assert.equal(list[0].delta, 1.2);
+  });
+});
+
+test("Corectie: o cantitate lipsa sau invalida NU goleste cilindrul", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    await seedReceipt(storage, { location: "Cilindru 1" }); // 100 t
+
+    // `sanitizeNumber` transforma orice gunoi in 0, iar 0 inseamna „goleste cilindrul".
+    // Un camp lipsa dintr-un client ar fi sters tot stocul si ar fi raspuns „salvat".
+    for (const bad of [undefined, null, "", "abc", NaN, {}]) {
+      await assert.rejects(
+        storage.createStockCorrection({
+          location: "Cilindru 1", product: "Grau", countedQuantity: bad,
+          changeReason: "test", currentUser: { roleCode: "admin" }
+        }),
+        /obligatorie|numar finit/i,
+        `valoarea ${String(bad)} ar trebui respinsa`
+      );
+    }
+    const stock = await storage.getStockSummary();
+    assert.equal(stock.totals.totalQuantity, 100, "stocul a ramas neatins");
+  });
+});
+
+test("Corectie: nu inventeaza stoc pentru o pereche locatie+produs inexistenta", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    await seedReceipt(storage, { location: "Cilindru 1" });
+
+    // O greseala de scriere ar fi creat stoc fantoma in loc sa corecteze randul real.
+    await assert.rejects(
+      storage.createStockCorrection({
+        location: "Cilindru Inexistent", product: "Grau", countedQuantity: 50,
+        changeReason: "test", currentUser: { roleCode: "admin" }
+      }),
+      /Nu exista stoc inregistrat/i
+    );
+    await assert.rejects(
+      storage.createStockCorrection({
+        location: "Cilindru 1", product: "ProdusInventat", countedQuantity: 50,
+        changeReason: "test", currentUser: { roleCode: "admin" }
+      }),
+      /Nu exista stoc inregistrat/i
+    );
+
+    // Potrivirea pe produs e insensibila la litere mari/mici, ca la locatie.
+    const ok = await storage.createStockCorrection({
+      location: "cilindru 1", product: "GRAU", countedQuantity: 95,
+      changeReason: "inventar", currentUser: { roleCode: "admin" }
+    });
+    assert.equal(ok.location, "Cilindru 1", "se salveaza numele canonic");
+    assert.equal(ok.product, "Grau");
+
+    const stock = await storage.getStockSummary();
+    assert.equal(stock.totals.totalQuantity, 95);
+    assert.equal(stock.byLocation.length, 1, "nu s-a creat nicio linie noua");
+  });
+});
+
+test("Corectie: fail-closed — lipsa rolului NU dezactiveaza regula", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    await seedReceipt(storage, { location: "Cilindru 1" });
+    await assert.rejects(
+      storage.createStockCorrection({
+        location: "Cilindru 1", product: "Grau", countedQuantity: 0,
+        changeReason: "test", currentUser: {}
+      }),
+      /Doar administratorul/i
+    );
+    const stock = await storage.getStockSummary();
+    assert.equal(stock.totals.totalQuantity, 100);
+  });
+});
+
+test("Corectie: nu poate depasi capacitatea locatiei", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    await seedReceipt(storage, { location: "Cilindru 1" });
+    await assert.rejects(
+      storage.createStockCorrection({
+        location: "Cilindru 1", product: "Grau", countedQuantity: 1e9,
+        changeReason: "test", currentUser: { roleCode: "admin" }
+      }),
+      /depaseste capacitatea/i
+    );
+  });
+});

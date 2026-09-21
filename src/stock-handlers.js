@@ -1,4 +1,4 @@
-const { getStockSummary } = require("./storage");
+const { getStockSummary, listStockCorrections } = require("./storage");
 
 function sendJson(res, statusCode, payload) {
   if (typeof res.status === "function" && typeof res.json === "function") {
@@ -12,8 +12,14 @@ function sendJson(res, statusCode, payload) {
 
 async function getStockSummaryHandler(_req, res) {
   try {
-    const summary = await getStockSummary();
-    return sendJson(res, 200, summary);
+    // Corectiile vin in ACELASI raspuns cu stocul. O cerere separata ar fi costat inca o
+    // descarcare a blobului intreg (fiecare /api/* trece prin `reloadFromKv`), pentru cateva
+    // zeci de KB — iar `loadStocks()` e apelat din zeci de locuri.
+    const [summary, stockCorrections] = await Promise.all([
+      getStockSummary(),
+      listStockCorrections()
+    ]);
+    return sendJson(res, 200, { ...summary, stockCorrections });
   } catch (error) {
     console.error("Failed to load stock summary:", error.message);
     return sendJson(res, 500, { error: "Nu am putut incarca stocurile." });
