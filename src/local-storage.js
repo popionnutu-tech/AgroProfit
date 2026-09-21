@@ -1213,8 +1213,10 @@ function createStockSummary(receipts, deliveries = [], openingDocuments = [], tr
   // NU plafonam la zero. Plafonarea ascundea deficitul: „Stoc pe locatie" arata mai mult
   // decat exista, iar „Miscarea stocului" (aritmetica pura) arata adevarul — cele doua nu
   // se potriveau, fara ca nimeni sa poata spune de ce. Un minus se VEDE si se corecteaza.
+  // Rotunjim la GRAM: pastreaza toata precizia reala (cantarul da kg, uneori cu zecimale),
+  // dar taie zgomotul de virgula mobila (1e-13) care ar face un cilindru sa apara pe minus.
   byLocation
-    .forEach((item) => { item.quantity = Number(item.quantity || 0); });
+    .forEach((item) => { item.quantity = Math.round(Number(item.quantity || 0) * 1e6) / 1e6; });
   byLocation.sort((a, b) => {
     if (a.location === b.location) {
       return a.product.localeCompare(b.product, "ro");
@@ -4887,8 +4889,14 @@ async function createStockCorrection(payload = {}) {
     );
   }
 
-  const delta = Math.round((counted - current) * 1000) / 1000;
-  if (delta === 0) {
+  // Delta EXACT, fara rotunjire. Rotunjirea la kg intreg facea ca stocul sa NU ajunga pe
+  // cantitatea numarata: daca in cilindru erau 0,6 kg si adminul punea 0, ramanea -0,4 kg,
+  // adica un „deficit" fantoma, rosu pe ecran. Corectia trebuie sa aseze stocul FIX pe cat
+  // s-a numarat — asta e tot rostul ei.
+  const delta = counted - current;
+  // „Nimic de corectat" inseamna sub un gram, nu sub un kilogram: altfel o diferenta reala
+  // de sub 1 kg nu s-ar putea inchide deloc.
+  if (Math.abs(delta) < 0.000001) {
     throw new Error("Stocul din aplicatie coincide deja cu cantitatea numarata.");
   }
 
