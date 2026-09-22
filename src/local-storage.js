@@ -1413,8 +1413,8 @@ function getReceiptAvailableQuantity(state, receiptId, options = {}) {
     return null;
   }
   // Marfa care nu e in stoc nu e disponibila de livrat. Fara asta, o receptie „Proiect"
-  // (exclusa din stoc) ramanea livrabila, iar scaderea ar fi consumat marfa ALTOR receptii
-  // prin cascada pe locatii, cu rezultatul ascuns de plafonarea la zero.
+  // (exclusa din stoc) ramanea livrabila si scotea din locatie marfa ALTOR receptii
+  // (inainte prin cascada pe locatii, eliminata intre timp).
   if (!isReceiptInStock(receipt)) {
     return 0;
   }
@@ -3049,7 +3049,7 @@ async function createDelivery(payload) {
     throw new Error("Receptia este inchisa. Nu se poate crea livrare.");
   }
   // Ce nu e in stoc nu se poate livra. Fara asta, o receptie „Proiect" (exclusa din stoc)
-  // ramanea livrabila, iar scaderea consuma marfa ALTOR receptii prin cascada pe locatii.
+  // ramanea livrabila si scotea din locatie marfa ALTOR receptii.
   if (receipt && !isReceiptInStock(receipt)) {
     throw new Error(
       `Receptia #${receipt.id} are statusul "${receipt.status}" — marfa nu e inca in stoc. ` +

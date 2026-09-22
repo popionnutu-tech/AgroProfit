@@ -107,7 +107,8 @@ introducă. Îl creează în status **`Proiect`**.
   filtrai doar pe `"Anulat"` la recepții — altfel marfa nedescărcată apare ca fiind în depozit.
 - **Regula care ține totul:** ce nu e în stoc nu se poate livra. `getReceiptAvailableQuantity`
   întoarce 0 pentru astfel de recepții, iar `createDelivery` dă eroare explicită. Fără asta,
-  scăderea ar fi consumat marfa ALTOR recepții prin cascada pe locații, ascunsă de `Math.max(…,0)`.
+  scăderea ar fi consumat marfa ALTOR recepții din aceeași locație (istoric: și din alte locații,
+  prin cascada eliminată — vezi regula 8).
 - `Proiect` se setează **doar la creare**. Un document existent nu se întoarce în proiect —
   altfel oricine cu drept de status ar scoate marfă din stoc lăsând documentul să pară în regulă.
 - Livrarea-proiect are `deliveredQuantity = 0` **și `netWeight = 0`** (doar rezervare). Nu pune
