@@ -1104,58 +1104,41 @@ function createStockSummary(receipts, deliveries = [], openingDocuments = [], tr
   }
   const byLocation = Array.from(mergedMap.values());
 
-  // Scadem fiecare livrare livrata: intai din locatia aleasa la livrare, apoi din
-  // celelalte locatii ale produsului (cele mai pline intai) daca acolo nu ajunge —
-  // astfel poarta (pe locatie) si scaderea coincid, dar ramane robust daca produsul
-  // a fost mutat intre timp prin procesare/transfer.
+  // Fiecare livrare se scade DOAR din locatia ei. Nu se mai „imprumuta" din alte locatii ale
+  // produsului: cascada de odinioara (cele mai pline intai) muta marfa intre locatii fara
+  // niciun document si fara sa tina cont de date. Cazul real: returul unei livrari din
+  // Cilindru 2 scade intai iesirea bruta, lipsa temporara era acoperita din gropile de
+  // primire, iar creditul returului o punea apoi in Cilindru 2 — receptiile din gropi
+  // „ajungeau" in cilindru. O mutare intre locatii se face DOAR prin transfer sau procesare.
+  // Daca livrarea nu incape, locatia ei iese pe minus — vizibil si corectabil (regula 8).
   for (const d of deliveries) {
     // Livrarea anulată nu a existat niciodată: nicio mișcare, nici ieșirea, nici returul.
     if (d.status === "Anulat") continue;
     // Scădem IEȘIREA BRUTĂ (cât a plecat efectiv din stoc la încărcare), nu cantitatea rămasă
-    // după retur. Altfel cascada de mai jos s-ar recalcula cu un număr mai mic și marfa ar
-    // „reveni" în locațiile din care s-a completat, nu în cea unde a fost descărcată fizic.
-    // Creditul returului se aplică separat, mai jos, DUPĂ ce ieșirea a fost alocată.
-    let remaining = Number(d.deliveredQuantity || 0) + Number(d.returnedQuantity || 0);
-    if (remaining <= 0) continue;
-    const product = d.product;
-    const primary = byLocation.find((i) => normLoc(i.location) === normLoc(d.location) && i.product === product);
-    if (primary && primary.quantity > 0) {
-      const take = Math.min(primary.quantity, remaining);
-      primary.quantity -= take;
-      primary.deliveredQuantity += take;
-      remaining -= take;
+    // după retur. Creditul returului se aplică separat, mai jos, în locația unde marfa a fost
+    // descărcată fizic — care poate diferi de locația de plecare.
+    const outQty = Number(d.deliveredQuantity || 0) + Number(d.returnedQuantity || 0);
+    if (outQty <= 0) continue;
+    const locName = d.location || "Fara locatie";
+    let target = byLocation.find((i) => normLoc(i.location) === normLoc(locName) && i.product === d.product);
+    if (!target) {
+      target = {
+        location: locName,
+        product: d.product,
+        quantity: 0,
+        unit: "tone",
+        costCategory: null,
+        deliveredQuantity: 0
+      };
+      byLocation.push(target);
     }
-    if (remaining > 0) {
-      const others = byLocation
-        .filter((i) => i.product === product && i !== primary && i.quantity > 0)
-        .sort((a, b) => b.quantity - a.quantity);
-      for (const loc of others) {
-        if (remaining <= 0) break;
-        const take = Math.min(loc.quantity, remaining);
-        loc.quantity -= take;
-        loc.deliveredQuantity += take;
-        remaining -= take;
-      }
-    }
-    // Ce nu s-a putut scadea de nicaieri NU se arunca: se scade din locatia livrarii, chiar
-    // daca iese pe minus. Altfel cantitatea dispare in tacere si stocul pe locatii ajunge
-    // MAI MARE decat realitatea — exact cazul „marfa descarcata, apoi livrata din nou":
-    // a doua livrare cauta marfa inainte ca descarcarea sa fie creditata (creditul vine mai
-    // jos), nu o gaseste, restul se pierdea, iar creditul adauga apoi un stoc fantoma egal
-    // cu cantitatea descarcata. Pe minus, cele doua ecrane coincid intotdeauna.
-    if (remaining > 0) {
-      const target = primary || byLocation.find((i) => i.product === product);
-      if (target) {
-        target.quantity -= remaining;
-        target.deliveredQuantity += remaining;
-      }
-    }
+    target.quantity -= outQty;
+    target.deliveredQuantity += outQty;
   }
 
   // Retur / descărcare: marfa se întoarce EXACT în locația unde a fost pusă fizic — cea
   // verificată la retur (conflict de produs + capacitate). Creditul vine DUPĂ scăderea
-  // livrărilor, ca alocarea ieșirii originale (eventual cascadată pe mai multe locații)
-  // să rămână neatinsă, și ÎNAINTE de plafonarea la zero de mai jos.
+  // ieșirii brute din locația de plecare.
   for (const d of deliveries) {
     if (d.status === "Anulat") continue;
     const returnEntries = Array.isArray(d.returns) && d.returns.length > 0
@@ -1430,8 +1413,8 @@ function getReceiptAvailableQuantity(state, receiptId, options = {}) {
     return null;
   }
   // Marfa care nu e in stoc nu e disponibila de livrat. Fara asta, o receptie „Proiect"
-  // (exclusa din stoc) ramanea livrabila, iar scaderea ar fi consumat marfa ALTOR receptii
-  // prin cascada pe locatii, cu rezultatul ascuns de plafonarea la zero.
+  // (exclusa din stoc) ramanea livrabila si scotea din locatie marfa ALTOR receptii
+  // (inainte prin cascada pe locatii, eliminata intre timp).
   if (!isReceiptInStock(receipt)) {
     return 0;
   }
@@ -3066,7 +3049,7 @@ async function createDelivery(payload) {
     throw new Error("Receptia este inchisa. Nu se poate crea livrare.");
   }
   // Ce nu e in stoc nu se poate livra. Fara asta, o receptie „Proiect" (exclusa din stoc)
-  // ramanea livrabila, iar scaderea consuma marfa ALTOR receptii prin cascada pe locatii.
+  // ramanea livrabila si scotea din locatie marfa ALTOR receptii.
   if (receipt && !isReceiptInStock(receipt)) {
     throw new Error(
       `Receptia #${receipt.id} are statusul "${receipt.status}" — marfa nu e inca in stoc. ` +
@@ -3110,15 +3093,14 @@ async function createDelivery(payload) {
     if (plannedQuantity > availableQuantity) {
       throw new Error("Cantitatea planificata depaseste stocul disponibil pentru receptie.");
     }
-    // ...si marfa trebuie sa existe FIZIC. Verificarea e pe PRODUS, nu pe o singura locatie:
-    // marfa receptiei poate fi mutata intre timp prin transfer/procesare, iar scaderea o
-    // urmareste cascadat. Fara asta, o livrare pe locatie si una pe receptie scoteau
-    // amandoua aceeasi marfa — 200 t dintr-un stoc de 100 t, diferenta inghitita de
-    // plafonarea la zero.
-    const physical = getDeliveryAvailableQuantity(state, { product: productName });
+    // ...si marfa trebuie sa existe FIZIC, in locatia din care se scade livrarea — cea a
+    // receptiei. Scaderea nu mai cauta in alte locatii, deci nici verificarea nu o face:
+    // daca marfa receptiei a fost mutata prin transfer/procesare, se livreaza din locatia
+    // noua, fara legatura cu receptia.
+    const physical = getDeliveryAvailableQuantity(state, { product: productName, location: sourceLocation });
     if (Math.round(plannedQuantity * 1000) > Math.round(physical.available * 1000)) {
       throw new Error(
-        `Stoc insuficient pentru ${productName}: disponibil ` +
+        `Stoc insuficient pentru ${productName} in ${sourceLocation}: disponibil ` +
           `${Math.round(physical.available * 1000)} kg, cerut ${Math.round(plannedQuantity * 1000)} kg.`
       );
     }
@@ -3271,19 +3253,15 @@ async function transitionDelivery(id, newStatus, payload = {}) {
       // Marfa trebuie sa existe FIZIC. Verificarea lipsea complet pe ramura cu receptie,
       // deci se putea confirma un proiect peste marfa deja plecata printr-o livrare pe
       // locatie — 200 t dintr-un stoc de 100 t.
-      // Pe receptie masura e pe PRODUS (marfa poate fi mutata prin transfer/procesare);
-      // pe locatie, pe cilindrul de plecare.
-      const scope = delivery.receiptId
-        ? { product: delivery.product }
-        : { product: delivery.product, location: delivery.location };
+      // Masura e pe cilindrul de plecare — acolo se scade livrarea, cu sau fara receptie.
       const physical = getDeliveryAvailableQuantity(state, {
-        ...scope,
+        product: delivery.product,
+        location: delivery.location,
         excludeDeliveryId: delivery.id
       });
       if (Math.round(extraNeeded * 1000) > Math.round(physical.available * 1000)) {
-        const where = delivery.receiptId ? "" : ` in ${delivery.location}`;
         throw new Error(
-          `Stoc insuficient pentru ${delivery.product}${where}: disponibil ` +
+          `Stoc insuficient pentru ${delivery.product} in ${delivery.location}: disponibil ` +
             `${Math.round(physical.available * 1000)} kg, cerut ${Math.round(extraNeeded * 1000)} kg.`
         );
       }
@@ -4284,11 +4262,9 @@ async function getStats() {
 // locatie. De acolo venea supra-livrarea (200 t dintr-un stoc de 100 t), iar diferenta era
 // inghitita de plafonarea la zero din `createStockSummary`.
 //
-//  `location` lipsa -> pe PRODUS, peste toate locatiile. Masura corecta pentru livrarile
-//                      legate de o receptie: marfa poate fi mutata prin transfer/procesare,
-//                      iar scaderea o urmareste cascadat. O verificare pe o singura locatie
-//                      ar refuza gresit exact acest caz legitim.
-//  `location` dat   -> pe acel cilindru, pentru livrarile care pleaca dintr-o locatie anume.
+//  `location` lipsa -> pe PRODUS, peste toate locatiile (doar informativ).
+//  `location` dat   -> pe acel cilindru. Garda pentru ORICE livrare: scaderea se face doar
+//                      din locatia livrarii, deci si verificarea.
 //  `excludeDeliveryId` -> scoate documentul care tocmai se creeaza/confirma, ca sa nu
 //                      concureze cu el insusi.
 //  `summary`        -> stocul deja calculat de apelant (evita un recalcul complet).
@@ -4306,19 +4282,14 @@ function getDeliveryAvailableQuantity(state, options = {}) {
 
   // Rezervari: documente care nu au scazut inca stocul, dar sunt deja promise.
   //
-  // Pe scopul LOCATIE numaram doar livrarile libere. O livrare legata de receptie isi tine
-  // `location` inghetat pe cilindrul receptiei si nu-l actualizeaza niciodata — daca marfa
-  // e mutata prin transfer/procesare, rezervarea ar ramane pironita pe cilindrul vechi si ar
-  // bloca marfa ALTEI receptii ajunsa acolo intre timp.
-  // Supra-livrarea nu se redeschide: poarta care conteaza e cea de la CONFIRMARE (acolo
-  // pleaca marfa efectiv), iar acolo livrarile pe receptie se verifica pe PRODUS, peste
-  // toate locatiile. Verificarea de la creare ramane o avertizare timpurie, nu garda finala.
+  // Pe scopul LOCATIE numaram toate livrarile din acea locatie, cu sau fara receptie: si
+  // livrarea pe receptie se scade din `location` ei, deci acolo isi rezerva marfa.
   const reservedPending = (state.deliveries || [])
     .filter(
       (d) =>
         (excludeId === null || d.id !== excludeId) &&
         d.product === product &&
-        (location ? !d.receiptId && sameLocation(d.location, location) : true) &&
+        (location ? sameLocation(d.location, location) : true) &&
         Number(d.deliveredQuantity || 0) === 0 &&
         DELIVERY_STATUSES_RESERVING.includes(d.status)
     )

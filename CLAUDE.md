@@ -107,7 +107,8 @@ introducă. Îl creează în status **`Proiect`**.
   filtrai doar pe `"Anulat"` la recepții — altfel marfa nedescărcată apare ca fiind în depozit.
 - **Regula care ține totul:** ce nu e în stoc nu se poate livra. `getReceiptAvailableQuantity`
   întoarce 0 pentru astfel de recepții, iar `createDelivery` dă eroare explicită. Fără asta,
-  scăderea ar fi consumat marfa ALTOR recepții prin cascada pe locații, ascunsă de `Math.max(…,0)`.
+  scăderea ar fi consumat marfa ALTOR recepții din aceeași locație (istoric: și din alte locații,
+  prin cascada eliminată — vezi regula 8).
 - `Proiect` se setează **doar la creare**. Un document existent nu se întoarce în proiect —
   altfel oricine cu drept de status ar scoate marfă din stoc lăsând documentul să pară în regulă.
 - Livrarea-proiect are `deliveredQuantity = 0` **și `netWeight = 0`** (doar rezervare). Nu pune
@@ -153,6 +154,13 @@ introducă. Îl creează în status **`Proiect`**.
   arată −0,6 — aceeași realitate, două numere. Rotunjind la sursă, un rest sub jumătate de
   kilogram devine **zero curat** (inclusiv `-0`, normalizat cu `+ 0`), iar restul e identic
   în ambele tabele.
+- **Fiecare locație își are cantitatea ei — fără „cascadă".** O livrare se scade DOAR din
+  locația ei (`createStockSummary`), iar verificarea de stoc la livrare (inclusiv cea legată de
+  o recepție) e tot pe acea locație. Cascada veche („dacă nu ajunge, ia din celelalte locații
+  ale produsului") muta marfă între locații fără document și fără dată: returul livrării
+  Nr. 47 din Cilindru 2 a făcut ca recepțiile de soia din gropile de primire (sept. 2026) să
+  apară în Cilindru 2. Marfa se mută între locații **doar** prin transfer sau procesare.
+  **Nu reintroduce cascada.**
 - **Nu ascunde un rând negativ.** Se afișează tot ce nu e zero. Un minus ascuns rămâne fără
   butonul „Corectează" — vizibil în „Mișcarea stocului", imposibil de închis din „Stoc".
 
