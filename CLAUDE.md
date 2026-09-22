@@ -153,6 +153,13 @@ introducă. Îl creează în status **`Proiect`**.
   arată −0,6 — aceeași realitate, două numere. Rotunjind la sursă, un rest sub jumătate de
   kilogram devine **zero curat** (inclusiv `-0`, normalizat cu `+ 0`), iar restul e identic
   în ambele tabele.
+- **Fiecare locație își are cantitatea ei — fără „cascadă".** O livrare se scade DOAR din
+  locația ei (`createStockSummary`), iar verificarea de stoc la livrare (inclusiv cea legată de
+  o recepție) e tot pe acea locație. Cascada veche („dacă nu ajunge, ia din celelalte locații
+  ale produsului") muta marfă între locații fără document și fără dată: returul livrării
+  Nr. 47 din Cilindru 2 a făcut ca recepțiile de soia din gropile de primire (sept. 2026) să
+  apară în Cilindru 2. Marfa se mută între locații **doar** prin transfer sau procesare.
+  **Nu reintroduce cascada.**
 - **Nu ascunde un rând negativ.** Se afișează tot ce nu e zero. Un minus ascuns rămâne fără
   butonul „Corectează" — vizibil în „Mișcarea stocului", imposibil de închis din „Stoc".
 

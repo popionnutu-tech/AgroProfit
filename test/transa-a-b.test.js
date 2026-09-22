@@ -1396,7 +1396,7 @@ test("Retur pe livrare din cilindru (fara receptie): marfa revine in locatia de 
   });
 });
 
-test("Retur: marfa revine in locatia unde a fost descarcata, nu in cea din care s-a completat", async () => {
+test("Retur: marfa revine in locatia livrarii; celelalte locatii nu se ating", async () => {
   await withIsolatedWorkspace(async ({ load }) => {
     const storage = load("src/local-storage.js");
     // Receptie 100 t in Cilindru 1, apoi 70 t mutate in Cilindru 2.
@@ -1406,28 +1406,24 @@ test("Retur: marfa revine in locatia unde a fost descarcata, nu in cea din care 
       changeReason: "pregatire livrare", createdBy: "op"
     });
 
-    // Livrare de 100 t pe receptie: in Cilindru 1 mai sunt doar 30 t, deci scaderea se
-    // completeaza (cascadat) cu 70 t din Cilindru 2.
+    // Livrare de 30 t pe receptie: se scade DOAR din Cilindru 1.
     const d = await storage.createDelivery({
-      receiptId: receipt.id, customerId: 2, customer: "X", plannedQuantity: 100, createdBy: "op"
+      receiptId: receipt.id, customerId: 2, customer: "X", plannedQuantity: 30, createdBy: "op"
     });
     assert.equal(d.location, "Cilindru 1");
-    let summary = await storage.getStockSummary();
-    assert.equal(summary.totals.totalQuantity, 0); // tot stocul a plecat
 
-    // Cumparatorul refuza 40 t; camionul le descarca inapoi in Cilindru 1.
+    // Cumparatorul refuza 20 t; camionul le descarca inapoi in Cilindru 1.
     await storage.returnDelivery(d.id, {
-      returnedQuantity: 40, reason: "refuz partial", currentUser: { roleCode: "operator" }
+      returnedQuantity: 20, reason: "refuz partial", currentUser: { roleCode: "operator" }
     });
 
-    summary = await storage.getStockSummary();
+    const summary = await storage.getStockSummary();
     const qtyAt = (name) => Number(
       (summary.byLocation.find((i) => i.location === name && i.product === "Grau") || {}).quantity || 0
     );
-    assert.equal(summary.totals.totalQuantity, 40);
-    // Marfa e in Cilindru 1 (unde s-a descarcat fizic), NU in Cilindru 2 (de unde s-a completat).
-    assert.equal(qtyAt("Cilindru 1"), 40);
-    assert.equal(qtyAt("Cilindru 2"), 0);
+    assert.equal(qtyAt("Cilindru 1"), 20);
+    // Cilindru 2 isi pastreaza exact marfa mutata acolo: returul nu a trecut prin el.
+    assert.equal(qtyAt("Cilindru 2"), 70);
   });
 });
 
@@ -1975,19 +1971,28 @@ test("Supra-livrare mod mixt: livrarea pe receptie nu mai poate scoate marfa dej
   });
 });
 
-test("Livrarea pe receptie merge cand marfa ei a fost mutata in alt cilindru", async () => {
+test("Livrarea pe receptie se scade din locatia ei, nu urmareste marfa mutata", async () => {
   await withIsolatedWorkspace(async ({ load }) => {
     const storage = load("src/local-storage.js");
     const receipt = await seedReceipt(storage, { location: "Cilindru 1" });
-    // 70 t mutate in Cilindru 2: marfa exista, doar ca in alta parte.
+    // 70 t mutate in Cilindru 2: in Cilindru 1 raman 30 t.
     await storage.createTransfer({
       productId: 1, fromLocationId: 1, toLocationId: 2, quantity: 70,
       changeReason: "mutare", createdBy: "op"
     });
+    // Pe receptie (locatia ei = Cilindru 1) nu se pot scoate 100 t: acolo sunt doar 30.
+    await assert.rejects(
+      storage.createDelivery({
+        receiptId: receipt.id, customerId: 2, customer: "X", plannedQuantity: 100, createdBy: "op"
+      }),
+      /Stoc insuficient pentru Grau in Cilindru 1/
+    );
+    // Marfa mutata se livreaza din locatia in care se afla acum.
     const d = await storage.createDelivery({
-      receiptId: receipt.id, customerId: 2, customer: "X", plannedQuantity: 100, createdBy: "op"
+      customerId: 2, customer: "X", product: "Grau", productId: 1,
+      sourceLocation: "Cilindru 2", plannedQuantity: 70, createdBy: "op"
     });
-    assert.equal(d.deliveredQuantity, 100, "verificarea pe produs nu refuza marfa mutata");
+    assert.equal(d.deliveredQuantity, 70);
   });
 });
 
@@ -1996,25 +2001,29 @@ test("Supra-livrare: proiectul nu se poate confirma peste marfa deja plecata", a
     const storage = load("src/local-storage.js");
     const receipt = await seedReceipt(storage, { location: "Cilindru 1" }); // 100 t
 
-    // 1. Contabilul pregateste un proiect pe TOATA receptia (nu scade stocul).
+    // 1. Contabilul pregateste un proiect pe TOATA receptia (nu scade stocul, dar rezerva
+    //    marfa in Cilindru 1 — de acolo se va scadea la confirmare).
     const draft = await storage.createDelivery({
       receiptId: receipt.id, customerId: 2, customer: "A", plannedQuantity: 100,
       isDraft: true, actorRole: "accountant", createdBy: "contabil"
     });
     assert.equal(draft.status, "Proiect");
 
-    // 2. O livrare pe LOCATIE de 100 t trece la creare: rezervarea unui proiect legat de
-    //    receptie NU apasa pe cilindru (`location` i-ar ramane pironit pe cilindrul vechi
-    //    daca marfa e mutata, si ar bloca marfa altei receptii ajunsa acolo).
-    await storage.createDelivery({
-      customerId: 2, customer: "B", product: "Grau", productId: 1,
-      sourceLocation: "Cilindru 1", plannedQuantity: 100, createdBy: "op"
-    });
-    let stockAfter = await storage.getStockSummary();
-    assert.equal(stockAfter.totals.totalQuantity, 0, "marfa a plecat pe livrarea reala");
+    // 2. O livrare pe LOCATIE peste aceeasi marfa e refuzata: e deja rezervata.
+    await assert.rejects(
+      storage.createDelivery({
+        customerId: 2, customer: "B", product: "Grau", productId: 1,
+        sourceLocation: "Cilindru 1", plannedQuantity: 100, createdBy: "op"
+      }),
+      /Stoc insuficient/i
+    );
 
-    // 3. ...iar poarta care conteaza tine: confirmarea proiectului peste marfa deja plecata
-    //    e refuzata. Supra-livrarea (200 t din 100 t) ramane inchisa.
+    // 3. Daca marfa pleaca totusi altfel (transfer), confirmarea proiectului peste un cilindru
+    //    gol e refuzata. Supra-livrarea (200 t din 100 t) ramane inchisa.
+    await storage.createTransfer({
+      productId: 1, fromLocationId: 1, toLocationId: 2, quantity: 100,
+      changeReason: "mutare", createdBy: "op"
+    });
     await assert.rejects(
       storage.transitionDelivery(draft.id, "Livrat", {
         grossWeight: 100, tareWeight: 0, changeReason: "cantarit",
@@ -2025,29 +2034,27 @@ test("Supra-livrare: proiectul nu se poate confirma peste marfa deja plecata", a
   });
 });
 
-test("Proiect pe receptie nu blocheaza cilindrul dupa ce marfa lui a fost mutata", async () => {
+test("Proiect pe receptie rezerva marfa in locatia din care se va scadea", async () => {
   await withIsolatedWorkspace(async ({ load }) => {
     const storage = load("src/local-storage.js");
     const r1 = await seedReceipt(storage, { location: "Cilindru 1" }); // 100 t
     await storage.createDelivery({
-      receiptId: r1.id, customerId: 2, customer: "A", plannedQuantity: 100,
+      receiptId: r1.id, customerId: 2, customer: "A", plannedQuantity: 60,
       isDraft: true, actorRole: "accountant", createdBy: "contabil"
     });
-    // Marfa lui R1 pleaca in Cilindru 2; rezervarea proiectului ramane scrisa pe Cilindru 1.
-    await storage.createTransfer({
-      productId: 1, fromLocationId: 1, toLocationId: 2, quantity: 100,
-      changeReason: "mutare", createdBy: "op"
-    });
-    // Alta receptie aduce marfa NOUA in Cilindru 1.
-    await seedReceipt(storage, {
-      location: "Cilindru 1", quantity: 50, provisionalNetQuantity: 50, finalNetQuantity: 50
-    });
-    // Marfa lui R2 trebuie sa se poata livra: proiectul lui R1 nu mai e acolo.
+    // Proiectul se va scadea din Cilindru 1, deci acolo raman libere doar 40 t.
+    await assert.rejects(
+      storage.createDelivery({
+        customerId: 2, customer: "B", product: "Grau", productId: 1,
+        sourceLocation: "Cilindru 1", plannedQuantity: 50, createdBy: "op"
+      }),
+      /rezervat 60000 kg/
+    );
     const ok = await storage.createDelivery({
       customerId: 2, customer: "B", product: "Grau", productId: 1,
-      sourceLocation: "Cilindru 1", plannedQuantity: 50, createdBy: "op"
+      sourceLocation: "Cilindru 1", plannedQuantity: 40, createdBy: "op"
     });
-    assert.equal(ok.deliveredQuantity, 50);
+    assert.equal(ok.deliveredQuantity, 40);
   });
 });
 
@@ -2480,5 +2487,41 @@ test("Stoc: cantitatile sunt rotunjite la KILOGRAM, ca ambele ecrane sa arate ac
     // 10000 kg (rotunjeste la afisare), deci cele doua coincid.
     assert.equal(linie.quantity, 10.0);
     assert.equal(Math.round(linie.quantity * 1000), 10000);
+  });
+});
+
+test("Fiecare locatie isi pastreaza cantitatea: un retur vechi nu muta receptiile din gropi", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    // Cazul real (soia, sept. 2026): Cilindru 2 plin, trei livrari din el, una returnata integral.
+    await seedReceipt(storage, { location: "Cilindru 2" }); // 100 t
+    const out = (qty) => storage.createDelivery({
+      customerId: 2, customer: "X", product: "Grau", productId: 1,
+      sourceLocation: "Cilindru 2", plannedQuantity: qty, createdBy: "op"
+    });
+    const returned = await out(30);
+    await out(70);
+    await storage.returnDelivery(returned.id, {
+      returnedQuantity: 30, reason: "refuzat", currentUser: { roleCode: "operator" }
+    });
+    await out(20);
+    // Iesirea bruta din Cilindru 2 (120 t) depaseste ce a intrat (100 t) pana la creditul
+    // returului. Receptiile ulterioare in gropi NU au voie sa acopere acel pas intermediar.
+    for (const [location, quantity] of [
+      ["1-Groapa Primire", 20], ["2-Groapa Primire", 15], ["5-Groapa Primire", 7]
+    ]) {
+      await seedReceipt(storage, {
+        location, quantity, provisionalNetQuantity: quantity, finalNetQuantity: quantity
+      });
+    }
+
+    const summary = await storage.getStockSummary();
+    const qtyAt = (name) => Number(
+      (summary.byLocation.find((i) => i.location === name && i.product === "Grau") || {}).quantity || 0
+    );
+    assert.equal(qtyAt("Cilindru 2"), 10);
+    assert.equal(qtyAt("1-Groapa Primire"), 20);
+    assert.equal(qtyAt("2-Groapa Primire"), 15);
+    assert.equal(qtyAt("5-Groapa Primire"), 7);
   });
 });
