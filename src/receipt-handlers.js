@@ -269,6 +269,16 @@ async function createReceiptHandler(req, res) {
       return sendJson(res, 400, { error: "Impuritatile trebuie sa fie o valoare valida." });
     }
 
+    if (
+      body.payOnGrossQuantity !== undefined &&
+      body.payOnGrossQuantity !== null &&
+      typeof body.payOnGrossQuantity !== "boolean"
+    ) {
+      return sendJson(res, 400, {
+        error: "Campul „plata pe masa cu umiditate” trebuie sa fie adevarat sau fals."
+      });
+    }
+
     const estimate = computeReceiptEstimate({
       payOnGrossQuantity: body.payOnGrossQuantity === true,
       quantity: normalizedQuantity,

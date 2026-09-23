@@ -6914,9 +6914,15 @@ function buildPurchaseActPrintHtml(delivery, company) {
   // Act de achizitie is based on the source receipt's supplier
   const receipt = (receiptsCache || []).find((r) => Number(r.id) === Number(delivery.receiptId));
   const supplier = receipt ? findPartnerByName(receipt.supplier) : null;
-  // Actul de achizitie reflecta RECEPTIA (cumpararea de la furnizor): cantitate neta + pret lei/kg.
+  // Actul de achizitie reflecta RECEPTIA (cumpararea de la furnizor): cantitatea PLATITA
+  // + pret lei/kg. Cand plata s-a convenit pe masa cu umiditate, cantitatea e net + apa —
+  // aceeasi baza ca `actReceiptFigures` si ca `receiptPayableTonnes` din backend. Altfel
+  // cele doua acte de achizitie tiparite pentru aceeasi receptie arata cantitati si preturi
+  // unitare diferite, desi totalul coincide.
   const qty = Number(
-    receipt?.provisionalNetQuantity || receipt?.quantity ||
+    (receipt?.provisionalNetQuantity || receipt?.quantity || 0)
+      + (receipt?.payOnGrossQuantity === true ? Number(receipt.estimatedWaterLoss || 0) : 0)
+  ) || Number(
     (delivery.netWeight > 0 ? delivery.netWeight : delivery.deliveredQuantity) || 0
   ); // tone
   if (!receipt) {

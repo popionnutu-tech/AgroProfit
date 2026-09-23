@@ -199,7 +199,14 @@ taxează. Marfa fizică rămâne aceeași: apa tot se evaporă.
   din `src/receipt-handlers.js`, oglindit în `public/app.js`). Peste prag nu mai e o
   toleranță comercială, ci grâu plătit ca apă — la +12 p.p. pe 100 t înseamnă 12 t de apă
   la prețul grâului. Serverul **refuză cu 400**, nu ignoră tăcut: altfel omul bifează, vede
-  altă sumă și nu află de ce.
+  altă sumă și nu află de ce. Pragul e verificat în **două** locuri: în handler (răspuns 400,
+  pentru om) și în `createReceipt` (excepție, fail-closed, pentru orice apelant viitor —
+  import, seed, migrare). `receiptPayableTonnes` se încrede în flagul stocat, deci flagul
+  nu are voie să ajungă pe document peste prag.
+- Actul de achiziție se tipărește din **două** locuri (`actReceiptFigures` pentru „Documente
+  tipar", `buildPurchaseActPrintHtml` din Livrări). Ambele pornesc de la cantitatea plătită.
+  Când unul singur a fost actualizat, cele două acte pentru aceeași recepție arătau cantități
+  și prețuri unitare diferite, deși totalul coincidea.
 - Bifa apare în formular **doar când umiditatea depășește norma** și se debifează singură dacă
   excesul dispare. O bifă fără efect e o invitație la greșeli.
 - Rândul recepției poartă badge-ul „plătit cu apă" lângă coloana de apă eliminată: altfel suma
