@@ -232,8 +232,26 @@ apa tot se evaporă.
     formulă ca la creare. Diferență față de `updateReceiptAmount` (✎), care scrie o sumă la
     liber și deduce prețul din ea. Aici documentul rămâne aritmetic închis: cantitate × preț
     = sumă, pe act și pe extras. Nu le confunda și nu le unifica.
-  - **Cantitatea și umiditatea nu se ating**, deci stocul nu se mișcă. Normele se citesc tot
-    de pe document, nu din nomenclatorul de acum.
+  - **Cantitatea și umiditatea nu se ating**, deci stocul nu se mișcă. Garanția nu e o
+    presupunere: `correctReceiptTerms` **aruncă** dacă recalculul ar da altă
+    `provisionalNetQuantity` decât cea stocată. `RECALCULATED` conține doar câmpuri de bani.
+  - **Tot ce s-a înghețat la recepție se citește de pe document**, nu din nomenclatorul de
+    acum: normele, **tarifele** (`cleaningTariff`/`dryingTariff`, persistate la creare) și
+    **cota de reținere la sursă**. Altfel o corectare de preț rescrie retroactiv o cifră
+    fiscală, iar adminul confirmă o sumă în timp ce serverul salvează alta.
+  - Previzualizarea din dialog (`rcEstimate`) e a cincea copie a formulei și **trebuie să dea
+    exact ce salvează serverul** — confirmarea e singurul control uman al operației. Folosește
+    aceleași surse: cantitatea, apa și cota de pe document.
+  - Refuzuri: datoria nu poate coborî sub cât s-a achitat deja (storno de plată întâi —
+    același precedent ca returul pe livrare cu încasări), plafon de sanitate pe sumă,
+    `payOnGrossQuantity` lipsă din body **păstrează** valoarea curentă (altfel un apel care
+    voia doar prețul ar scoate tăcut bifa).
+  - `termCorrections` e în `FINANCIAL_RECEIPT_FIELDS` — conține prețuri și sume, deci nu
+    pleacă prin API către operator și `control`. Pe document se păstrează ultimele 20;
+    istoricul complet rămâne în audit.
+  - Statutul de plată **nu se scrie** aici: se derivă la citire în `listReceipts` (FIFO pe
+    partener). Scris pe document ar fi greșit pentru o recepție stinsă printr-o plată făcută
+    pe altă recepție a aceluiași furnizor — și ar intra așa în audit.
   - Motiv obligatoriu; istoricul stă **pe document** în `termCorrections` (bifă veche/nouă,
     preț vechi/nou, sumă veche/nouă, cine, când, de ce) și se vede în „Detalii recepție",
     nu doar în Audit. Rândul poartă badge-ul „corectat".

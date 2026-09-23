@@ -2,6 +2,7 @@ const {
   closeReceipt,
   completeReceiptWeighing,
   correctReceiptTerms,
+  getReceiptRaw,
   createReceipt,
   getConfig,
   getStats,
@@ -26,6 +27,13 @@ function sendJson(res, statusCode, payload) {
 
 function getBody(req) {
   return req.body || {};
+}
+
+function getTariffValue(tariffs, service) {
+  const found = (tariffs || []).find(
+    (item) => String(item.service || "").toLowerCase() === service && item.active
+  );
+  return Number(found?.value || 0);
 }
 
 function computeReceiptEstimate({
@@ -91,6 +99,8 @@ function computeReceiptEstimate({
     estimatedWaterLoss,
     estimatedImpurityLoss,
     provisionalNetQuantity,
+    cleaningTariff: Number(cleaningTariff || 0),
+    dryingTariff: Number(dryingTariff || 0),
     payOnGrossQuantity: payOnGross,
     payableQuantity,
     cleaningServiceTotal,
@@ -124,7 +134,13 @@ const FINANCIAL_RECEIPT_FIELDS = [
   "paymentStatus",
   "lastPaymentDate",
   "amountNote",
-  "amountCorrections"
+  "amountCorrections",
+  // Istoricul corectarilor de conditii contine PRETURI si SUME. Fara el aici, operatorul
+  // si rolul `control` primeau pretul de achizitie si datoria catre furnizor prin API,
+  // desi interfata nu le arata.
+  "termCorrections",
+  "cleaningTariff",
+  "dryingTariff"
 ];
 
 function stripReceiptFinancials(receipt) {
@@ -444,8 +460,9 @@ async function completeWeighingHandler(req, res, id) {
 async function correctReceiptTermsHandler(req, res, id) {
   const body = req.body || {};
   try {
-    const receipts = await listReceipts();
-    const receipt = receipts.find((item) => Number(item.id) === Number(id));
+    // Document BRUT: avem nevoie doar de campuri de pe el. `listReceipts` ar agrega FIFO
+    // toate platile si ar clona toate receptiile, ca sa arunce tot.
+    const receipt = getReceiptRaw(id);
     if (!receipt) {
       return sendJson(res, 404, { error: "Receptia nu a fost gasita." });
     }
@@ -460,6 +477,13 @@ async function correctReceiptTermsHandler(req, res, id) {
       });
     }
 
+    // Lipsa din body PASTREAZA valoarea curenta, ca la pret. Altfel un apel care voia doar
+    // sa corecteze pretul ar scoate tacit bifa si ar micsora datoria catre furnizor.
+    const nextFlag =
+      body.payOnGrossQuantity === undefined || body.payOnGrossQuantity === null
+        ? receipt.payOnGrossQuantity === true
+        : body.payOnGrossQuantity === true;
+
     const price = body.price === undefined ? Number(receipt.price || 0) : Number(body.price);
     if (!Number.isFinite(price) || price < 0) {
       return sendJson(res, 400, { error: "Pretul trebuie sa fie un numar pozitiv." });
@@ -467,27 +491,52 @@ async function correctReceiptTermsHandler(req, res, id) {
 
     const config = await getConfig();
     const partner = config.partners.find((item) => item.id === Number(receipt.supplierId));
-    const fiscalProfile = config.fiscalProfiles.find((item) => item.name === partner?.fiscalProfile);
+    const fiscalProfile = config.fiscalProfiles.find(
+      (item) =>
+        String(item.name || "").trim().toLowerCase() ===
+        String(partner?.fiscalProfile || "").trim().toLowerCase()
+    );
     const product = config.products.find(
       (item) => item.id === Number(receipt.productId) || item.name === receipt.product
     );
-    // Normele de pe DOCUMENT, nu din nomenclatorul de acum: o corectie de conditii nu are
-    // voie sa rescrie si normele dupa care s-a calculat apa la receptie.
+
+    // TOT ce s-a inghetat la receptie se citeste de pe DOCUMENT, nu din nomenclatorul de
+    // acum: normele, TARIFELE si COTA DE IMPOZIT. Altfel o corectare care voia doar sa
+    // schimbe pretul rescrie retroactiv si cifra fiscala — iar adminul confirma o suma in
+    // timp ce serverul salveaza alta. Config-ul ramane fallback doar pentru documentele
+    // vechi, care nu au campurile salvate.
     const normeDocument = {
       humidityNorm: Number(receipt.humidityNorm ?? product?.humidityNorm ?? 0),
       impurityNorm: Number(receipt.impurityNorm ?? product?.impurityNorm ?? 0)
     };
+    const tarifeDocument = [
+      {
+        service: "Curatire",
+        active: true,
+        value: Number(receipt.cleaningTariff ?? getTariffValue(config.tariffs, "curatire"))
+      },
+      {
+        service: "Uscare",
+        active: true,
+        value: Number(receipt.dryingTariff ?? getTariffValue(config.tariffs, "uscare"))
+      }
+    ];
+    const cotaDocument = {
+      withholdingPercent: Number(
+        receipt.withholdingPercent ?? fiscalProfile?.withholdingPercent ?? 0
+      )
+    };
 
     const estimate = computeReceiptEstimate({
-      payOnGrossQuantity: body.payOnGrossQuantity === true,
+      payOnGrossQuantity: nextFlag,
       // Cantitatea ramane cea cantarita: se corecteaza conditiile, nu marfa.
       quantity: Number(receipt.quantity || 0),
       price,
       humidity: Number(receipt.humidity || 0),
       impurity: Number(receipt.impurity || 0),
       product: normeDocument,
-      tariffs: config.tariffs,
-      fiscalProfile
+      tariffs: tarifeDocument,
+      fiscalProfile: cotaDocument
     });
 
     const updated = await correctReceiptTerms(id, {

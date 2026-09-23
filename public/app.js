@@ -2112,7 +2112,7 @@ function renderReceipts(receipts) {
           <td title="Apă eliminată la recepție (din umiditatea în exces)">${isPendingWeighing || !(Number(item.estimatedWaterLoss) > 0) ? "—" : formatNumber(Math.round(Number(item.estimatedWaterLoss) * 1000)) + " kg"}${item.payOnGrossQuantity === true ? ` <span class="status-badge badge-warn" title="${bi("Plata s-a făcut pe masa cu apă, uscarea nu s-a taxat. În stoc a intrat masa fără apă.")}">${bi("plătit cu apă")}</span>` : ""}</td>
           <td>${qtyCell}</td>
           <td>${item.location || "-"}</td>
-          <td class="col-fin">${currency.format(valoare)}${canEditAmount && !isCanceled ? ` <button type="button" class="cell-btn change-amount-btn" data-action="adjust-amount" data-id="${item.id}" title="Ajustează valoarea recepției">✎</button>` : ""}${canCorrectTerms && !isCanceled && !isPendingWeighing ? ` <button type="button" class="cell-btn change-amount-btn" data-action="correct-terms" data-id="${item.id}" title="Corectează condițiile: plata pe masa cu umiditate și/sau prețul">⚖</button>` : ""}${Array.isArray(item.termCorrections) && item.termCorrections.length ? ` <span class="status-badge badge-warn" title="Condițiile au fost corectate de ${escapeComboHtml(item.termCorrections[item.termCorrections.length - 1].by || "")} — vezi Detalii">corectat</span>` : ""}</td>
+          <td class="col-fin">${currency.format(valoare)}${canEditAmount && !isCanceled ? ` <button type="button" class="cell-btn change-amount-btn" data-action="adjust-amount" data-id="${item.id}" title="Ajustează valoarea recepției">✎</button>` : ""}${canCorrectTerms && !isCanceled && !isPendingWeighing && item.status !== "Inchis" && item.status !== "Proiect" ? ` <button type="button" class="cell-btn change-amount-btn" data-action="correct-terms" data-id="${item.id}" title="Corectează condițiile: plata pe masa cu umiditate și/sau prețul">⚖</button>` : ""}${Array.isArray(item.termCorrections) && item.termCorrections.length ? ` <span class="status-badge badge-warn" title="Condițiile au fost corectate de ${escapeComboHtml(item.termCorrections[item.termCorrections.length - 1].by || "")} — vezi Detalii">corectat</span>` : ""}</td>
           <td class="col-fin">${achitat > 0 ? currency.format(achitat) : "-"}</td>
           <td class="col-fin"><b>${rest > 0 ? currency.format(rest) : "0"}</b></td>
           <td class="col-fin">${formatDateShort(item.lastPaymentDate)}</td>
@@ -9814,8 +9814,12 @@ const receiptCorrectForm = document.getElementById("receipt-correct-form");
 let receiptBeingCorrected = null;
 
 function rcEstimate(receipt, payOnGross, priceKg) {
-  // Oglinda lui `computeReceiptEstimate` pentru PREVIZUALIZARE. Sumele salvate le
-  // recalculeaza serverul — aici aratam doar ce urmeaza sa se intample.
+  // Previzualizare. Trebuie sa dea EXACT ce salveaza serverul, altfel confirmarea finala
+  // (singurul control uman al operatiei) arata o suma si se salveaza alta.
+  //
+  // De aceea foloseste aceleasi surse ca `correctReceiptTermsHandler`: cantitatea si apa
+  // DE PE DOCUMENT (corectarea nu le atinge — serverul chiar refuza daca s-ar schimba) si
+  // cota de impozit DE PE DOCUMENT, nu din nomenclatorul curent.
   const apa = Number(receipt.estimatedWaterLoss || 0);
   const net = Number(receipt.provisionalNetQuantity || receipt.quantity || 0);
   const tone = payOnGross && apa > 0 ? net + apa : net;
@@ -9884,8 +9888,8 @@ if (receiptCorrectDialog && receiptCorrectForm) {
     const price = parseDecimal(document.getElementById("rc-price").value);
     const reason = String(document.getElementById("rc-reason").value || "").trim();
 
-    if (!(price >= 0)) {
-      messageEl.textContent = "Introdu un preț valid (ex. 5 sau 5,20).";
+    if (!String(document.getElementById("rc-price").value || "").trim() || !(price > 0)) {
+      messageEl.textContent = "Introdu un preț valid, mai mare ca zero (ex. 5 sau 5,20).";
       return;
     }
     if (!reason) {
