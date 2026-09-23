@@ -1712,12 +1712,26 @@ function assertEntity(entity) {
 //  - preliminaryPayableAmount daca e setat (>0) — ex. valoare setata manual de contabil (✎);
 //  - altfel se DERIVA: cantitate (KG) × pret (LEI/KG). Cantitatea interna e in TONE -> ×1000.
 // Pretul se introduce in lei/kg (ex. 6 lei/kg), cantitatea neta 0,8 t = 800 kg -> 800×6 = 4800.
+// Cate TONE se platesc pe aceasta receptie. Sursa UNICA — o foloseste si valoarea de mai
+// jos, si corectia manuala de suma, si extrasul de cont al furnizorului. Cand cele trei
+// calculau fiecare pe cont propriu, extrasul semnat de furnizor nu se mai inchidea
+// aritmetic (cantitate × pret ≠ suma).
+// Regula: implicit masa fara apa; cu `payOnGrossQuantity` se pune apa inapoi — DOAR apa,
+// impuritatile raman scazute (vezi computeReceiptEstimate din receipt-handlers.js).
+function receiptPayableTonnes(r) {
+  // `||`, nu `??`: un `provisionalNetQuantity` de 0 inseamna „nu s-a calculat inca",
+  // nu „zero tone" — receptiile vechi il au lipsa si cad corect pe `quantity`.
+  const net = Number((r && (r.provisionalNetQuantity || r.quantity)) || 0);
+  if (!r || r.payOnGrossQuantity !== true) return net;
+  return net + Number(r.estimatedWaterLoss || 0);
+}
+
 function receiptPayableValue(r) {
   const stored = Number((r && r.preliminaryPayableAmount) || 0);
   if (stored > 0) return stored;
-  const netTonnes = Number((r && (r.provisionalNetQuantity || r.quantity)) || 0);
+  const tonnes = receiptPayableTonnes(r);
   const priceKg = Number((r && r.price) || 0);
-  return netTonnes > 0 && priceKg > 0 ? Number((netTonnes * 1000 * priceKg).toFixed(2)) : 0;
+  return tonnes > 0 && priceKg > 0 ? Number((tonnes * 1000 * priceKg).toFixed(2)) : 0;
 }
 
 async function listReceipts() {
@@ -2004,6 +2018,10 @@ async function createReceipt(payload) {
     dryingServiceTotal: sanitizeNumber(payload.dryingServiceTotal),
     preliminaryServicesTotal: sanitizeNumber(payload.preliminaryServicesTotal),
     preliminaryMerchandiseValue: sanitizeNumber(payload.preliminaryMerchandiseValue),
+    // Intelegerea comerciala de pe ACEASTA receptie: s-a platit masa cu apa (fara scaderea
+    // umiditatii peste norma) si nu s-a taxat uscarea. Se pastreaza pe document ca suma sa
+    // fie explicabila si reproductibila mai tarziu.
+    payOnGrossQuantity: payload.payOnGrossQuantity === true,
     withholdingPercent: sanitizeNumber(payload.withholdingPercent),
     withholdingAmount: sanitizeNumber(payload.withholdingAmount),
     preliminaryPayableAmount: sanitizeNumber(payload.preliminaryPayableAmount),
@@ -2059,6 +2077,10 @@ async function completeReceiptWeighing(id, payload = {}) {
   }
 
   const oldValue = { tareWeight: receipt.tareWeight, quantity: receipt.quantity, status: receipt.status };
+  // NU adauga aici `payOnGrossQuantity`: e boolean, iar bucla de mai jos trece totul prin
+  // `sanitizeNumber`. Mai important, baza de plata se stabileste la PRIMA cantarire si se
+  // citeste de pe document — daca ar veni din body-ul cantaririi a doua, oricine ar putea
+  // creste datoria catre furnizor printr-o a doua cerere, fara urma.
   const ESTIMATE_FIELDS = [
     "grossQuantity", "humidity", "impurity", "humidityNorm", "impurityNorm",
     "excessHumidity", "excessImpurity", "estimatedWaterLoss", "estimatedImpurityLoss",
@@ -2092,7 +2114,16 @@ async function completeReceiptWeighing(id, payload = {}) {
     reason: "A doua cantarire (tara) - finalizare receptie",
     user: payload.changedBy || "dashboard",
     oldValue,
-    newValue: { tareWeight: receipt.tareWeight, quantity: receipt.quantity, status: "Draft" }
+    // Suma se naste ABIA aici: la prima cantarire cantitatea e 0, deci auditul de creare
+    // a salvat sume nule. Fara suma si baza ei, un verificator vede doar „tara 12.000 kg"
+    // si nicio urma a banilor sau a motivului pentru care sunt atatia.
+    newValue: {
+      tareWeight: receipt.tareWeight,
+      quantity: receipt.quantity,
+      status: "Draft",
+      payOnGrossQuantity: receipt.payOnGrossQuantity === true,
+      preliminaryPayableAmount: receipt.preliminaryPayableAmount
+    }
   });
   writeReceiptsState(state);
   return receipt;
@@ -2148,7 +2179,9 @@ async function getSupplierStatement(partnerId, fromDate, toDate) {
     .filter((r) => Number(r.supplierId) === Number(partnerId))
     .filter((r) => inRange(r.createdAt || r.receivedAt))
     .map((r) => {
-      const net = Number(r.provisionalNetQuantity ?? r.quantity ?? 0);
+      // Cantitatea de pe rand e cea PLATITA, nu cea intrata in stoc: documentul e semnat
+      // de furnizor, deci cantitate × pret trebuie sa dea suma de pe acelasi rand.
+      const net = receiptPayableTonnes(r);
       const price = Number(r.price ?? r.unitPrice ?? 0);
       const amount = receiptPayableValue(r); // preliminaryPayableAmount sau cantitate × pret
       return {
@@ -3921,9 +3954,9 @@ async function updateReceiptAmount(id, amount, changedBy, note) {
   const oldValue = { preliminaryPayableAmount: receipt.preliminaryPayableAmount, price: receipt.price };
   const now = new Date().toISOString();
   receipt.preliminaryPayableAmount = value; // valoare manuala (>0) -> are prioritate in receiptPayableValue
-  const netTonnes = Number(receipt.provisionalNetQuantity ?? receipt.quantity ?? 0);
-  if (netTonnes > 0) {
-    receipt.price = Number((value / (netTonnes * 1000)).toFixed(4)); // lei / kg, pentru afisare in act
+  const payableTonnes = receiptPayableTonnes(receipt);
+  if (payableTonnes > 0) {
+    receipt.price = Number((value / (payableTonnes * 1000)).toFixed(4)); // lei / kg, pentru afisare in act
   }
   // Istoric corectari (fiecare corectare pastreaza comentariul + cine/cand).
   if (!Array.isArray(receipt.amountCorrections)) receipt.amountCorrections = [];

@@ -62,6 +62,9 @@ const grossWeightInput = document.getElementById("gross-weight-input");
 const tareWeightInput = document.getElementById("tare-weight-input");
 const netQtyHintEl = document.getElementById("net-qty-hint");
 const humidityInput = document.getElementById("humidity-input");
+const payOnGrossInput = document.getElementById("pay-on-gross-input");
+const payOnGrossWrap = document.getElementById("pay-on-gross-wrap");
+const payOnGrossHintEl = document.getElementById("pay-on-gross-hint");
 const impurityInput = document.getElementById("impurity-input");
 const fiscalProfileOptions = document.getElementById("fiscal-profile-options");
 const roleOptions = document.getElementById("role-options");
@@ -1989,7 +1992,7 @@ function renderReceipts(receipts) {
           <td>${escapeComboHtml(item.product)}${photosMini(item.photos)}</td>
           <td>${item.grossWeight > 0 ? formatNumber(Number(item.grossWeight)) + " kg" : "—"}</td>
           <td>${item.tareWeight > 0 ? formatNumber(Number(item.tareWeight)) + " kg" : "—"}</td>
-          <td title="Apă eliminată la recepție (din umiditatea în exces)">${isPendingWeighing || !(Number(item.estimatedWaterLoss) > 0) ? "—" : formatNumber(Math.round(Number(item.estimatedWaterLoss) * 1000)) + " kg"}</td>
+          <td title="Apă eliminată la recepție (din umiditatea în exces)">${isPendingWeighing || !(Number(item.estimatedWaterLoss) > 0) ? "—" : formatNumber(Math.round(Number(item.estimatedWaterLoss) * 1000)) + " kg"}${item.payOnGrossQuantity === true ? ` <span class="status-badge badge-warn" title="${bi("Plata s-a făcut pe masa cu apă, uscarea nu s-a taxat. În stoc a intrat masa fără apă.")}">${bi("plătit cu apă")}</span>` : ""}</td>
           <td>${qtyCell}</td>
           <td>${item.location || "-"}</td>
           <td class="col-fin">${currency.format(valoare)}${canEditAmount && !isCanceled ? ` <button type="button" class="cell-btn change-amount-btn" data-action="adjust-amount" data-id="${item.id}" title="Ajustează valoarea recepției">✎</button>` : ""}</td>
@@ -4552,6 +4555,10 @@ function getActiveTariff(serviceName) {
   );
 }
 
+// Oglinda lui MAX_PAY_ON_GROSS_EXCESS_HUMIDITY din src/receipt-handlers.js.
+// Serverul refuza cu 400 peste prag; aici doar nu mai oferim bifa, ca sa nu se ajunga acolo.
+const PAY_ON_GROSS_MAX_EXCESS_HUMIDITY = 4;
+
 function getReceiptEstimate() {
   const selectedProduct = currentConfig.products.find(
     (item) => String(item.id) === String(productSelect.value)
@@ -4585,10 +4592,23 @@ function getReceiptEstimate() {
   //   uscare   = tarif_uscare   × (umiditate − norma_umiditate)   × kg
   //   curatare = tarif_curatare × (impuritati − norma_impuritati) × kg
   // If umiditate ≤ norma AND impuritati ≤ norma → 0 (no services).
+  // Intelegere comerciala: la umiditate peste norma dar in limita acceptata se plateste
+  // masa CU apa si nu se taxeaza uscarea. Stocul primeste tot `provisionalNetQuantity`.
+  // Oglinda exacta a lui `computeReceiptEstimate` din src/receipt-handlers.js — se schimba
+  // in AMBELE locuri (CLAUDE.md, regula 2).
+  // Se pune la loc DOAR apa, nu si impuritatile — vezi comentariul din backend.
+  const payOnGross =
+    Boolean(payOnGrossInput && payOnGrossInput.checked) &&
+    excessHumidity > 0 &&
+    excessHumidity <= PAY_ON_GROSS_MAX_EXCESS_HUMIDITY;
+  const payableQuantity = payOnGross
+    ? provisionalNetQuantity + estimatedWaterLoss
+    : provisionalNetQuantity;
+
   const cleaningServiceTotal = quantity * excessImpurity * cleaningTariff;
-  const dryingServiceTotal = quantity * excessHumidity * dryingTariff;
+  const dryingServiceTotal = payOnGross ? 0 : quantity * excessHumidity * dryingTariff;
   const preliminaryServicesTotal = cleaningServiceTotal + dryingServiceTotal;
-  const preliminaryMerchandiseValue = provisionalNetQuantity * 1000 * price; // kg × lei/kg
+  const preliminaryMerchandiseValue = payableQuantity * 1000 * price; // kg × lei/kg
   // Aceeasi regula ca in backend (computeReceiptEstimate): costul marfii ramane BRUT, iar impozitul
   // retinut la sursa se scade din datoria catre furnizor. Serviciile NU se scad (barter, plati).
   const withholdingPercent = Number(fiscalProfile?.withholdingPercent || 0);
@@ -4599,6 +4619,9 @@ function getReceiptEstimate() {
     humidityNorm,
     impurityNorm,
     provisionalNetQuantity,
+    payOnGrossQuantity: payOnGross,
+    payableQuantity,
+    excessHumidity,
     preliminaryServicesTotal,
     preliminaryMerchandiseValue,
     withholdingPercent,
@@ -4619,12 +4642,36 @@ function toggleNewSupplierInput() {
   }
 }
 
+// Bifa are sens doar cand umiditatea depaseste norma — altfel nu se scade apa oricum,
+// iar o bifa fara efect e o invitatie la greseli. Cand dispare, se si debifeaza: altfel
+// ar ramane bifata pe o receptie unde nu inseamna nimic si ar deruta la verificare.
+function renderPayOnGrossField(estimate) {
+  if (!payOnGrossWrap || !payOnGrossInput) return;
+  const excess = Number(estimate.excessHumidity || 0);
+  const relevant = excess > 0 && excess <= PAY_ON_GROSS_MAX_EXCESS_HUMIDITY;
+  payOnGrossWrap.hidden = !relevant;
+  if (!relevant) {
+    payOnGrossInput.checked = false;
+    return;
+  }
+  if (!payOnGrossHintEl) return;
+  const netKg = (estimate.provisionalNetQuantity || 0) * 1000;
+  const payKg = (estimate.payableQuantity || 0) * 1000;
+  const head = `${bi("Umiditate peste norma")}: +${formatNumber(excess)}%.`;
+  const body = estimate.payOnGrossQuantity
+    ? bi("Se plateste masa cu apa, uscarea nu se taxeaza. In stoc intra masa fara apa.")
+    : bi("Acum se plateste masa fara apa si se taxeaza uscarea. Bifeaza daca intelegerea e pe masa cu apa.");
+  payOnGrossHintEl.textContent =
+    `${head} ${body} (${formatNumber(payKg)} kg -> plata / ${formatNumber(netKg)} kg -> stoc)`;
+}
+
 function renderReceiptEstimate() {
   if (!currentConfig) {
     return;
   }
 
   const estimate = getReceiptEstimate();
+  renderPayOnGrossField(estimate);
   estimateHumidityNormEl.textContent = `${formatNumber(estimate.humidityNorm)}%`;
   estimateImpurityNormEl.textContent = `${formatNumber(estimate.impurityNorm)}%`;
   // Net provizoriu afisat in kg (calculul e in tone)
@@ -5126,6 +5173,7 @@ async function createReceipt(formData) {
     price: formData.get("price") || "0",
     humidity: formData.get("humidity") || String(selectedProduct?.humidityNorm ?? 0),
     impurity: formData.get("impurity") || String(selectedProduct?.impurityNorm ?? 0),
+    payOnGrossQuantity: Boolean(payOnGrossInput && payOnGrossInput.checked),
     vehicle: formData.get("vehicle"),
     contact: formData.get("contact"),
     note: formData.get("note"),
@@ -5296,7 +5344,8 @@ function resetReceiptForm(mode = "save") {
     receivedBy: preserveContext ? userSelect.value : "",
     price: preserveContext ? formEl.elements.price.value : "",
     humidity: preserveContext ? humidityInput.value : "",
-    impurity: preserveContext ? impurityInput.value : ""
+    impurity: preserveContext ? impurityInput.value : "",
+    payOnGross: preserveContext && Boolean(payOnGrossInput && payOnGrossInput.checked)
   };
 
   formEl.reset();
@@ -5314,6 +5363,7 @@ function resetReceiptForm(mode = "save") {
   formEl.elements.price.value = preservedValues.price || "";
   humidityInput.value = preservedValues.humidity || "";
   impurityInput.value = preservedValues.impurity || "";
+  if (payOnGrossInput) payOnGrossInput.checked = preservedValues.payOnGross;
   if (grossWeightInput) grossWeightInput.value = "";
   if (tareWeightInput) tareWeightInput.value = "";
   formEl.elements.vehicle.value = "";
@@ -6452,9 +6502,14 @@ function partnerWithholdingPercent(partner) {
 
 // Cantitate (kg) + valoare (bruta) + pret derivat pentru o receptie, pe act (cantitate × pret = valoare).
 function actReceiptFigures(receipt) {
-  // Cantitatea = aceeași bază ca in tabelul Recepții (net provizoriu × 1000 = kg).
-  const netKg = Number(receipt.provisionalNetQuantity || receipt.quantity || 0) * 1000
-    || Number(receipt.netWeight) || 0;
+  // Cantitatea de pe act = cea pe care s-au calculat BANII, nu cea intrata in stoc.
+  // Cand plata s-a convenit pe masa cu umiditate (`payOnGrossQuantity`), apa se pune
+  // inapoi — doar apa, impuritatile raman scazute. Oglinda lui `receiptPayableTonnes`
+  // din src/local-storage.js; se schimba in AMBELE locuri.
+  // Fara asta, actul semnat de furnizor arata o suma mai mica decat datoria inregistrata.
+  const payableTonnes = Number(receipt.provisionalNetQuantity || receipt.quantity || 0)
+    + (receipt.payOnGrossQuantity === true ? Number(receipt.estimatedWaterLoss || 0) : 0);
+  const netKg = payableTonnes * 1000 || Number(receipt.netWeight) || 0;
   // Prețul = EXACT cel introdus la recepție (lei/kg), NU derivat din valoare ÷ cantitate.
   const price = Number(receipt.price) || 0;
   // Valoarea (brută, cost) = cantitate × preț, exact — ca „col.5 = col.3 × col.4" să iasă perfect.
@@ -7776,6 +7831,7 @@ supplierSuggestionsEl.addEventListener("mousedown", (event) => {
   handleSuggestionPick(li);
 });
 humidityInput.addEventListener("input", renderReceiptEstimate);
+if (payOnGrossInput) payOnGrossInput.addEventListener("change", renderReceiptEstimate);
 impurityInput.addEventListener("input", renderReceiptEstimate);
 grossWeightInput.addEventListener("input", renderReceiptEstimate);
 tareWeightInput.addEventListener("input", renderReceiptEstimate);

@@ -27,7 +27,16 @@ function getBody(req) {
   return req.body || {};
 }
 
-function computeReceiptEstimate({ quantity, price, humidity, impurity, product, tariffs, fiscalProfile }) {
+// Pragul intelegerii comerciale: plata pe masa cu apa e acceptata doar cat timp umiditatea
+// in exces ramane mica (utilizatorul a descris „3-4 puncte procentuale"; e luat maximul).
+// Peste prag nu mai e o toleranta, ci grau platit ca apa — la +12 p.p. pe 100 t inseamna
+// 12 t de apa la pretul graului. Gardă pe SERVER: interfata ascunde bifa, dar interfata
+// nu e o garda. Se schimba aici, intr-un singur loc.
+const MAX_PAY_ON_GROSS_EXCESS_HUMIDITY = 4;
+
+function computeReceiptEstimate({
+  quantity, price, humidity, impurity, product, tariffs, fiscalProfile, payOnGrossQuantity
+}) {
   const grossQuantity = Number(quantity);
   const unitPrice = Number(price);
   const humidityNorm = Number(product.humidityNorm || 0);
@@ -48,12 +57,27 @@ function computeReceiptEstimate({ quantity, price, humidity, impurity, product, 
   const dryingTariff =
     tariffs.find((item) => item.service.toLowerCase() === "uscare" && item.active)?.value || 0;
 
+  // Intelegere comerciala: la umiditate peste norma dar in limita acceptata, se plateste
+  // cantitatea CU apa, iar uscarea nu se taxeaza. Stocul primeste tot masa FARA apa
+  // (`provisionalNetQuantity`) — in cilindru intra echivalentul uscat, ca pana acum.
+  //
+  // Se pune la loc DOAR apa, nu si impuritatile. Pe brut s-ar plati si gunoiul de peste
+  // norma, ceea ce nu a convenit nimeni; cand impuritatile sunt in norma, cele doua
+  // formule coincid oricum.
+  const payOnGross =
+    payOnGrossQuantity === true && excessHumidity <= MAX_PAY_ON_GROSS_EXCESS_HUMIDITY;
+  const payableQuantity = payOnGross
+    ? provisionalNetQuantity + estimatedWaterLoss
+    : provisionalNetQuantity;
+
   const cleaningServiceTotal = grossQuantity * Number(cleaningTariff || 0);
-  const dryingServiceTotal = grossQuantity * excessHumidity * Number(dryingTariff || 0);
+  const dryingServiceTotal = payOnGross
+    ? 0
+    : grossQuantity * excessHumidity * Number(dryingTariff || 0);
   const preliminaryServicesTotal = cleaningServiceTotal + dryingServiceTotal;
   // Pretul e in lei/kg, cantitatea in TONE -> ×1000 pentru kg (aceeasi regula ca receiptPayableValue
   // si getReceiptEstimate din frontend; a se pastra sincronizate).
-  const preliminaryMerchandiseValue = provisionalNetQuantity * 1000 * unitPrice;
+  const preliminaryMerchandiseValue = payableQuantity * 1000 * unitPrice;
   // COSTUL marfii ramane valoarea BRUTA (integrala) = preliminaryMerchandiseValue.
   // IMPOZITUL retinut la sursa (din statutul fiscal al furnizorului; ex. persoana fizica) se calculeaza
   // pe valoarea bruta si se SCADE din datoria catre furnizor: furnizorul primeste NETUL, iar impozitul
@@ -74,6 +98,9 @@ function computeReceiptEstimate({ quantity, price, humidity, impurity, product, 
     estimatedWaterLoss,
     estimatedImpurityLoss,
     provisionalNetQuantity,
+    payOnGrossQuantity: payOnGross,
+    payableQuantity,
+    payOnGrossMaxExcessHumidity: MAX_PAY_ON_GROSS_EXCESS_HUMIDITY,
     cleaningServiceTotal,
     dryingServiceTotal,
     preliminaryServicesTotal,
@@ -243,6 +270,7 @@ async function createReceiptHandler(req, res) {
     }
 
     const estimate = computeReceiptEstimate({
+      payOnGrossQuantity: body.payOnGrossQuantity === true,
       quantity: normalizedQuantity,
       price: normalizedPrice,
       humidity: normalizedHumidity,
@@ -251,6 +279,12 @@ async function createReceiptHandler(req, res) {
       tariffs: config.tariffs,
       fiscalProfile
     });
+
+    if (body.payOnGrossQuantity === true && !estimate.payOnGrossQuantity) {
+      return sendJson(res, 400, {
+        error: `Plata pe masa cu umiditate se poate aplica doar pana la ${estimate.payOnGrossMaxExcessHumidity} puncte procentuale peste norma. Aici excesul este ${Number(estimate.excessHumidity || 0).toFixed(2)} p.p.`
+      });
+    }
 
     const receipt = await createReceipt({
       ...body,
@@ -373,6 +407,7 @@ async function completeWeighingHandler(req, res, id) {
     const fiscalProfile = config.fiscalProfiles.find((item) => item.name === partner?.fiscalProfile);
 
     const estimate = computeReceiptEstimate({
+      payOnGrossQuantity: receipt.payOnGrossQuantity === true,
       quantity: quantityTons,
       price: Number(receipt.price || 0),
       humidity: Number(receipt.humidity || 0),

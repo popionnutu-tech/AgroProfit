@@ -90,6 +90,16 @@
     "Locatie initiala": "Начальная локация",
     "Umiditate %": "Влажность %",
     "Impuritati %": "Сорность %",
+    "Plata pe masa cu umiditate (fara scaderea apei)":
+      "Оплата по массе с влажностью (без вычета воды)",
+    "Umiditate peste norma": "Влажность выше нормы",
+    "plătit cu apă": "оплачено с водой",
+    "Plata s-a făcut pe masa cu apă, uscarea nu s-a taxat. În stoc a intrat masa fără apă.":
+      "Оплата произведена по массе с водой, сушка не начислена. На склад приходована масса без воды.",
+    "Se plateste masa cu apa, uscarea nu se taxeaza. In stoc intra masa fara apa.":
+      "Оплачивается масса с водой, сушка не начисляется. На склад приходует масса без воды.",
+    "Acum se plateste masa fara apa si se taxeaza uscarea. Bifeaza daca intelegerea e pe masa cu apa.":
+      "Сейчас оплачивается масса без воды и начисляется сушка. Поставьте галочку, если договорённость — по массе с водой.",
     "Vehicul": "Транспорт",
     "Contact": "Контакт",
     "Receptionat de": "Принял",
