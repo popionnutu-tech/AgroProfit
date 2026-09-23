@@ -3927,6 +3927,123 @@ async function updateReceiptSupplier(id, partnerId, changedBy) {
 // Contabilul ajusteaza valoarea (suma) unei receptii — ex. pretul nu a fost completat de
 // operator (care nu are acces financiar), deci valoarea a ramas 0. Setam preliminaryPayableAmount
 // si derivam pretul/tona pentru afisare. Soldul/statusul platii se recalculeaza on-read in listReceipts.
+// Corectie de CONDITII pe o receptie deja intrata: bifa „plata pe masa cu umiditate" si/sau
+// pretul. Exista fiindca intelegerea se afla uneori dupa ce marfa a fost descarcata, iar pana
+// acum flagul se putea pune DOAR la creare.
+//
+// Diferenta fata de `updateReceiptAmount`: acolo se scrie o suma la liber si pretul se deduce
+// din ea; aici se corecteaza INTRARILE, iar sumele se recalculeaza dupa aceeasi formula ca la
+// creare. Asa documentul ramane explicabil: cantitate × pret = suma, pe act si pe extras.
+//
+// Estimarea vine gata calculata din handler (ca la creare si la a doua cantarire) — stratul
+// de persistenta nu citeste nomenclatorul.
+//
+// STOCUL NU SE ATINGE. Nici bifa, nici pretul nu schimba cate tone au intrat in cilindru.
+async function correctReceiptTerms(id, payload = {}) {
+  const state = readReceiptsState();
+  const receipt = state.receipts.find((item) => item.id === Number(id));
+  if (!receipt) {
+    throw new Error("Receptia nu a fost gasita.");
+  }
+
+  // Fail-closed pe rol, ca la corectia de inventar: e o rescriere de bani pe un document
+  // deja inregistrat, nu o operatie de zi cu zi.
+  const role = normalizeRoleCode(payload.actorRole);
+  if (role !== "admin") {
+    throw forbiddenError("Doar administratorul poate corecta conditiile unei receptii.");
+  }
+  if (receipt.status === "Anulat") {
+    throw new Error("Receptia este anulata. Nu se pot corecta conditiile.");
+  }
+  if (receipt.status === "Inchis") {
+    throw new Error("Receptia este inchisa. Redeschide-o intai, apoi corecteaza conditiile.");
+  }
+  if (receipt.status === "In descarcare") {
+    throw new Error("Receptia asteapta a doua cantarire. Finalizeaz-o intai.");
+  }
+
+  const reason = String(payload.reason || "").trim();
+  if (!reason) {
+    throw new Error("Motivul este obligatoriu la corectarea conditiilor.");
+  }
+
+  const estimate = payload.estimate;
+  if (!estimate || typeof estimate !== "object") {
+    throw new Error("Recalcularea sumelor lipseste.");
+  }
+
+  const oldValue = {
+    payOnGrossQuantity: receipt.payOnGrossQuantity === true,
+    price: Number(receipt.price || 0),
+    preliminaryPayableAmount: Number(receipt.preliminaryPayableAmount || 0)
+  };
+
+  const newFlag = payload.payOnGrossQuantity === true;
+  const newPrice = sanitizeNumber(payload.price);
+  if (!(newPrice >= 0)) {
+    throw new Error("Pretul trebuie sa fie un numar pozitiv.");
+  }
+  if (newFlag === oldValue.payOnGrossQuantity && newPrice === oldValue.price) {
+    throw new Error("Nu s-a schimbat nimic: aceeasi bifa si acelasi pret.");
+  }
+
+  receipt.payOnGrossQuantity = newFlag;
+  receipt.price = newPrice;
+  // Aceleasi campuri ca la creare, ca documentul sa nu ramana cu jumatati din calculul vechi.
+  const RECALCULATED = [
+    "excessHumidity", "excessImpurity", "estimatedWaterLoss", "estimatedImpurityLoss",
+    "provisionalNetQuantity", "cleaningServiceTotal", "dryingServiceTotal",
+    "preliminaryServicesTotal", "preliminaryMerchandiseValue", "withholdingPercent",
+    "withholdingAmount", "preliminaryPayableAmount"
+  ];
+  for (const field of RECALCULATED) {
+    if (estimate[field] !== undefined) {
+      receipt[field] = sanitizeNumber(estimate[field]);
+    }
+  }
+
+  // Suma tinta s-a schimbat, deci statutul de plata trebuie recitit fata de ea — altfel o
+  // receptie ramane „Achitat integral" dupa ce datoria a crescut.
+  const paid = Number(receipt.paidAmount || 0);
+  const target = Number(receipt.preliminaryPayableAmount || 0);
+  receipt.paymentStatus = paid <= 0 ? "Neachitat" : paid < target ? "Partial" : "Achitat";
+
+  const now = new Date().toISOString();
+  // Istoricul ramane PE DOCUMENT, nu doar in audit: cine deschide receptia peste un an
+  // trebuie sa vada de ce suma e cea care e, fara sa caute in alt ecran.
+  if (!Array.isArray(receipt.termCorrections)) receipt.termCorrections = [];
+  receipt.termCorrections.push({
+    at: now,
+    by: payload.changedBy || "dashboard",
+    reason,
+    oldPayOnGrossQuantity: oldValue.payOnGrossQuantity,
+    newPayOnGrossQuantity: newFlag,
+    oldPrice: oldValue.price,
+    newPrice,
+    oldAmount: oldValue.preliminaryPayableAmount,
+    newAmount: target
+  });
+  receipt.updatedAt = now;
+
+  createAuditEntry(state, {
+    entityType: "receipt",
+    entityId: receipt.id,
+    action: "receipt-correct-terms",
+    reason: `Corectare conditii: ${reason}`,
+    user: payload.changedBy || "dashboard",
+    oldValue,
+    newValue: {
+      payOnGrossQuantity: newFlag,
+      price: newPrice,
+      preliminaryPayableAmount: target,
+      paymentStatus: receipt.paymentStatus
+    }
+  });
+
+  writeReceiptsState(state);
+  return receipt;
+}
+
 async function updateReceiptAmount(id, amount, changedBy, note) {
   const state = readReceiptsState();
   const receipt = state.receipts.find((item) => item.id === Number(id));
@@ -5693,6 +5810,7 @@ module.exports = {
   updateReceiptStatusWithAudit,
   completeReceiptWeighing,
   updateReceiptSupplier,
+  correctReceiptTerms,
   updateReceiptAmount,
   updateSystemSettings,
   updateTransaction,

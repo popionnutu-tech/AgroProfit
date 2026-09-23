@@ -219,17 +219,31 @@ apa tot se evaporă.
   excesul dispare. O bifă fără efect e o invitație la greșeli.
 - Rândul recepției poartă badge-ul „plătit cu apă" lângă coloana de apă eliminată: altfel suma
   nu se poate explica din cifrele de pe rând.
-- **Bifa se pune la creare, de cine creează recepția (inclusiv operatorul) — și nu se mai
-  schimbă niciodată după aceea.** Asta e decizia asumată: operatorul e la cântar, el vorbește
-  cu șoferul, deci el o pune; compensația e confirmarea explicită plus auditul. Ce ține
-  regula e imutabilitatea, nu rolul. Operatorul NU are voie să modifice recepția ulterior:
-  furnizorul și suma sunt rezervate contabilului/managerului, închiderea și redeschiderea
-  managerului, anularea adminului. Nu-i da operatorului o cale de editare „pentru comoditate" —
-  ar ocoli confirmarea în două cereri.
-- Singurele scrieri pe o recepție existentă sunt **statusul** (mărginit de
+- **Bifa se pune la creare**, de cine creează recepția (inclusiv operatorul): el e la cântar,
+  el vorbește cu șoferul. Compensația e confirmarea explicită plus auditul. Operatorul NU are
+  voie să modifice recepția ulterior: furnizorul și suma sunt rezervate contabilului/managerului,
+  închiderea și redeschiderea managerului, anularea și corectarea de condiții adminului.
+  Nu-i da operatorului o cale de editare „pentru comoditate" — ar ocoli confirmarea în două cereri.
+- **Corectarea ulterioară există, dar e a adminului** (`correctReceiptTerms`, rută
+  `PATCH /api/receipts/:id/correct-terms`). Înțelegerea se află uneori după ce marfa a fost
+  descarcată — furnizorul spune abia la decontare că achiziția a fost cu tot cu apă, sau
+  prețul n-a fost completat la cântar.
+  - Se corectează **intrările** (bifa, prețul), iar sumele se **recalculează** după aceeași
+    formulă ca la creare. Diferență față de `updateReceiptAmount` (✎), care scrie o sumă la
+    liber și deduce prețul din ea. Aici documentul rămâne aritmetic închis: cantitate × preț
+    = sumă, pe act și pe extras. Nu le confunda și nu le unifica.
+  - **Cantitatea și umiditatea nu se ating**, deci stocul nu se mișcă. Normele se citesc tot
+    de pe document, nu din nomenclatorul de acum.
+  - Motiv obligatoriu; istoricul stă **pe document** în `termCorrections` (bifă veche/nouă,
+    preț vechi/nou, sumă veche/nouă, cine, când, de ce) și se vede în „Detalii recepție",
+    nu doar în Audit. Rândul poartă badge-ul „corectat".
+  - Refuzată pe `Anulat`, pe `Inchis` (se redeschide întâi) și pe `In descarcare`.
+  - `paymentStatus` se recitește față de suma nouă — altfel o recepție rămâne „Achitat"
+    după ce datoria a crescut.
+- Celelalte scrieri pe o recepție existentă: **statusul** (mărginit de
   `assertStatusChangePermission` + `assertReceiptStatusTransition`, cu motiv obligatoriu) și
-  **a doua cântărire**, care rulează o singură dată: nu se intră manual în „In descarcare" și
-  nu se iese din ea decât spre „Anulat". Dacă adaugi o rută nouă de editare, reverifică:
+  **a doua cântărire**, care rulează o singură dată — nu se intră manual în „In descarcare" și
+  nu se iese din ea decât spre „Anulat". Dacă adaugi altă rută de editare, reverifică:
   `receiptPayableTonnes` se încrede orbește în flagul stocat.
 
 ## Deploy

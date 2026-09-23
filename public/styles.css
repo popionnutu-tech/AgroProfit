@@ -3042,3 +3042,8 @@ dialog.details-dialog { width: min(680px, 94vw); max-height: 88vh; overflow-y: a
   display: block;
   margin-top: 0.2rem;
 }
+
+/* Delta din dialogul de corectare a conditiilor: cat creste sau scade datoria. */
+.rc-delta { font-weight: 600; margin-left: 0.4rem; font-size: 0.9em; }
+.rc-delta.rc-up { color: #b3261e; }
+.rc-delta.rc-down { color: #1b6e3c; }

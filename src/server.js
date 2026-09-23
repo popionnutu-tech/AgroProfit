@@ -36,6 +36,7 @@ const {
 const {
   closeReceiptHandler,
   completeWeighingHandler,
+  correctReceiptTermsHandler,
   createReceiptHandler,
   healthHandler,
   listReceiptsHandler,
@@ -382,6 +383,17 @@ app.post(
       console.error("Failed to allocate document number:", error.message);
       return res.status(error.statusCode || 400).json({ error: error.message || "Nu am putut aloca numarul." });
     }
+  }
+);
+
+// Corectie de conditii pe o receptie deja intrata: bifa „plata pe masa cu umiditate" si/sau
+// pretul. DOAR admin — rescrie bani pe un document inregistrat. Motiv obligatoriu, istoric
+// pe document (`termCorrections`) si intrare de audit. Rolul se reverifica in storage.
+app.patch(
+  "/api/receipts/:id/correct-terms",
+  requireRoles(["admin"]),
+  async (req, res) => {
+    return correctReceiptTermsHandler(req, res, req.params.id);
   }
 );
 

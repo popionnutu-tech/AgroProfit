@@ -1,6 +1,7 @@
 const {
   closeReceipt,
   completeReceiptWeighing,
+  correctReceiptTerms,
   createReceipt,
   getConfig,
   getStats,
@@ -437,9 +438,79 @@ async function completeWeighingHandler(req, res, id) {
   }
 }
 
+// Corectie de conditii pe o receptie deja intrata (doar admin): bifa „plata pe masa cu
+// umiditate" si/sau pretul. Recalculam estimarea AICI, ca la creare si la a doua cantarire —
+// stratul de persistenta nu citeste nomenclatorul.
+async function correctReceiptTermsHandler(req, res, id) {
+  const body = req.body || {};
+  try {
+    const receipts = await listReceipts();
+    const receipt = receipts.find((item) => Number(item.id) === Number(id));
+    if (!receipt) {
+      return sendJson(res, 404, { error: "Receptia nu a fost gasita." });
+    }
+
+    if (
+      body.payOnGrossQuantity !== undefined &&
+      body.payOnGrossQuantity !== null &&
+      typeof body.payOnGrossQuantity !== "boolean"
+    ) {
+      return sendJson(res, 400, {
+        error: "Campul „plata pe masa cu umiditate” trebuie sa fie adevarat sau fals."
+      });
+    }
+
+    const price = body.price === undefined ? Number(receipt.price || 0) : Number(body.price);
+    if (!Number.isFinite(price) || price < 0) {
+      return sendJson(res, 400, { error: "Pretul trebuie sa fie un numar pozitiv." });
+    }
+
+    const config = await getConfig();
+    const partner = config.partners.find((item) => item.id === Number(receipt.supplierId));
+    const fiscalProfile = config.fiscalProfiles.find((item) => item.name === partner?.fiscalProfile);
+    const product = config.products.find(
+      (item) => item.id === Number(receipt.productId) || item.name === receipt.product
+    );
+    // Normele de pe DOCUMENT, nu din nomenclatorul de acum: o corectie de conditii nu are
+    // voie sa rescrie si normele dupa care s-a calculat apa la receptie.
+    const normeDocument = {
+      humidityNorm: Number(receipt.humidityNorm ?? product?.humidityNorm ?? 0),
+      impurityNorm: Number(receipt.impurityNorm ?? product?.impurityNorm ?? 0)
+    };
+
+    const estimate = computeReceiptEstimate({
+      payOnGrossQuantity: body.payOnGrossQuantity === true,
+      // Cantitatea ramane cea cantarita: se corecteaza conditiile, nu marfa.
+      quantity: Number(receipt.quantity || 0),
+      price,
+      humidity: Number(receipt.humidity || 0),
+      impurity: Number(receipt.impurity || 0),
+      product: normeDocument,
+      tariffs: config.tariffs,
+      fiscalProfile
+    });
+
+    const updated = await correctReceiptTerms(id, {
+      estimate,
+      payOnGrossQuantity: estimate.payOnGrossQuantity,
+      price,
+      reason: body.reason,
+      actorRole: req.currentUser && req.currentUser.roleCode,
+      changedBy: getActorLabel(req)
+    });
+    return sendJson(res, 200, receiptForRequest(req, updated));
+  } catch (error) {
+    console.error("Failed to correct receipt terms:", error.message);
+    return sendJson(res, error.statusCode || 400, {
+      error: error.message || "Nu am putut corecta conditiile receptiei."
+    });
+  }
+}
+
 module.exports = {
   closeReceiptHandler,
   completeWeighingHandler,
+  correctReceiptTermsHandler,
   createReceiptHandler,
   healthHandler,
   listReceiptsHandler,

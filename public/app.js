@@ -1926,6 +1926,10 @@ function renderReceipts(receipts) {
   const canEditStatuses = canAccess("receipt-write");
   const canChangeSupplier = canAccess("finance");
   const canEditAmount = canAccess("finance-write");
+  // Corectia de CONDITII (bifa de umiditate + pret) e rezervata adminului: recalculeaza
+  // bani pe un document deja inregistrat. Butonul e separat de ✎ (care scrie o suma la
+  // liber) tocmai ca sa nu se confunde cele doua operatii.
+  const canCorrectTerms = currentSessionUser?.roleCode === "admin";
   // Operatorul nu vede coloanele de plata (plata preliminara, data platii).
   const receiptsTable = document.getElementById("receipts-table");
   if (receiptsTable) {
@@ -1995,7 +1999,7 @@ function renderReceipts(receipts) {
           <td title="Apă eliminată la recepție (din umiditatea în exces)">${isPendingWeighing || !(Number(item.estimatedWaterLoss) > 0) ? "—" : formatNumber(Math.round(Number(item.estimatedWaterLoss) * 1000)) + " kg"}${item.payOnGrossQuantity === true ? ` <span class="status-badge badge-warn" title="${bi("Plata s-a făcut pe masa cu apă, uscarea nu s-a taxat. În stoc a intrat masa fără apă.")}">${bi("plătit cu apă")}</span>` : ""}</td>
           <td>${qtyCell}</td>
           <td>${item.location || "-"}</td>
-          <td class="col-fin">${currency.format(valoare)}${canEditAmount && !isCanceled ? ` <button type="button" class="cell-btn change-amount-btn" data-action="adjust-amount" data-id="${item.id}" title="Ajustează valoarea recepției">✎</button>` : ""}</td>
+          <td class="col-fin">${currency.format(valoare)}${canEditAmount && !isCanceled ? ` <button type="button" class="cell-btn change-amount-btn" data-action="adjust-amount" data-id="${item.id}" title="Ajustează valoarea recepției">✎</button>` : ""}${canCorrectTerms && !isCanceled && !isPendingWeighing ? ` <button type="button" class="cell-btn change-amount-btn" data-action="correct-terms" data-id="${item.id}" title="Corectează condițiile: plata pe masa cu umiditate și/sau prețul">⚖</button>` : ""}${Array.isArray(item.termCorrections) && item.termCorrections.length ? ` <span class="status-badge badge-warn" title="Condițiile au fost corectate de ${escapeComboHtml(item.termCorrections[item.termCorrections.length - 1].by || "")} — vezi Detalii">corectat</span>` : ""}</td>
           <td class="col-fin">${achitat > 0 ? currency.format(achitat) : "-"}</td>
           <td class="col-fin"><b>${rest > 0 ? currency.format(rest) : "0"}</b></td>
           <td class="col-fin">${formatDateShort(item.lastPaymentDate)}</td>
@@ -7952,6 +7956,15 @@ function openReceiptDetails(id) {
         ${rdRow("Stare plată", escapeComboHtml(item.paymentStatus || "—"))}
         ${rdRow("Ultima plată", formatDateShort(item.lastPaymentDate))}
         ${item.amountNote ? rdRow("Corectare valoare", escapeComboHtml(item.amountNote)) : ""}
+        ${item.payOnGrossQuantity === true ? rdRow("Bază de plată", "Masa CU apă (uscarea nu s-a taxat)") : ""}
+        ${(Array.isArray(item.termCorrections) ? item.termCorrections : []).map((c) => rdRow(
+          "Corectare condiții · " + formatDateShort(c.at),
+          escapeComboHtml(
+            `${c.oldPayOnGrossQuantity === c.newPayOnGrossQuantity ? "" : (c.newPayOnGrossQuantity ? "bifat «cu apă»; " : "scos «cu apă»; ")}` +
+            `${Number(c.oldPrice) === Number(c.newPrice) ? "" : `preț ${formatNumber(c.oldPrice)} → ${formatNumber(c.newPrice)} lei/kg; `}` +
+            `sumă ${formatNumber(c.oldAmount)} → ${formatNumber(c.newAmount)} lei · ${c.by || "-"} · ${c.reason || ""}`
+          )
+        )).join("")}
       </div>`
     : "";
 
@@ -9631,6 +9644,137 @@ bodyEl.addEventListener("click", async (event) => {
     window.alert(err.message);
   }
 });
+
+// --- Corectie de CONDITII pe o receptie deja intrata (doar admin) ---
+// Intelegerea se afla uneori dupa ce marfa a fost descarcata: furnizorul spune abia la
+// decontare ca achizitia s-a facut cu tot cu apa, sau pretul n-a fost completat la cantar.
+// Diferenta fata de ✎ (ajustare de suma): aici se corecteaza INTRARILE (bifa, pretul), iar
+// sumele se recalculeaza dupa aceeasi formula ca la creare — deci actul si extrasul raman
+// aritmetic inchise. Fiecare corectare ramane pe document, in `termCorrections`.
+const receiptCorrectDialog = document.getElementById("receipt-correct-dialog");
+const receiptCorrectForm = document.getElementById("receipt-correct-form");
+let receiptBeingCorrected = null;
+
+function rcEstimate(receipt, payOnGross, priceKg) {
+  // Oglinda lui `computeReceiptEstimate` pentru PREVIZUALIZARE. Sumele salvate le
+  // recalculeaza serverul — aici aratam doar ce urmeaza sa se intample.
+  const apa = Number(receipt.estimatedWaterLoss || 0);
+  const net = Number(receipt.provisionalNetQuantity || receipt.quantity || 0);
+  const tone = payOnGross && apa > 0 ? net + apa : net;
+  const gross = tone * 1000 * (Number(priceKg) || 0);
+  const percent = Number(receipt.withholdingPercent || 0);
+  const tax = gross * (percent / 100);
+  return { kg: tone * 1000, gross, tax, total: Math.max(gross - tax, 0) };
+}
+
+function renderReceiptCorrectPreview() {
+  if (!receiptBeingCorrected) return;
+  const flag = document.getElementById("rc-pay-on-gross").checked;
+  const price = parseDecimal(document.getElementById("rc-price").value);
+  const e = rcEstimate(receiptBeingCorrected, flag, price);
+  document.getElementById("rc-qty").textContent = formatNumber(e.kg);
+  document.getElementById("rc-gross").textContent = formatNumber(e.gross);
+  document.getElementById("rc-tax").textContent = formatNumber(e.tax);
+  document.getElementById("rc-total").textContent = formatNumber(e.total);
+
+  const vechi = Number(receiptBeingCorrected.amountToPay ?? receiptBeingCorrected.preliminaryPayableAmount ?? 0);
+  const delta = e.total - vechi;
+  const deltaEl = document.getElementById("rc-delta");
+  deltaEl.textContent = Math.abs(delta) < 0.005
+    ? ""
+    : `(${delta > 0 ? "+" : "−"}${formatNumber(Math.abs(delta))} lei față de acum)`;
+  deltaEl.className = "rc-delta " + (delta > 0 ? "rc-up" : delta < 0 ? "rc-down" : "");
+
+  const apaKg = Number(receiptBeingCorrected.estimatedWaterLoss || 0) * 1000;
+  document.getElementById("rc-flag-hint").textContent = apaKg > 0
+    ? (flag
+        ? `Se plătesc și cele ${formatNumber(apaKg)} kg de apă; uscarea nu se taxează.`
+        : `Apa (${formatNumber(apaKg)} kg) se scoate din calcul și uscarea se taxează.`)
+    : "Recepția nu are umiditate peste normă — bifa nu schimbă suma.";
+}
+
+if (receiptCorrectDialog && receiptCorrectForm) {
+  document.addEventListener("click", (event) => {
+    const trigger = event.target.closest('[data-action="correct-terms"]');
+    if (!trigger) return;
+    const receipt = receiptsCache.find((r) => String(r.id) === String(trigger.dataset.id));
+    if (!receipt) return;
+    receiptBeingCorrected = receipt;
+
+    document.getElementById("rc-receipt-id").textContent = `#${receipt.id}`;
+    document.getElementById("rc-context").textContent =
+      `${receipt.supplier || "-"} · ${receipt.product || "-"} · umiditate ${formatNumber(Number(receipt.humidity || 0))}% ` +
+      `(normă ${formatNumber(Number(receipt.humidityNorm || 0))}%) · în stoc ` +
+      `${formatNumber(Number(receipt.provisionalNetQuantity || receipt.quantity || 0) * 1000)} kg`;
+    document.getElementById("rc-pay-on-gross").checked = receipt.payOnGrossQuantity === true;
+    document.getElementById("rc-price").value = receipt.price ? String(receipt.price).replace(".", ",") : "";
+    document.getElementById("rc-reason").value = "";
+    document.getElementById("rc-message").textContent = "";
+    renderReceiptCorrectPreview();
+    receiptCorrectDialog.showModal();
+  });
+
+  document.getElementById("rc-pay-on-gross").addEventListener("change", renderReceiptCorrectPreview);
+  document.getElementById("rc-price").addEventListener("input", renderReceiptCorrectPreview);
+  document.getElementById("rc-cancel-btn").addEventListener("click", () => receiptCorrectDialog.close());
+
+  receiptCorrectForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!receiptBeingCorrected) return;
+    const messageEl = document.getElementById("rc-message");
+    const flag = document.getElementById("rc-pay-on-gross").checked;
+    const price = parseDecimal(document.getElementById("rc-price").value);
+    const reason = String(document.getElementById("rc-reason").value || "").trim();
+
+    if (!(price >= 0)) {
+      messageEl.textContent = "Introdu un preț valid (ex. 5 sau 5,20).";
+      return;
+    }
+    if (!reason) {
+      messageEl.textContent = "Motivul este obligatoriu — el explică suma peste un an.";
+      return;
+    }
+
+    // Aceeasi regula ca la bifarea de la receptie: schimbarea bazei de plata se confirma
+    // explicit, cu cifrele in fata.
+    const e = rcEstimate(receiptBeingCorrected, flag, price);
+    const vechi = Number(receiptBeingCorrected.amountToPay ?? receiptBeingCorrected.preliminaryPayableAmount ?? 0);
+    const achitat = Number(receiptBeingCorrected.paidAmount || 0);
+    const avertismente = [];
+    if (achitat > 0) {
+      avertismente.push(`Atenție: pe această recepție s-au achitat deja ${formatNumber(achitat)} lei.`);
+    }
+    if (Array.isArray(receiptBeingCorrected.amountCorrections) && receiptBeingCorrected.amountCorrections.length) {
+      avertismente.push("Atenție: suma fusese ajustată manual — corectarea o va înlocui.");
+    }
+    const intrebare = [
+      `Recepția #${receiptBeingCorrected.id} · ${receiptBeingCorrected.supplier || "-"}`,
+      "",
+      `Total de plată: ${formatNumber(vechi)} lei  →  ${formatNumber(e.total)} lei`,
+      ...(avertismente.length ? ["", ...avertismente] : []),
+      "",
+      "Corectarea rămâne în istoricul recepției. Continui?"
+    ].join("\n");
+    if (!window.confirm(intrebare)) return;
+
+    try {
+      const res = await fetch(`/api/receipts/${receiptBeingCorrected.id}/correct-terms`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ payOnGrossQuantity: flag, price, reason })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Nu am putut corecta condițiile.");
+      }
+      receiptCorrectDialog.close();
+      receiptBeingCorrected = null;
+      await loadReceipts();
+    } catch (err) {
+      messageEl.textContent = err.message;
+    }
+  });
+}
 
 // Contabilul schimba DOAR furnizorul unei receptii (inline, in lista Receptii recente)
 bodyEl.addEventListener("click", (event) => {
