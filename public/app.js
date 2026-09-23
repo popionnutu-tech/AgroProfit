@@ -7836,13 +7836,13 @@ if (payOnGrossInput) {
       const estimate = getReceiptEstimate();
       const excess = Number(estimate.excessHumidity || 0);
       const apaKg = Number(estimate.estimatedWaterLoss || 0) * 1000;
+      // Doar ce e specific ACESTEI decizii. Ca in stoc intra masa fara apa e regula
+      // permanenta a aplicatiei, nu ceva ce se schimba prin bifa — nu se repeta aici.
       const intrebare = [
         bi("Sigur se achită marfa CU TOT CU APĂ?"),
         "",
         `${bi("Umiditate peste normă")}: +${formatNumber(excess)}%`,
         `${bi("Apă plătită ca marfă")}: ${formatNumber(apaKg)} kg`,
-        `${bi("Uscarea NU se taxează")}.`,
-        `${bi("În stoc intră tot masa fără apă")}: ${formatNumber((estimate.provisionalNetQuantity || 0) * 1000)} kg`,
         "",
         bi("Apasă OK doar dacă aceasta este înțelegerea cu furnizorul.")
       ].join("\n");

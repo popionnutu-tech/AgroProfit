@@ -93,6 +93,13 @@
     "Plata pe masa cu umiditate (fara scaderea apei)":
       "Оплата по массе с влажностью (без вычета воды)",
     "Umiditate peste norma": "Влажность выше нормы",
+    // Fereastra de confirmare la bifarea platii pe masa cu umiditate. Cheia e textul
+    // EXACT afisat, cu diacritice — „norma" si „normă" sunt chei diferite.
+    "Sigur se achită marfa CU TOT CU APĂ?": "Оплатить товар ВМЕСТЕ С ВОДОЙ?",
+    "Umiditate peste normă": "Влажность выше нормы",
+    "Apă plătită ca marfă": "Вода, оплачиваемая как товар",
+    "Apasă OK doar dacă aceasta este înțelegerea cu furnizorul.":
+      "Нажмите ОК только если такова договорённость с поставщиком.",
     "plătit cu apă": "оплачено с водой",
     "Plata s-a făcut pe masa cu apă, uscarea nu s-a taxat. În stoc a intrat masa fără apă.":
       "Оплата произведена по массе с водой, сушка не начислена. На склад приходована масса без воды.",

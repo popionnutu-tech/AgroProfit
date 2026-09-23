@@ -182,9 +182,14 @@ apa tot se evaporă.
   cu apă, oricât ar fi excesul; dacă nu e pusă, apa se scoate din calcul. Decizia e a omului,
   nu a unei constante. (A existat un prag de 4 p.p. — a fost scos deliberat, nu uitat.)
 - Fiindcă nu există prag care să oprească o greșeală, apărarea e **confirmarea explicită**:
-  la bifare aplicația arată excesul, kilogramele de apă plătite ca marfă și cantitatea care
-  intră în stoc, iar omul trebuie să apese OK. Refuzul debifează. Debifarea nu cere
-  confirmare — întoarcerea la regula obișnuită nu e o decizie de bani.
+  la bifare aplicația arată excesul de umiditate și kilogramele de apă plătite ca marfă, iar
+  omul trebuie să apese OK. Refuzul debifează. Debifarea nu cere confirmare — întoarcerea la
+  regula obișnuită nu e o decizie de bani. Fereastra conține **doar ce e specific acestei
+  decizii**: că în stoc intră masa fără apă e o regulă permanentă, nu ceva ce schimbă bifa,
+  deci nu se repetă acolo.
+- Textele din fereastră se traduc prin `bi()` pe **textul exact afișat, cu diacritice**.
+  „Umiditate peste norma" și „Umiditate peste normă" sunt chei diferite în `i18n-ru.js` —
+  o nepotrivire nu dă eroare, doar lasă textul netradus pentru operator.
 - Fără apă în exces flagul **nu se înregistrează** (nu există ce pune înapoi), în backend și
   în frontend deopotrivă. Altfel ar rămâne recepții marcate „plătit cu apă" fără nicio apă.
 - **Implicit e NEBIFAT** = comportamentul dinainte (plata pe masa fără apă). Așa o recepție
@@ -214,6 +219,18 @@ apa tot se evaporă.
   excesul dispare. O bifă fără efect e o invitație la greșeli.
 - Rândul recepției poartă badge-ul „plătit cu apă" lângă coloana de apă eliminată: altfel suma
   nu se poate explica din cifrele de pe rând.
+- **Bifa se pune la creare, de cine creează recepția (inclusiv operatorul) — și nu se mai
+  schimbă niciodată după aceea.** Asta e decizia asumată: operatorul e la cântar, el vorbește
+  cu șoferul, deci el o pune; compensația e confirmarea explicită plus auditul. Ce ține
+  regula e imutabilitatea, nu rolul. Operatorul NU are voie să modifice recepția ulterior:
+  furnizorul și suma sunt rezervate contabilului/managerului, închiderea și redeschiderea
+  managerului, anularea adminului. Nu-i da operatorului o cale de editare „pentru comoditate" —
+  ar ocoli confirmarea în două cereri.
+- Singurele scrieri pe o recepție existentă sunt **statusul** (mărginit de
+  `assertStatusChangePermission` + `assertReceiptStatusTransition`, cu motiv obligatoriu) și
+  **a doua cântărire**, care rulează o singură dată: nu se intră manual în „In descarcare" și
+  nu se iese din ea decât spre „Anulat". Dacă adaugi o rută nouă de editare, reverifică:
+  `receiptPayableTonnes` se încrede orbește în flagul stocat.
 
 ## Deploy
 - **Push pe `main` → Vercel publică automat** pe agroprofit-plus.vercel.app (integrare Git activă).
