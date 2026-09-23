@@ -1858,11 +1858,56 @@ dialog.details-dialog { width: min(680px, 94vw); max-height: 88vh; overflow-y: a
   font-size: 0.8rem;
   border: 1px solid #d1d5db;
   background: #f9fafb;
+  /* Regula globala `button { color: white }` de mai sus facea textul alb pe fundal alb:
+     butoanele de schimbare a statutului („Inchis", „Redeschis") erau CITIBILE doar la hover.
+     Culoarea se scrie explicit aici. */
+  color: var(--ink);
+  font-weight: 600;
   border-radius: 4px;
   cursor: pointer;
 }
 .delivery-action:hover {
   background: #e5e7eb;
+}
+
+/* Randul de livrare: toate actiunile pe O SINGURA banda orizontala, care se rupe cand nu
+   incape. Inainte fiecare grup (status, tranzitii, anulare, retur, tipar) statea pe randul
+   lui, deci randul crestea in inaltime si celula impingea tabelul in latime. */
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.row-actions .cell-btn,
+.row-actions .delivery-action {
+  margin-left: 0;
+}
+.row-actions-cell {
+  max-width: 320px;
+}
+.row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+/* Tabelul de livrari are 13 coloane: coloane mai stranse, ca sa incapa fara derulare laterala. */
+#deliveries-table thead th,
+#deliveries-table tbody td,
+#deliveries-table tfoot td {
+  padding: 6px 8px;
+}
+#deliveries-table .delivery-action {
+  padding: 2px 8px;
+  font-size: 0.72rem;
+}
+#deliveries-table .cell-btn,
+#deliveries-table .doc-print-btn {
+  padding: 3px 8px;
+  font-size: 0.68rem;
 }
 
 /* Sidebar responsive drawer — placed at end to override base rules */

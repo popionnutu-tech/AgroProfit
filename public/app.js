@@ -1782,6 +1782,168 @@ function renderStockPeriod() {
       <td><b>${kgNum(tCorr)}</b></td>
       <td>${kgNum(tFin)}</td>
     </tr>`;
+  renderStockPeriodByLocation();
+}
+
+
+// Aceleasi miscari ca `renderStockPeriod`, dar desfasurate pe LOCATIE. Perechea de fata a
+// ecranului „Stoc pe locatii": acolo se vede soldul de acum, aici de unde a venit si unde a
+// plecat marfa in perioada aleasa. Formulele sunt cele din `createStockSummary` (backend):
+// receptia intra in locatia ei, transferul si procesarea muta intre locatii, livrarea se
+// scade DOAR din locatia ei, returul se crediteaza acolo unde s-a descarcat fizic.
+// Pierderea la procesare NU are coloana proprie pentru procesarile-miscare: ea e chiar
+// diferenta dintre „Iesit mutari" (intrarea in utilaj) si „Intrat mutari" (iesirea din el).
+// Coloana „Pierderi proc." numara doar pierderea din receptiile de model vechi (net final
+// mai mic decat cel provizoriu), care apartine locatiei receptiei.
+function renderStockPeriodByLocation() {
+  const body = document.getElementById("stock-period-loc-body");
+  if (!body) return;
+  const fromEl = document.getElementById("stock-period-loc-from");
+  const toEl = document.getElementById("stock-period-loc-to");
+  const from = fromEl && fromEl.value ? fromEl.value : "";
+  const to = toEl && toEl.value ? toEl.value : "";
+
+  const dayOf = (iso) => String(iso || "").slice(0, 10);
+  const normLoc = (v) => String(v || "Fara locatie").trim().toLowerCase();
+  const inPeriod = (day) => (!from || day >= from) && (!to || day <= to);
+
+  // O linie per locatie+produs. `before` = inainte de perioada (intra in stocul initial),
+  // `now` = in perioada.
+  const lines = new Map();
+  const line = (location, product) => {
+    const key = `${normLoc(location)}::${product}`;
+    let row = lines.get(key);
+    if (!row) {
+      row = {
+        location: String(location || "Fara locatie").trim() || "Fara locatie",
+        product,
+        before: { rec: 0, in: 0, out: 0, del: 0, loss: 0, corr: 0 },
+        now: { rec: 0, in: 0, out: 0, del: 0, loss: 0, corr: 0 }
+      };
+      lines.set(key, row);
+    }
+    return row;
+  };
+  const add = (location, product, field, day, qty) => {
+    if (!product || !qty) return;
+    const row = line(location, product);
+    if (from && day < from) row.before[field] += qty;
+    else if (inPeriod(day)) row.now[field] += qty;
+  };
+
+  // Sold initial (documentul de sold): mereu inainte de orice perioada.
+  const openingByLocation = (lastStockSummary && lastStockSummary.openingByLocation) || {};
+  Object.keys(openingByLocation).forEach((key) => {
+    const idx = key.lastIndexOf("::");
+    if (idx < 0) return;
+    const location = key.slice(0, idx);
+    const product = key.slice(idx + 2);
+    line(location, product).before.rec += Number(openingByLocation[key] || 0);
+  });
+
+  (receiptsCache || []).forEach((r) => {
+    if (!isReceiptInStock(r)) return;
+    const provNet = Number(r.provisionalNetQuantity || r.quantity || 0);
+    const day = dayOf(r.createdAt || r.receivedAt);
+    add(r.location, r.product, "rec", day, provNet);
+    const finalNet = r.finalNetQuantity != null ? Number(r.finalNetQuantity) : provNet;
+    add(r.location, r.product, "loss", day, Math.max(provNet - finalNet, 0));
+  });
+
+  (transfersCache || []).forEach((t) => {
+    if (!t || t.status === "Anulat") return;
+    const qty = Number(t.quantity || 0);
+    if (qty <= 0) return;
+    const day = dayOf(t.createdAt);
+    add(t.fromLocation, t.product, "out", day, qty);
+    add(t.toLocation, t.product, "in", day, qty);
+  });
+
+  (processingsCache || []).forEach((pr) => {
+    if (!pr || pr.movement !== true) return;
+    if (pr.status === "Anulat" || pr.status === "In lucru") return;
+    const input = Number(pr.processedQuantity || 0);
+    const output = Number(
+      pr.outputQuantity ??
+        Math.max(input - Number(pr.confirmedWaste || 0) - Number(pr.waterRemoved || 0), 0)
+    );
+    const day = dayOf(pr.createdAt);
+    add(pr.sourceLocation, pr.product, "out", day, input);
+    add(pr.destLocation || pr.sourceLocation, pr.product, "in", day, output);
+  });
+
+  (deliveriesCache || []).forEach((d) => {
+    if (!d || d.status === "Anulat") return;
+    const gross = Number(d.deliveredQuantity || 0) + Number(d.returnedQuantity || 0);
+    add(d.location, d.product, "del", dayOf(d.deliveredAt || d.createdAt), gross);
+    const entries = Array.isArray(d.returns) && d.returns.length > 0
+      ? d.returns
+      : (Number(d.returnedQuantity || 0) > 0
+          ? [{ quantity: Number(d.returnedQuantity), location: d.location, returnedAt: d.returnedAt || d.createdAt }]
+          : []);
+    entries.forEach((e) => {
+      const qty = Number(e.quantity || 0);
+      if (qty > 0) add(e.location || d.location, d.product, "del", dayOf(e.returnedAt || d.createdAt), -qty);
+    });
+  });
+
+  (stockCorrectionsCache || []).forEach((cr) => {
+    add(cr.location, cr.product, "corr", dayOf(cr.createdAt), Number(cr.delta || 0));
+  });
+
+  const prodEl = document.getElementById("stock-period-loc-product");
+  const locEl = document.getElementById("stock-period-loc-location");
+  const prodFilter = prodEl ? prodEl.value : "";
+  const locFilter = locEl ? locEl.value : "";
+
+  const rows = Array.from(lines.values())
+    .filter((r) => !prodFilter || r.product === prodFilter)
+    .filter((r) => !locFilter || normLoc(r.location) === normLoc(locFilter))
+    .map((r) => {
+      const init = r.before.rec + r.before.in - r.before.out - r.before.del - r.before.loss + r.before.corr;
+      const fin = init + r.now.rec + r.now.in - r.now.out - r.now.del - r.now.loss + r.now.corr;
+      return { ...r, init, fin };
+    })
+    // O linie fara nicio miscare si fara sold nu spune nimic: ar umple tabelul cu zerouri.
+    .filter((r) => [r.init, r.fin, r.now.rec, r.now.in, r.now.out, r.now.del, r.now.loss, r.now.corr]
+      .some((v) => Math.round(v * 1000) !== 0))
+    .sort((a, b) =>
+      String(a.location).localeCompare(String(b.location), "ro") ||
+      String(a.product).localeCompare(String(b.product), "ro"));
+
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="10" class="empty-state">Nu există mișcări pentru perioada aleasă.</td></tr>';
+    return;
+  }
+
+  const t = { init: 0, rec: 0, in: 0, out: 0, del: 0, loss: 0, corr: 0, fin: 0 };
+  body.innerHTML = rows.map((r) => {
+    t.init += r.init; t.rec += r.now.rec; t.in += r.now.in; t.out += r.now.out;
+    t.del += r.now.del; t.loss += r.now.loss; t.corr += r.now.corr; t.fin += r.fin;
+    return `<tr>
+      <td>${escapeComboHtml(r.location)}</td>
+      <td>${escapeComboHtml(r.product)}</td>
+      <td>${kgNum(r.init)}</td>
+      <td>${kgNum(r.now.rec)}</td>
+      <td>${r.now.in ? kgNum(r.now.in) : "—"}</td>
+      <td>${r.now.out ? kgNum(r.now.out) : "—"}</td>
+      <td>${kgNum(r.now.del)}</td>
+      <td>${r.now.loss ? kgNum(r.now.loss) : "—"}</td>
+      <td>${r.now.corr ? `<b>${kgNum(r.now.corr)}</b>` : "—"}</td>
+      <td><b>${kgNum(r.fin)}</b></td>
+    </tr>`;
+  }).join("") + `
+    <tr class="totals-row">
+      <td colspan="2">TOTAL</td>
+      <td>${kgNum(t.init)}</td>
+      <td>${kgNum(t.rec)}</td>
+      <td>${kgNum(t.in)}</td>
+      <td>${kgNum(t.out)}</td>
+      <td>${kgNum(t.del)}</td>
+      <td>${kgNum(t.loss)}</td>
+      <td><b>${kgNum(t.corr)}</b></td>
+      <td><b>${kgNum(t.fin)}</b></td>
+    </tr>`;
 }
 
 function renderAutomationStatus(status) {
@@ -2899,14 +3061,13 @@ function renderDeliveries(deliveries) {
           <td class="col-fin">${priceLabel}</td>
           <td class="col-fin">${totalFactura > 0 ? currency.format(totalFactura) : "-"}</td>
           <td class="col-fin pay-cell ${item.invoicePaid ? "is-paid" : "is-unpaid"}">${paidSelect}</td>
-          <td>
-            <div class="col-fin">${item.invoiceNumber || "-"}</div>
-            ${item.note ? `<div class="row-note">${escapeComboHtml(item.note)}</div>` : ""}
-            <div>${deliveryStatusBadge(status)}</div>
-            <div class="action-row">${buttons}</div>
-            <div class="action-row">${docActionsCell("delivery", item)}</div>
-            ${(() => { const cell = deliveryReturnCell(item, canDeliveryWrite); return cell ? `<div class="action-row">${cell}</div>` : ""; })()}
-            ${canAccess("finance") ? `<div class="doc-print-row">
+          <td class="row-actions-cell">
+            <div class="row-actions">
+              ${deliveryStatusBadge(status)}
+              ${buttons}
+              ${docActionsCell("delivery", item)}
+              ${deliveryReturnCell(item, canDeliveryWrite)}
+            ${canAccess("finance") ? `
               <button type="button" class="cell-btn cell-btn-primary" data-action="edit-billing" data-id="${item.id}">Date factură</button>
               <details class="print-menu">
                 <summary class="doc-print-btn">Tipar ▾</summary>
@@ -2919,8 +3080,16 @@ function renderDeliveries(deliveries) {
                   <button type="button" class="doc-print-btn" data-print="declaratie" data-id="${item.id}">Declarație</button>
                   <button type="button" class="doc-print-btn" data-print="act" data-id="${item.id}">Act achiziție</button>
                 </div>
-              </details>
-            </div>` : ""}
+              </details>` : ""}
+            </div>
+            ${(() => {
+              // Numarul facturii si comentariul stau sub butoane, pe un rand marunt: asa
+              // celula nu se mai imparte in benzi verticale si randul ramane scund.
+              const inv = canAccess("finance") && item.invoiceNumber
+                ? `<span>Factura ${escapeComboHtml(item.invoiceNumber)}</span>` : "";
+              const note = item.note ? `<span class="row-note">${escapeComboHtml(item.note)}</span>` : "";
+              return inv || note ? `<div class="row-meta">${inv}${note}</div>` : "";
+            })()}
           </td>
         </tr>
       `;
@@ -3789,6 +3958,38 @@ function renderFilterOptions() {
       ...productNames.map((name) => `<option value="${name}">${name}</option>`)
     ].join("");
     stockPeriodProductEl.value = productNames.includes(prev) ? prev : "";
+  }
+
+  // Aceleasi filtre pentru tabelul pe locatii + lista de locatii (nomenclator si orice
+  // locatie aparuta pe documente vechi, ca marfa sa nu ramana invizibila daca locatia a
+  // fost intre timp scoasa din nomenclator).
+  const stockPeriodLocProductEl = document.getElementById("stock-period-loc-product");
+  if (stockPeriodLocProductEl) {
+    const prev = stockPeriodLocProductEl.value;
+    stockPeriodLocProductEl.innerHTML = [
+      '<option value="">Toate produsele</option>',
+      ...productNames.map((name) => `<option value="${name}">${name}</option>`)
+    ].join("");
+    stockPeriodLocProductEl.value = productNames.includes(prev) ? prev : "";
+  }
+  const stockPeriodLocEl = document.getElementById("stock-period-loc-location");
+  if (stockPeriodLocEl) {
+    const prev = stockPeriodLocEl.value;
+    const fromDocs = [
+      ...(receiptsCache || []).map((r) => r.location),
+      ...(deliveriesCache || []).map((d) => d.location),
+      ...(transfersCache || []).flatMap((t) => [t.fromLocation, t.toLocation]),
+      ...(processingsCache || []).flatMap((pr) => [pr.sourceLocation, pr.destLocation])
+    ];
+    const locNames = Array.from(new Set([
+      ...(currentConfig?.storageLocations || []).map((l) => l.name),
+      ...fromDocs
+    ].filter(Boolean))).sort((a, b) => String(a).localeCompare(String(b), "ro"));
+    stockPeriodLocEl.innerHTML = [
+      '<option value="">Toate locațiile</option>',
+      ...locNames.map((name) => `<option value="${escapeComboHtml(name)}">${escapeComboHtml(name)}</option>`)
+    ].join("");
+    stockPeriodLocEl.value = locNames.includes(prev) ? prev : "";
   }
 }
 
@@ -8442,6 +8643,10 @@ function fillPrintDocPanel() {
 document.getElementById("stock-period-from")?.addEventListener("change", renderStockPeriod);
 document.getElementById("stock-period-to")?.addEventListener("change", renderStockPeriod);
 document.getElementById("stock-period-product")?.addEventListener("change", renderStockPeriod);
+document.getElementById("stock-period-loc-from")?.addEventListener("change", renderStockPeriodByLocation);
+document.getElementById("stock-period-loc-to")?.addEventListener("change", renderStockPeriodByLocation);
+document.getElementById("stock-period-loc-product")?.addEventListener("change", renderStockPeriodByLocation);
+document.getElementById("stock-period-loc-location")?.addEventListener("change", renderStockPeriodByLocation);
 document.getElementById("losses-report-form")?.addEventListener("submit", (e) => { e.preventDefault(); renderLossesReport(); });
 ["losses-from", "losses-to", "losses-product"].forEach((id) => document.getElementById(id)?.addEventListener("change", renderLossesReport));
 document.getElementById("field-yield-form")?.addEventListener("submit", (e) => { e.preventDefault(); renderFieldYield(); });

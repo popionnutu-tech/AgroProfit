@@ -1099,6 +1099,38 @@
           </div>
         </section>
 
+        <section class="panel" data-view="stoc">
+          <div class="panel-head">
+            <h2>Mișcare stoc pe perioadă, pe locații</h2>
+            <p>Aceleași mișcări, desfășurate pe fiecare cilindru / groapă: de unde a plecat marfa și unde a ajuns. Toate cantitățile în kg.</p>
+          </div>
+          <div class="inline-date-filter">
+            <label>De la<input type="date" id="stock-period-loc-from" /></label>
+            <label>Pana la<input type="date" id="stock-period-loc-to" /></label>
+            <label>Produs<select id="stock-period-loc-product"><option value="">Toate produsele</option></select></label>
+            <label>Locație<select id="stock-period-loc-location"><option value="">Toate locațiile</option></select></label>
+          </div>
+          <div class="table-wrap">
+            <table id="stock-period-loc-table">
+              <thead>
+                <tr>
+                  <th>Locație</th>
+                  <th>Produs</th>
+                  <th>Inițial</th>
+                  <th>Recepții</th>
+                  <th title="Marfă venită prin transfer sau ieșită din procesare în această locație">Intrat</th>
+                  <th title="Marfă plecată prin transfer sau intrată la procesare din această locație">Ieșit</th>
+                  <th>Livrări</th>
+                  <th title="Pierderea la procesare apare ca diferență între ieșit și intrat">Pierderi proc.</th>
+                  <th>Corecții</th>
+                  <th>Final</th>
+                </tr>
+              </thead>
+              <tbody id="stock-period-loc-body"></tbody>
+            </table>
+          </div>
+        </section>
+
         <section class="grid finance-grid" data-access="finance" data-view="financiar">
           <div class="receipt-new-bar" style="grid-column: 1 / -1;">
             <button type="button" id="transaction-new-toggle" class="receipt-new-btn" aria-expanded="false" aria-controls="transaction-form">
@@ -1959,7 +1991,7 @@
                       <th>Apă uscare (kg)</th>
                       <th>Livrat (kg)</th>
                       <th>Apă livrare (kg)</th>
-                      <th>Corecții inventar (kg)</th>
+                      <th>Corecții</th>
                       <th>Diferență (kg)</th>
                       <th>Stoc curent (kg)</th>
                     </tr>
