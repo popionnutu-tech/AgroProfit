@@ -15,3 +15,13 @@ data/
 # Rapoarte de audit de securitate — NU se comit (repo public)
 SECURITY-AUDIT-*.md
 .DS_Store
+
+# Exporturi descarcate din aplicatie (contin date REALE de productie).
+# Hook-ul de auto-commit face `git add -A`, iar repo-ul e public: fara liniile astea,
+# un export lasat in radacina ajunge publicat la prima modificare de cod.
+/config.json
+/stocks.json
+/receipts.json
+/config*.json
+/stocks*.json
+/receipts*.json

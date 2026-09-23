@@ -254,11 +254,6 @@ const WAREHOUSE_ONLY_RETURN_ROLES = ["accountant", "accountant-sef"];
 // confirma la cantar cu greutatile reale.
 const CAN_CREATE_DRAFT_ROLES = ["accountant", "accountant-sef", "admin"];
 
-// Plata pe masa cu umiditate e o toleranta comerciala, valabila doar cat excesul e mic.
-// Oglindit in `src/receipt-handlers.js` (unde produce 400) si in `public/app.js` (unde
-// ascunde bifa). Aici e ultima poarta: `receiptPayableTonnes` se increde in flagul stocat,
-// deci flagul nu are voie sa ajunga pe document peste prag, indiferent de apelant.
-const MAX_PAY_ON_GROSS_EXCESS_HUMIDITY = 4;
 // Statusuri care NU se pot cere din body la crearea unei receptii:
 //   „Proiect" — se obtine doar prin `isDraft`, decis de ROL. Altfel oricine putea crea o
 //               receptie in afara stocului, a KPI-ului si a datoriei: ascundere de marfa.
@@ -1933,14 +1928,6 @@ function findCylinderConflict(summary, toLocation, productName) {
 
 async function createReceipt(payload) {
   const state = readReceiptsState();
-  if (payload.payOnGrossQuantity === true) {
-    const excess = Number(payload.excessHumidity || 0);
-    if (!(excess > 0) || excess > MAX_PAY_ON_GROSS_EXCESS_HUMIDITY) {
-      throw new Error(
-        `Plata pe masa cu umiditate se aplica doar la un exces de umiditate intre 0 si ${MAX_PAY_ON_GROSS_EXCESS_HUMIDITY} puncte procentuale.`
-      );
-    }
-  }
   // Regim de PROIECT: doar rolurile care pregatesc documente, si niciodata combinat cu un
   // status dintr-o masina de stari (ex. „In descarcare" ar bloca a doua cantarire).
   if (payload.isDraft === true) {

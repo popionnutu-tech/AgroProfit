@@ -27,13 +27,6 @@ function getBody(req) {
   return req.body || {};
 }
 
-// Pragul intelegerii comerciale: plata pe masa cu apa e acceptata doar cat timp umiditatea
-// in exces ramane mica (utilizatorul a descris „3-4 puncte procentuale"; e luat maximul).
-// Peste prag nu mai e o toleranta, ci grau platit ca apa — la +12 p.p. pe 100 t inseamna
-// 12 t de apa la pretul graului. Gardă pe SERVER: interfata ascunde bifa, dar interfata
-// nu e o garda. Se schimba aici, intr-un singur loc.
-const MAX_PAY_ON_GROSS_EXCESS_HUMIDITY = 4;
-
 function computeReceiptEstimate({
   quantity, price, humidity, impurity, product, tariffs, fiscalProfile, payOnGrossQuantity
 }) {
@@ -64,8 +57,7 @@ function computeReceiptEstimate({
   // Se pune la loc DOAR apa, nu si impuritatile. Pe brut s-ar plati si gunoiul de peste
   // norma, ceea ce nu a convenit nimeni; cand impuritatile sunt in norma, cele doua
   // formule coincid oricum.
-  const payOnGross =
-    payOnGrossQuantity === true && excessHumidity <= MAX_PAY_ON_GROSS_EXCESS_HUMIDITY;
+  const payOnGross = payOnGrossQuantity === true && excessHumidity > 0;
   const payableQuantity = payOnGross
     ? provisionalNetQuantity + estimatedWaterLoss
     : provisionalNetQuantity;
@@ -100,7 +92,6 @@ function computeReceiptEstimate({
     provisionalNetQuantity,
     payOnGrossQuantity: payOnGross,
     payableQuantity,
-    payOnGrossMaxExcessHumidity: MAX_PAY_ON_GROSS_EXCESS_HUMIDITY,
     cleaningServiceTotal,
     dryingServiceTotal,
     preliminaryServicesTotal,
@@ -290,12 +281,6 @@ async function createReceiptHandler(req, res) {
       fiscalProfile
     });
 
-    if (body.payOnGrossQuantity === true && !estimate.payOnGrossQuantity) {
-      return sendJson(res, 400, {
-        error: `Plata pe masa cu umiditate se poate aplica doar pana la ${estimate.payOnGrossMaxExcessHumidity} puncte procentuale peste norma. Aici excesul este ${Number(estimate.excessHumidity || 0).toFixed(2)} p.p.`
-      });
-    }
-
     const receipt = await createReceipt({
       ...body,
       quantity: normalizedQuantity,
@@ -416,13 +401,23 @@ async function completeWeighingHandler(req, res, id) {
     const partner = config.partners.find((item) => item.id === Number(receipt.supplierId));
     const fiscalProfile = config.fiscalProfiles.find((item) => item.name === partner?.fiscalProfile);
 
+    // Normele se citesc de pe DOCUMENT, nu din nomenclatorul de acum. Intre cele doua
+    // cantariri cineva poate schimba `humidityNorm` sau sterge produsul, iar recalcularea
+    // ar rescrie retroactiv baza de plata a unei receptii deja intrate — inclusiv anuland
+    // tacit intelegerea de plata pe masa cu apa. Normele sunt inghetate la creare exact
+    // pentru asta; config-ul ramane fallback doar pentru documentele vechi, fara ele.
+    const normeDocument = {
+      humidityNorm: Number(receipt.humidityNorm ?? product?.humidityNorm ?? 0),
+      impurityNorm: Number(receipt.impurityNorm ?? product?.impurityNorm ?? 0)
+    };
+
     const estimate = computeReceiptEstimate({
       payOnGrossQuantity: receipt.payOnGrossQuantity === true,
       quantity: quantityTons,
       price: Number(receipt.price || 0),
       humidity: Number(receipt.humidity || 0),
       impurity: Number(receipt.impurity || 0),
-      product: product || { humidityNorm: 0, impurityNorm: 0 },
+      product: normeDocument,
       tariffs: config.tariffs,
       fiscalProfile
     });

@@ -90,21 +90,6 @@ test("flag fara umiditate in exces nu poate plati impuritatile (gaura inchisa)",
   assert.strictEqual(cu.preliminaryPayableAmount, fara.preliminaryPayableAmount);
 });
 
-test("pragul intelegerii: peste 4 p.p. bifa nu se aplica", () => {
-  // +6 p.p. umiditate: nu mai e toleranta, ar fi grau platit ca apa.
-  const ud = { ...BASE, humidity: 20 };
-  const e = computeReceiptEstimate({ ...ud, payOnGrossQuantity: true });
-  assert.strictEqual(e.payOnGrossQuantity, false, "serverul refuza, nu accepta tacut");
-  assert.ok(Math.abs(e.payableQuantity - e.provisionalNetQuantity) < 1e-9);
-  assert.ok(e.dryingServiceTotal > 0, "uscarea ramane taxata cand bifa nu se aplica");
-});
-
-test("la limita exacta de 4 p.p. bifa inca se aplica", () => {
-  const e = computeReceiptEstimate({ ...BASE, humidity: 18, payOnGrossQuantity: true });
-  assert.strictEqual(e.payOnGrossQuantity, true);
-  assert.ok(Math.abs(e.payableQuantity - 100) < 1e-9);
-});
-
 test("cantitatea platita = cea de pe actul tiparit si din extrasul de cont", () => {
   // Oglinda lui receiptPayableTonnes (src/local-storage.js) si actReceiptFigures (app.js):
   // toate trei trebuie sa porneasca de la net + apa.
@@ -115,4 +100,23 @@ test("cantitatea platita = cea de pe actul tiparit si din extrasul de cont", () 
     Math.abs(e.preliminaryMerchandiseValue - dinDocument * 1000 * BASE.price) < 1e-6,
     "cantitate x pret = suma, ca extrasul semnat de furnizor sa se inchida"
   );
+});
+
+// Bifa E regula: nu exista prag de umiditate care sa o limiteze. Decizia e a omului,
+// iar aplicatia ii cere o confirmare explicita inainte de a o accepta (in frontend).
+test("bifa se aplica la orice umiditate in exces, fara prag", () => {
+  for (const humidity of [15, 18, 20, 26]) {
+    const e = computeReceiptEstimate({ ...BASE, humidity, payOnGrossQuantity: true });
+    const exces = humidity - 14;
+    assert.strictEqual(e.payOnGrossQuantity, true, `refuzata la +${exces} p.p.`);
+    assert.strictEqual(e.dryingServiceTotal, 0);
+    // Se plateste tot ce a intrat pe cantar, mai putin impuritatile (aici sunt in norma).
+    assert.ok(Math.abs(e.payableQuantity - 100) < 1e-9, `baza gresita la +${exces} p.p.`);
+  }
+});
+
+test("fara apa in exces flagul nu se inregistreaza (nu exista ce pune inapoi)", () => {
+  const e = computeReceiptEstimate({ ...BASE, humidity: 14, payOnGrossQuantity: true });
+  assert.strictEqual(e.payOnGrossQuantity, false);
+  assert.ok(Math.abs(e.payableQuantity - e.provisionalNetQuantity) < 1e-9);
 });

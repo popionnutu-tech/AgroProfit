@@ -165,9 +165,9 @@ introducă. Îl creează în status **`Proiect`**.
   butonul „Corectează" — vizibil în „Mișcarea stocului", imposibil de închis din „Stoc".
 
 ### 9. Plata pe masa cu umiditate (`payOnGrossQuantity`)
-Când umiditatea depășește norma dar rămâne în limita acceptată prin înțelegere (3-4 puncte
-procentuale), furnizorul e plătit pe marfa **cu apă**, la prețul convenit, iar uscarea nu se
-taxează. Marfa fizică rămâne aceeași: apa tot se evaporă.
+Când umiditatea depășește norma, înțelegerea poate fi ca furnizorul să fie plătit pe marfa
+**cu apă**, la prețul convenit, iar uscarea să nu se taxeze. Marfa fizică rămâne aceeași:
+apa tot se evaporă.
 - **Stocul NU se atinge.** `provisionalNetQuantity` (masa fără apă) intră în cilindru exact ca
   înainte. Flagul schimbă DOAR banii. Dacă vreodată îl legi de stoc, ai inventat marfă care
   nu există — cântarul de la ieșire o va contrazice.
@@ -175,38 +175,41 @@ taxează. Marfa fizică rămâne aceeași: apa tot se evaporă.
   provisionalNetQuantity + estimatedWaterLoss`. **Nu folosi `grossQuantity`** — brutul
   conține și gunoiul peste normă, iar nimeni n-a convenit să plătească pământ ca marfă.
   Când impuritățile sunt în normă cele două formule coincid, deci greșeala nu se vede la
-  primul test; se vede pe marfa murdară. Efect secundar bun: dacă umiditatea e sub normă,
-  `estimatedWaterLoss` e 0, deci bifa nu poate face nimic — garda e în formulă, nu în UI.
+  primul test; se vede pe marfa murdară.
 - `dryingServiceTotal` devine **0**. Merge împreună cu cele de mai sus: dacă plătești apa
   ca marfă, nu mai încasezi și uscarea ei.
+- **Nu există prag de umiditate.** Bifa ESTE regula: dacă e pusă, se plătește marfa cu tot
+  cu apă, oricât ar fi excesul; dacă nu e pusă, apa se scoate din calcul. Decizia e a omului,
+  nu a unei constante. (A existat un prag de 4 p.p. — a fost scos deliberat, nu uitat.)
+- Fiindcă nu există prag care să oprească o greșeală, apărarea e **confirmarea explicită**:
+  la bifare aplicația arată excesul, kilogramele de apă plătite ca marfă și cantitatea care
+  intră în stoc, iar omul trebuie să apese OK. Refuzul debifează. Debifarea nu cere
+  confirmare — întoarcerea la regula obișnuită nu e o decizie de bani.
+- Fără apă în exces flagul **nu se înregistrează** (nu există ce pune înapoi), în backend și
+  în frontend deopotrivă. Altfel ar rămâne recepții marcate „plătit cu apă" fără nicio apă.
+- **Implicit e NEBIFAT** = comportamentul dinainte (plata pe masa fără apă). Așa o recepție
+  veche, sau una unde nimeni n-a atins bifa, dă exact aceeași sumă ca înainte de regula asta.
 - Formula e **duplicată** în `getReceiptEstimate` din `public/app.js` (vezi regula 2). Se
   schimbă în AMBELE locuri.
 - Cantitatea pe care se calculează banii are o **sursă unică**: `receiptPayableTonnes()` din
   `src/local-storage.js`, folosită de valoarea recepției, de corecția manuală de sumă și de
-  extrasul de cont al furnizorului. Oglinda ei în frontend e `actReceiptFigures()`, pentru
-  actul de achiziție tipărit. Când cele patru calculau fiecare pe cont propriu, actul semnat
-  de furnizor arăta o sumă mai mică decât datoria înregistrată, iar pe extras
-  `cantitate × preț ≠ sumă`. Orice loc nou care înmulțește cantitate cu preț le folosește.
-- **Implicit e NEBIFAT** = comportamentul dinainte (plata pe masa fără apă). Așa o recepție
-  veche, sau una unde nimeni n-a atins bifa, dă exact aceeași sumă ca înainte de regula asta.
+  extrasul de cont al furnizorului. Oglinda ei în frontend e `actReceiptFigures()`. Când
+  fiecare calcula pe cont propriu, actul semnat de furnizor arăta o sumă mai mică decât
+  datoria înregistrată, iar pe extras `cantitate × preț ≠ sumă`. Orice loc nou care
+  înmulțește cantitate cu preț le folosește.
+- Actul de achiziție se tipărește din **două** locuri (`buildPurchaseActHtml` din „Documente
+  tipar" și `buildPurchaseActPrintHtml` din Livrări). Amândouă trec prin `actReceiptFigures` —
+  a doua a avut o clipă formula copiată inline și cele două acte ale aceleiași recepții au
+  arătat cantități și prețuri unitare diferite, deși totalul coincidea. Nu o copia a treia oară.
 - Flagul se **persistă pe recepție**, nu se recalculează din context. Peste un an suma trebuie
   să rămână explicabilă; `receiptPayableValue` folosește aceeași bază la fallback.
 - La cântarul în 2 pași flagul se citește de pe **recepție**, nu din body-ul celei de-a doua
   cântăriri — ca prețul și umiditatea. Înțelegerea se ia la intrare, nu la ieșirea de sub pod.
   Atenție: `ESTIMATE_FIELDS` din `completeReceiptWeighing` trece totul prin `sanitizeNumber`,
   deci flagul (boolean) **nu se pune în listă**.
-- **Prag: maximum 4 puncte procentuale** peste normă (`MAX_PAY_ON_GROSS_EXCESS_HUMIDITY`
-  din `src/receipt-handlers.js`, oglindit în `public/app.js`). Peste prag nu mai e o
-  toleranță comercială, ci grâu plătit ca apă — la +12 p.p. pe 100 t înseamnă 12 t de apă
-  la prețul grâului. Serverul **refuză cu 400**, nu ignoră tăcut: altfel omul bifează, vede
-  altă sumă și nu află de ce. Pragul e verificat în **două** locuri: în handler (răspuns 400,
-  pentru om) și în `createReceipt` (excepție, fail-closed, pentru orice apelant viitor —
-  import, seed, migrare). `receiptPayableTonnes` se încrede în flagul stocat, deci flagul
-  nu are voie să ajungă pe document peste prag.
-- Actul de achiziție se tipărește din **două** locuri (`actReceiptFigures` pentru „Documente
-  tipar", `buildPurchaseActPrintHtml` din Livrări). Ambele pornesc de la cantitatea plătită.
-  Când unul singur a fost actualizat, cele două acte pentru aceeași recepție arătau cantități
-  și prețuri unitare diferite, deși totalul coincidea.
+- Tot la a doua cântărire, normele se citesc **de pe document** (`receipt.humidityNorm` /
+  `impurityNorm`), nu din nomenclatorul de atunci. Sunt înghețate la creare tocmai ca o
+  schimbare de normă între cele două cântăriri să nu rescrie retroactiv baza de plată.
 - Bifa apare în formular **doar când umiditatea depășește norma** și se debifează singură dacă
   excesul dispare. O bifă fără efect e o invitație la greșeli.
 - Rândul recepției poartă badge-ul „plătit cu apă" lângă coloana de apă eliminată: altfel suma

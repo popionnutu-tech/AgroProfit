@@ -4555,10 +4555,6 @@ function getActiveTariff(serviceName) {
   );
 }
 
-// Oglinda lui MAX_PAY_ON_GROSS_EXCESS_HUMIDITY din src/receipt-handlers.js.
-// Serverul refuza cu 400 peste prag; aici doar nu mai oferim bifa, ca sa nu se ajunga acolo.
-const PAY_ON_GROSS_MAX_EXCESS_HUMIDITY = 4;
-
 function getReceiptEstimate() {
   const selectedProduct = currentConfig.products.find(
     (item) => String(item.id) === String(productSelect.value)
@@ -4597,10 +4593,7 @@ function getReceiptEstimate() {
   // Oglinda exacta a lui `computeReceiptEstimate` din src/receipt-handlers.js — se schimba
   // in AMBELE locuri (CLAUDE.md, regula 2).
   // Se pune la loc DOAR apa, nu si impuritatile — vezi comentariul din backend.
-  const payOnGross =
-    Boolean(payOnGrossInput && payOnGrossInput.checked) &&
-    excessHumidity > 0 &&
-    excessHumidity <= PAY_ON_GROSS_MAX_EXCESS_HUMIDITY;
+  const payOnGross = Boolean(payOnGrossInput && payOnGrossInput.checked) && excessHumidity > 0;
   const payableQuantity = payOnGross
     ? provisionalNetQuantity + estimatedWaterLoss
     : provisionalNetQuantity;
@@ -4648,7 +4641,7 @@ function toggleNewSupplierInput() {
 function renderPayOnGrossField(estimate) {
   if (!payOnGrossWrap || !payOnGrossInput) return;
   const excess = Number(estimate.excessHumidity || 0);
-  const relevant = excess > 0 && excess <= PAY_ON_GROSS_MAX_EXCESS_HUMIDITY;
+  const relevant = excess > 0;
   payOnGrossWrap.hidden = !relevant;
   if (!relevant) {
     payOnGrossInput.checked = false;
@@ -6913,22 +6906,18 @@ function buildInvoicePrintHtml(delivery) {
 function buildPurchaseActPrintHtml(delivery, company) {
   // Act de achizitie is based on the source receipt's supplier
   const receipt = (receiptsCache || []).find((r) => Number(r.id) === Number(delivery.receiptId));
-  const supplier = receipt ? findPartnerByName(receipt.supplier) : null;
-  // Actul de achizitie reflecta RECEPTIA (cumpararea de la furnizor): cantitatea PLATITA
-  // + pret lei/kg. Cand plata s-a convenit pe masa cu umiditate, cantitatea e net + apa —
-  // aceeasi baza ca `actReceiptFigures` si ca `receiptPayableTonnes` din backend. Altfel
-  // cele doua acte de achizitie tiparite pentru aceeasi receptie arata cantitati si preturi
-  // unitare diferite, desi totalul coincide.
-  const qty = Number(
-    (receipt?.provisionalNetQuantity || receipt?.quantity || 0)
-      + (receipt?.payOnGrossQuantity === true ? Number(receipt.estimatedWaterLoss || 0) : 0)
-  ) || Number(
-    (delivery.netWeight > 0 ? delivery.netWeight : delivery.deliveredQuantity) || 0
-  ); // tone
   if (!receipt) {
     alert("Recepția sursă nu a fost găsită — reîncarcă pagina și încearcă din nou.");
     return "";
   }
+  const supplier = findPartnerByName(receipt.supplier);
+  // Actul de achizitie reflecta RECEPTIA (cumpararea de la furnizor): cantitatea PLATITA
+  // + pret lei/kg. Baza vine din `actReceiptFigures` — aceeasi folosita de actul din
+  // „Documente tipar" si oglinda lui `receiptPayableTonnes` din backend. Copiata inline,
+  // devenea a patra varianta a aceleiasi formule; exact asa au ajuns cele doua acte ale
+  // aceleiasi receptii sa arate cantitati si preturi unitare diferite.
+  const qty = Number(actReceiptFigures(receipt).netKg / 1000)
+    || Number((delivery.netWeight > 0 ? delivery.netWeight : delivery.deliveredQuantity) || 0); // tone
   const priceRaw = Number(receipt.price || 0); // lei/kg
   // Aceeasi regula ca la actul din pagina „Documente tipar": randul arata valoarea BRUTA
   // (cantitate × pret), iar „Total de plata" e datoria REALA din registru (neta, dupa impozitul
@@ -7837,7 +7826,33 @@ supplierSuggestionsEl.addEventListener("mousedown", (event) => {
   handleSuggestionPick(li);
 });
 humidityInput.addEventListener("input", renderReceiptEstimate);
-if (payOnGrossInput) payOnGrossInput.addEventListener("change", renderReceiptEstimate);
+// Bifa ridica suma platita furnizorului si anuleaza taxa de uscare. Nu exista prag care
+// sa opreasca o greseala, deci singura aparare e ca omul sa confirme explicit, cu cifrele
+// in fata. Confirmarea se cere DOAR la bifare; debifarea (intoarcerea la regula obisnuita)
+// nu are nevoie de ea.
+if (payOnGrossInput) {
+  payOnGrossInput.addEventListener("change", () => {
+    if (payOnGrossInput.checked) {
+      const estimate = getReceiptEstimate();
+      const excess = Number(estimate.excessHumidity || 0);
+      const apaKg = Number(estimate.estimatedWaterLoss || 0) * 1000;
+      const intrebare = [
+        bi("Sigur se achită marfa CU TOT CU APĂ?"),
+        "",
+        `${bi("Umiditate peste normă")}: +${formatNumber(excess)}%`,
+        `${bi("Apă plătită ca marfă")}: ${formatNumber(apaKg)} kg`,
+        `${bi("Uscarea NU se taxează")}.`,
+        `${bi("În stoc intră tot masa fără apă")}: ${formatNumber((estimate.provisionalNetQuantity || 0) * 1000)} kg`,
+        "",
+        bi("Apasă OK doar dacă aceasta este înțelegerea cu furnizorul.")
+      ].join("\n");
+      if (!window.confirm(intrebare)) {
+        payOnGrossInput.checked = false;
+      }
+    }
+    renderReceiptEstimate();
+  });
+}
 impurityInput.addEventListener("input", renderReceiptEstimate);
 grossWeightInput.addEventListener("input", renderReceiptEstimate);
 tareWeightInput.addEventListener("input", renderReceiptEstimate);
