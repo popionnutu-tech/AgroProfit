@@ -14,3 +14,4 @@ data/
 
 # Rapoarte de audit de securitate — NU se comit (repo public)
 SECURITY-AUDIT-*.md
+.DS_Store
