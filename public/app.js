@@ -62,6 +62,9 @@ const grossWeightInput = document.getElementById("gross-weight-input");
 const tareWeightInput = document.getElementById("tare-weight-input");
 const netQtyHintEl = document.getElementById("net-qty-hint");
 const humidityInput = document.getElementById("humidity-input");
+const payOnGrossInput = document.getElementById("pay-on-gross-input");
+const payOnGrossWrap = document.getElementById("pay-on-gross-wrap");
+const payOnGrossHintEl = document.getElementById("pay-on-gross-hint");
 const impurityInput = document.getElementById("impurity-input");
 const fiscalProfileOptions = document.getElementById("fiscal-profile-options");
 const roleOptions = document.getElementById("role-options");
@@ -2036,6 +2039,10 @@ function renderReceipts(receipts) {
   const canEditStatuses = canAccess("receipt-write");
   const canChangeSupplier = canAccess("finance");
   const canEditAmount = canAccess("finance-write");
+  // Corectia de CONDITII (bifa de umiditate + pret) e rezervata adminului: recalculeaza
+  // bani pe un document deja inregistrat. Butonul e separat de ✎ (care scrie o suma la
+  // liber) tocmai ca sa nu se confunde cele doua operatii.
+  const canCorrectTerms = currentSessionUser?.roleCode === "admin";
   // Operatorul nu vede coloanele de plata (plata preliminara, data platii).
   const receiptsTable = document.getElementById("receipts-table");
   if (receiptsTable) {
@@ -2102,10 +2109,10 @@ function renderReceipts(receipts) {
           <td>${escapeComboHtml(item.product)}${photosMini(item.photos)}</td>
           <td>${item.grossWeight > 0 ? formatNumber(Number(item.grossWeight)) + " kg" : "—"}</td>
           <td>${item.tareWeight > 0 ? formatNumber(Number(item.tareWeight)) + " kg" : "—"}</td>
-          <td title="Apă eliminată la recepție (din umiditatea în exces)">${isPendingWeighing || !(Number(item.estimatedWaterLoss) > 0) ? "—" : formatNumber(Math.round(Number(item.estimatedWaterLoss) * 1000)) + " kg"}</td>
+          <td title="Apă eliminată la recepție (din umiditatea în exces)">${isPendingWeighing || !(Number(item.estimatedWaterLoss) > 0) ? "—" : formatNumber(Math.round(Number(item.estimatedWaterLoss) * 1000)) + " kg"}${item.payOnGrossQuantity === true ? ` <span class="status-badge badge-warn" title="${bi("Plata s-a făcut pe masa cu apă, uscarea nu s-a taxat. În stoc a intrat masa fără apă.")}">${bi("plătit cu apă")}</span>` : ""}</td>
           <td>${qtyCell}</td>
           <td>${item.location || "-"}</td>
-          <td class="col-fin">${currency.format(valoare)}${canEditAmount && !isCanceled ? ` <button type="button" class="cell-btn change-amount-btn" data-action="adjust-amount" data-id="${item.id}" title="Ajustează valoarea recepției">✎</button>` : ""}</td>
+          <td class="col-fin">${currency.format(valoare)}${canEditAmount && !isCanceled ? ` <button type="button" class="cell-btn change-amount-btn" data-action="adjust-amount" data-id="${item.id}" title="Ajustează valoarea recepției">✎</button>` : ""}${canCorrectTerms && !isCanceled && !isPendingWeighing ? ` <button type="button" class="cell-btn change-amount-btn" data-action="correct-terms" data-id="${item.id}" title="Corectează condițiile: plata pe masa cu umiditate și/sau prețul">⚖</button>` : ""}${Array.isArray(item.termCorrections) && item.termCorrections.length ? ` <span class="status-badge badge-warn" title="Condițiile au fost corectate de ${escapeComboHtml(item.termCorrections[item.termCorrections.length - 1].by || "")} — vezi Detalii">corectat</span>` : ""}</td>
           <td class="col-fin">${achitat > 0 ? currency.format(achitat) : "-"}</td>
           <td class="col-fin"><b>${rest > 0 ? currency.format(rest) : "0"}</b></td>
           <td class="col-fin">${formatDateShort(item.lastPaymentDate)}</td>
@@ -4734,10 +4741,20 @@ function getReceiptEstimate() {
   //   uscare   = tarif_uscare   × (umiditate − norma_umiditate)   × kg
   //   curatare = tarif_curatare × (impuritati − norma_impuritati) × kg
   // If umiditate ≤ norma AND impuritati ≤ norma → 0 (no services).
+  // Intelegere comerciala: la umiditate peste norma dar in limita acceptata se plateste
+  // masa CU apa si nu se taxeaza uscarea. Stocul primeste tot `provisionalNetQuantity`.
+  // Oglinda exacta a lui `computeReceiptEstimate` din src/receipt-handlers.js — se schimba
+  // in AMBELE locuri (CLAUDE.md, regula 2).
+  // Se pune la loc DOAR apa, nu si impuritatile — vezi comentariul din backend.
+  const payOnGross = Boolean(payOnGrossInput && payOnGrossInput.checked) && excessHumidity > 0;
+  const payableQuantity = payOnGross
+    ? provisionalNetQuantity + estimatedWaterLoss
+    : provisionalNetQuantity;
+
   const cleaningServiceTotal = quantity * excessImpurity * cleaningTariff;
-  const dryingServiceTotal = quantity * excessHumidity * dryingTariff;
+  const dryingServiceTotal = payOnGross ? 0 : quantity * excessHumidity * dryingTariff;
   const preliminaryServicesTotal = cleaningServiceTotal + dryingServiceTotal;
-  const preliminaryMerchandiseValue = provisionalNetQuantity * 1000 * price; // kg × lei/kg
+  const preliminaryMerchandiseValue = payableQuantity * 1000 * price; // kg × lei/kg
   // Aceeasi regula ca in backend (computeReceiptEstimate): costul marfii ramane BRUT, iar impozitul
   // retinut la sursa se scade din datoria catre furnizor. Serviciile NU se scad (barter, plati).
   const withholdingPercent = Number(fiscalProfile?.withholdingPercent || 0);
@@ -4748,6 +4765,9 @@ function getReceiptEstimate() {
     humidityNorm,
     impurityNorm,
     provisionalNetQuantity,
+    payOnGrossQuantity: payOnGross,
+    payableQuantity,
+    excessHumidity,
     preliminaryServicesTotal,
     preliminaryMerchandiseValue,
     withholdingPercent,
@@ -4768,12 +4788,36 @@ function toggleNewSupplierInput() {
   }
 }
 
+// Bifa are sens doar cand umiditatea depaseste norma — altfel nu se scade apa oricum,
+// iar o bifa fara efect e o invitatie la greseli. Cand dispare, se si debifeaza: altfel
+// ar ramane bifata pe o receptie unde nu inseamna nimic si ar deruta la verificare.
+function renderPayOnGrossField(estimate) {
+  if (!payOnGrossWrap || !payOnGrossInput) return;
+  const excess = Number(estimate.excessHumidity || 0);
+  const relevant = excess > 0;
+  payOnGrossWrap.hidden = !relevant;
+  if (!relevant) {
+    payOnGrossInput.checked = false;
+    return;
+  }
+  if (!payOnGrossHintEl) return;
+  const netKg = (estimate.provisionalNetQuantity || 0) * 1000;
+  const payKg = (estimate.payableQuantity || 0) * 1000;
+  const head = `${bi("Umiditate peste norma")}: +${formatNumber(excess)}%.`;
+  const body = estimate.payOnGrossQuantity
+    ? bi("Se plateste masa cu apa, uscarea nu se taxeaza. In stoc intra masa fara apa.")
+    : bi("Acum se plateste masa fara apa si se taxeaza uscarea. Bifeaza daca intelegerea e pe masa cu apa.");
+  payOnGrossHintEl.textContent =
+    `${head} ${body} (${formatNumber(payKg)} kg -> plata / ${formatNumber(netKg)} kg -> stoc)`;
+}
+
 function renderReceiptEstimate() {
   if (!currentConfig) {
     return;
   }
 
   const estimate = getReceiptEstimate();
+  renderPayOnGrossField(estimate);
   estimateHumidityNormEl.textContent = `${formatNumber(estimate.humidityNorm)}%`;
   estimateImpurityNormEl.textContent = `${formatNumber(estimate.impurityNorm)}%`;
   // Net provizoriu afisat in kg (calculul e in tone)
@@ -5275,6 +5319,7 @@ async function createReceipt(formData) {
     price: formData.get("price") || "0",
     humidity: formData.get("humidity") || String(selectedProduct?.humidityNorm ?? 0),
     impurity: formData.get("impurity") || String(selectedProduct?.impurityNorm ?? 0),
+    payOnGrossQuantity: Boolean(payOnGrossInput && payOnGrossInput.checked),
     vehicle: formData.get("vehicle"),
     contact: formData.get("contact"),
     note: formData.get("note"),
@@ -5445,7 +5490,8 @@ function resetReceiptForm(mode = "save") {
     receivedBy: preserveContext ? userSelect.value : "",
     price: preserveContext ? formEl.elements.price.value : "",
     humidity: preserveContext ? humidityInput.value : "",
-    impurity: preserveContext ? impurityInput.value : ""
+    impurity: preserveContext ? impurityInput.value : "",
+    payOnGross: preserveContext && Boolean(payOnGrossInput && payOnGrossInput.checked)
   };
 
   formEl.reset();
@@ -5463,6 +5509,7 @@ function resetReceiptForm(mode = "save") {
   formEl.elements.price.value = preservedValues.price || "";
   humidityInput.value = preservedValues.humidity || "";
   impurityInput.value = preservedValues.impurity || "";
+  if (payOnGrossInput) payOnGrossInput.checked = preservedValues.payOnGross;
   if (grossWeightInput) grossWeightInput.value = "";
   if (tareWeightInput) tareWeightInput.value = "";
   formEl.elements.vehicle.value = "";
@@ -6601,9 +6648,14 @@ function partnerWithholdingPercent(partner) {
 
 // Cantitate (kg) + valoare (bruta) + pret derivat pentru o receptie, pe act (cantitate × pret = valoare).
 function actReceiptFigures(receipt) {
-  // Cantitatea = aceeași bază ca in tabelul Recepții (net provizoriu × 1000 = kg).
-  const netKg = Number(receipt.provisionalNetQuantity || receipt.quantity || 0) * 1000
-    || Number(receipt.netWeight) || 0;
+  // Cantitatea de pe act = cea pe care s-au calculat BANII, nu cea intrata in stoc.
+  // Cand plata s-a convenit pe masa cu umiditate (`payOnGrossQuantity`), apa se pune
+  // inapoi — doar apa, impuritatile raman scazute. Oglinda lui `receiptPayableTonnes`
+  // din src/local-storage.js; se schimba in AMBELE locuri.
+  // Fara asta, actul semnat de furnizor arata o suma mai mica decat datoria inregistrata.
+  const payableTonnes = Number(receipt.provisionalNetQuantity || receipt.quantity || 0)
+    + (receipt.payOnGrossQuantity === true ? Number(receipt.estimatedWaterLoss || 0) : 0);
+  const netKg = payableTonnes * 1000 || Number(receipt.netWeight) || 0;
   // Prețul = EXACT cel introdus la recepție (lei/kg), NU derivat din valoare ÷ cantitate.
   const price = Number(receipt.price) || 0;
   // Valoarea (brută, cost) = cantitate × preț, exact — ca „col.5 = col.3 × col.4" să iasă perfect.
@@ -7007,16 +7059,18 @@ function buildInvoicePrintHtml(delivery) {
 function buildPurchaseActPrintHtml(delivery, company) {
   // Act de achizitie is based on the source receipt's supplier
   const receipt = (receiptsCache || []).find((r) => Number(r.id) === Number(delivery.receiptId));
-  const supplier = receipt ? findPartnerByName(receipt.supplier) : null;
-  // Actul de achizitie reflecta RECEPTIA (cumpararea de la furnizor): cantitate neta + pret lei/kg.
-  const qty = Number(
-    receipt?.provisionalNetQuantity || receipt?.quantity ||
-    (delivery.netWeight > 0 ? delivery.netWeight : delivery.deliveredQuantity) || 0
-  ); // tone
   if (!receipt) {
     alert("Recepția sursă nu a fost găsită — reîncarcă pagina și încearcă din nou.");
     return "";
   }
+  const supplier = findPartnerByName(receipt.supplier);
+  // Actul de achizitie reflecta RECEPTIA (cumpararea de la furnizor): cantitatea PLATITA
+  // + pret lei/kg. Baza vine din `actReceiptFigures` — aceeasi folosita de actul din
+  // „Documente tipar" si oglinda lui `receiptPayableTonnes` din backend. Copiata inline,
+  // devenea a patra varianta a aceleiasi formule; exact asa au ajuns cele doua acte ale
+  // aceleiasi receptii sa arate cantitati si preturi unitare diferite.
+  const qty = Number(actReceiptFigures(receipt).netKg / 1000)
+    || Number((delivery.netWeight > 0 ? delivery.netWeight : delivery.deliveredQuantity) || 0); // tone
   const priceRaw = Number(receipt.price || 0); // lei/kg
   // Aceeasi regula ca la actul din pagina „Documente tipar": randul arata valoarea BRUTA
   // (cantitate × pret), iar „Total de plata" e datoria REALA din registru (neta, dupa impozitul
@@ -7930,6 +7984,33 @@ supplierSuggestionsEl.addEventListener("mousedown", (event) => {
   handleSuggestionPick(li);
 });
 humidityInput.addEventListener("input", renderReceiptEstimate);
+// Bifa ridica suma platita furnizorului si anuleaza taxa de uscare. Nu exista prag care
+// sa opreasca o greseala, deci singura aparare e ca omul sa confirme explicit, cu cifrele
+// in fata. Confirmarea se cere DOAR la bifare; debifarea (intoarcerea la regula obisnuita)
+// nu are nevoie de ea.
+if (payOnGrossInput) {
+  payOnGrossInput.addEventListener("change", () => {
+    if (payOnGrossInput.checked) {
+      const estimate = getReceiptEstimate();
+      const excess = Number(estimate.excessHumidity || 0);
+      const apaKg = Number(estimate.estimatedWaterLoss || 0) * 1000;
+      // Doar ce e specific ACESTEI decizii. Ca in stoc intra masa fara apa e regula
+      // permanenta a aplicatiei, nu ceva ce se schimba prin bifa — nu se repeta aici.
+      const intrebare = [
+        bi("Sigur se achită marfa CU TOT CU APĂ?"),
+        "",
+        `${bi("Umiditate peste normă")}: +${formatNumber(excess)}%`,
+        `${bi("Apă plătită ca marfă")}: ${formatNumber(apaKg)} kg`,
+        "",
+        bi("Apasă OK doar dacă aceasta este înțelegerea cu furnizorul.")
+      ].join("\n");
+      if (!window.confirm(intrebare)) {
+        payOnGrossInput.checked = false;
+      }
+    }
+    renderReceiptEstimate();
+  });
+}
 impurityInput.addEventListener("input", renderReceiptEstimate);
 grossWeightInput.addEventListener("input", renderReceiptEstimate);
 tareWeightInput.addEventListener("input", renderReceiptEstimate);
@@ -8029,6 +8110,15 @@ function openReceiptDetails(id) {
         ${rdRow("Stare plată", escapeComboHtml(item.paymentStatus || "—"))}
         ${rdRow("Ultima plată", formatDateShort(item.lastPaymentDate))}
         ${item.amountNote ? rdRow("Corectare valoare", escapeComboHtml(item.amountNote)) : ""}
+        ${item.payOnGrossQuantity === true ? rdRow("Bază de plată", "Masa CU apă (uscarea nu s-a taxat)") : ""}
+        ${(Array.isArray(item.termCorrections) ? item.termCorrections : []).map((c) => rdRow(
+          "Corectare condiții · " + formatDateShort(c.at),
+          escapeComboHtml(
+            `${c.oldPayOnGrossQuantity === c.newPayOnGrossQuantity ? "" : (c.newPayOnGrossQuantity ? "bifat «cu apă»; " : "scos «cu apă»; ")}` +
+            `${Number(c.oldPrice) === Number(c.newPrice) ? "" : `preț ${formatNumber(c.oldPrice)} → ${formatNumber(c.newPrice)} lei/kg; `}` +
+            `sumă ${formatNumber(c.oldAmount)} → ${formatNumber(c.newAmount)} lei · ${c.by || "-"} · ${c.reason || ""}`
+          )
+        )).join("")}
       </div>`
     : "";
 
@@ -9712,6 +9802,137 @@ bodyEl.addEventListener("click", async (event) => {
     window.alert(err.message);
   }
 });
+
+// --- Corectie de CONDITII pe o receptie deja intrata (doar admin) ---
+// Intelegerea se afla uneori dupa ce marfa a fost descarcata: furnizorul spune abia la
+// decontare ca achizitia s-a facut cu tot cu apa, sau pretul n-a fost completat la cantar.
+// Diferenta fata de ✎ (ajustare de suma): aici se corecteaza INTRARILE (bifa, pretul), iar
+// sumele se recalculeaza dupa aceeasi formula ca la creare — deci actul si extrasul raman
+// aritmetic inchise. Fiecare corectare ramane pe document, in `termCorrections`.
+const receiptCorrectDialog = document.getElementById("receipt-correct-dialog");
+const receiptCorrectForm = document.getElementById("receipt-correct-form");
+let receiptBeingCorrected = null;
+
+function rcEstimate(receipt, payOnGross, priceKg) {
+  // Oglinda lui `computeReceiptEstimate` pentru PREVIZUALIZARE. Sumele salvate le
+  // recalculeaza serverul — aici aratam doar ce urmeaza sa se intample.
+  const apa = Number(receipt.estimatedWaterLoss || 0);
+  const net = Number(receipt.provisionalNetQuantity || receipt.quantity || 0);
+  const tone = payOnGross && apa > 0 ? net + apa : net;
+  const gross = tone * 1000 * (Number(priceKg) || 0);
+  const percent = Number(receipt.withholdingPercent || 0);
+  const tax = gross * (percent / 100);
+  return { kg: tone * 1000, gross, tax, total: Math.max(gross - tax, 0) };
+}
+
+function renderReceiptCorrectPreview() {
+  if (!receiptBeingCorrected) return;
+  const flag = document.getElementById("rc-pay-on-gross").checked;
+  const price = parseDecimal(document.getElementById("rc-price").value);
+  const e = rcEstimate(receiptBeingCorrected, flag, price);
+  document.getElementById("rc-qty").textContent = formatNumber(e.kg);
+  document.getElementById("rc-gross").textContent = formatNumber(e.gross);
+  document.getElementById("rc-tax").textContent = formatNumber(e.tax);
+  document.getElementById("rc-total").textContent = formatNumber(e.total);
+
+  const vechi = Number(receiptBeingCorrected.amountToPay ?? receiptBeingCorrected.preliminaryPayableAmount ?? 0);
+  const delta = e.total - vechi;
+  const deltaEl = document.getElementById("rc-delta");
+  deltaEl.textContent = Math.abs(delta) < 0.005
+    ? ""
+    : `(${delta > 0 ? "+" : "−"}${formatNumber(Math.abs(delta))} lei față de acum)`;
+  deltaEl.className = "rc-delta " + (delta > 0 ? "rc-up" : delta < 0 ? "rc-down" : "");
+
+  const apaKg = Number(receiptBeingCorrected.estimatedWaterLoss || 0) * 1000;
+  document.getElementById("rc-flag-hint").textContent = apaKg > 0
+    ? (flag
+        ? `Se plătesc și cele ${formatNumber(apaKg)} kg de apă; uscarea nu se taxează.`
+        : `Apa (${formatNumber(apaKg)} kg) se scoate din calcul și uscarea se taxează.`)
+    : "Recepția nu are umiditate peste normă — bifa nu schimbă suma.";
+}
+
+if (receiptCorrectDialog && receiptCorrectForm) {
+  document.addEventListener("click", (event) => {
+    const trigger = event.target.closest('[data-action="correct-terms"]');
+    if (!trigger) return;
+    const receipt = receiptsCache.find((r) => String(r.id) === String(trigger.dataset.id));
+    if (!receipt) return;
+    receiptBeingCorrected = receipt;
+
+    document.getElementById("rc-receipt-id").textContent = `#${receipt.id}`;
+    document.getElementById("rc-context").textContent =
+      `${receipt.supplier || "-"} · ${receipt.product || "-"} · umiditate ${formatNumber(Number(receipt.humidity || 0))}% ` +
+      `(normă ${formatNumber(Number(receipt.humidityNorm || 0))}%) · în stoc ` +
+      `${formatNumber(Number(receipt.provisionalNetQuantity || receipt.quantity || 0) * 1000)} kg`;
+    document.getElementById("rc-pay-on-gross").checked = receipt.payOnGrossQuantity === true;
+    document.getElementById("rc-price").value = receipt.price ? String(receipt.price).replace(".", ",") : "";
+    document.getElementById("rc-reason").value = "";
+    document.getElementById("rc-message").textContent = "";
+    renderReceiptCorrectPreview();
+    receiptCorrectDialog.showModal();
+  });
+
+  document.getElementById("rc-pay-on-gross").addEventListener("change", renderReceiptCorrectPreview);
+  document.getElementById("rc-price").addEventListener("input", renderReceiptCorrectPreview);
+  document.getElementById("rc-cancel-btn").addEventListener("click", () => receiptCorrectDialog.close());
+
+  receiptCorrectForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!receiptBeingCorrected) return;
+    const messageEl = document.getElementById("rc-message");
+    const flag = document.getElementById("rc-pay-on-gross").checked;
+    const price = parseDecimal(document.getElementById("rc-price").value);
+    const reason = String(document.getElementById("rc-reason").value || "").trim();
+
+    if (!(price >= 0)) {
+      messageEl.textContent = "Introdu un preț valid (ex. 5 sau 5,20).";
+      return;
+    }
+    if (!reason) {
+      messageEl.textContent = "Motivul este obligatoriu — el explică suma peste un an.";
+      return;
+    }
+
+    // Aceeasi regula ca la bifarea de la receptie: schimbarea bazei de plata se confirma
+    // explicit, cu cifrele in fata.
+    const e = rcEstimate(receiptBeingCorrected, flag, price);
+    const vechi = Number(receiptBeingCorrected.amountToPay ?? receiptBeingCorrected.preliminaryPayableAmount ?? 0);
+    const achitat = Number(receiptBeingCorrected.paidAmount || 0);
+    const avertismente = [];
+    if (achitat > 0) {
+      avertismente.push(`Atenție: pe această recepție s-au achitat deja ${formatNumber(achitat)} lei.`);
+    }
+    if (Array.isArray(receiptBeingCorrected.amountCorrections) && receiptBeingCorrected.amountCorrections.length) {
+      avertismente.push("Atenție: suma fusese ajustată manual — corectarea o va înlocui.");
+    }
+    const intrebare = [
+      `Recepția #${receiptBeingCorrected.id} · ${receiptBeingCorrected.supplier || "-"}`,
+      "",
+      `Total de plată: ${formatNumber(vechi)} lei  →  ${formatNumber(e.total)} lei`,
+      ...(avertismente.length ? ["", ...avertismente] : []),
+      "",
+      "Corectarea rămâne în istoricul recepției. Continui?"
+    ].join("\n");
+    if (!window.confirm(intrebare)) return;
+
+    try {
+      const res = await fetch(`/api/receipts/${receiptBeingCorrected.id}/correct-terms`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ payOnGrossQuantity: flag, price, reason })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Nu am putut corecta condițiile.");
+      }
+      receiptCorrectDialog.close();
+      receiptBeingCorrected = null;
+      await loadReceipts();
+    } catch (err) {
+      messageEl.textContent = err.message;
+    }
+  });
+}
 
 // Contabilul schimba DOAR furnizorul unei receptii (inline, in lista Receptii recente)
 bodyEl.addEventListener("click", (event) => {

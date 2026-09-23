@@ -545,6 +545,14 @@
               </label>
             </div>
 
+            <label class="inline-check" id="pay-on-gross-wrap" hidden>
+              <input name="payOnGrossQuantity" id="pay-on-gross-input" type="checkbox" />
+              <span>
+                <strong>Plata pe masa cu umiditate (fara scaderea apei)</strong>
+                <span class="field-hint" id="pay-on-gross-hint"></span>
+              </span>
+            </label>
+
             <details class="optional-fields">
               <summary>Detalii optionale</summary>
               <div class="split">
@@ -1483,6 +1491,44 @@
               <button type="button" class="ghost-button" id="billing-cancel-btn">Renunță</button>
             </div>
             <p class="form-message" id="billing-message"></p>
+          </form>
+        </dialog>
+
+        <dialog id="receipt-correct-dialog" class="billing-dialog">
+          <form id="receipt-correct-form" method="dialog">
+            <h3>Corectează condițiile · Recepție <span id="rc-receipt-id"></span></h3>
+            <p class="field-hint" id="rc-context"></p>
+
+            <label class="inline-check">
+              <input name="payOnGrossQuantity" id="rc-pay-on-gross" type="checkbox" />
+              <span>
+                <strong>Plata pe masa cu umiditate (fara scaderea apei)</strong>
+                <span class="field-hint" id="rc-flag-hint"></span>
+              </span>
+            </label>
+
+            <label>Preț (lei / kg)
+              <input name="price" id="rc-price" type="text" inputmode="decimal" placeholder="ex: 5 sau 5,20" />
+            </label>
+
+            <div class="billing-totals" id="rc-totals">
+              <div>Cantitate plătită: <strong id="rc-qty">0</strong> kg</div>
+              <div>Valoare marfă: <strong id="rc-gross">0,00</strong> lei</div>
+              <div>Impozit reținut: <strong id="rc-tax">0,00</strong> lei</div>
+              <div class="billing-grand">Total de plată: <strong id="rc-total">0,00</strong> lei
+                <span id="rc-delta" class="rc-delta"></span>
+              </div>
+            </div>
+
+            <label>Motivul corectării (obligatoriu)
+              <input name="reason" id="rc-reason" placeholder="Ex: înțelegere cu furnizorul, achiziție cu tot cu apă" />
+            </label>
+
+            <div class="form-actions">
+              <button type="submit" value="save">Salvează corectarea</button>
+              <button type="button" class="ghost-button" id="rc-cancel-btn">Renunță</button>
+            </div>
+            <p class="form-message" id="rc-message"></p>
           </form>
         </dialog>
 

@@ -1,6 +1,7 @@
 const {
   closeReceipt,
   completeReceiptWeighing,
+  correctReceiptTerms,
   createReceipt,
   getConfig,
   getStats,
@@ -27,7 +28,9 @@ function getBody(req) {
   return req.body || {};
 }
 
-function computeReceiptEstimate({ quantity, price, humidity, impurity, product, tariffs, fiscalProfile }) {
+function computeReceiptEstimate({
+  quantity, price, humidity, impurity, product, tariffs, fiscalProfile, payOnGrossQuantity
+}) {
   const grossQuantity = Number(quantity);
   const unitPrice = Number(price);
   const humidityNorm = Number(product.humidityNorm || 0);
@@ -48,12 +51,26 @@ function computeReceiptEstimate({ quantity, price, humidity, impurity, product, 
   const dryingTariff =
     tariffs.find((item) => item.service.toLowerCase() === "uscare" && item.active)?.value || 0;
 
+  // Intelegere comerciala: la umiditate peste norma dar in limita acceptata, se plateste
+  // cantitatea CU apa, iar uscarea nu se taxeaza. Stocul primeste tot masa FARA apa
+  // (`provisionalNetQuantity`) — in cilindru intra echivalentul uscat, ca pana acum.
+  //
+  // Se pune la loc DOAR apa, nu si impuritatile. Pe brut s-ar plati si gunoiul de peste
+  // norma, ceea ce nu a convenit nimeni; cand impuritatile sunt in norma, cele doua
+  // formule coincid oricum.
+  const payOnGross = payOnGrossQuantity === true && excessHumidity > 0;
+  const payableQuantity = payOnGross
+    ? provisionalNetQuantity + estimatedWaterLoss
+    : provisionalNetQuantity;
+
   const cleaningServiceTotal = grossQuantity * Number(cleaningTariff || 0);
-  const dryingServiceTotal = grossQuantity * excessHumidity * Number(dryingTariff || 0);
+  const dryingServiceTotal = payOnGross
+    ? 0
+    : grossQuantity * excessHumidity * Number(dryingTariff || 0);
   const preliminaryServicesTotal = cleaningServiceTotal + dryingServiceTotal;
   // Pretul e in lei/kg, cantitatea in TONE -> ×1000 pentru kg (aceeasi regula ca receiptPayableValue
   // si getReceiptEstimate din frontend; a se pastra sincronizate).
-  const preliminaryMerchandiseValue = provisionalNetQuantity * 1000 * unitPrice;
+  const preliminaryMerchandiseValue = payableQuantity * 1000 * unitPrice;
   // COSTUL marfii ramane valoarea BRUTA (integrala) = preliminaryMerchandiseValue.
   // IMPOZITUL retinut la sursa (din statutul fiscal al furnizorului; ex. persoana fizica) se calculeaza
   // pe valoarea bruta si se SCADE din datoria catre furnizor: furnizorul primeste NETUL, iar impozitul
@@ -74,6 +91,8 @@ function computeReceiptEstimate({ quantity, price, humidity, impurity, product, 
     estimatedWaterLoss,
     estimatedImpurityLoss,
     provisionalNetQuantity,
+    payOnGrossQuantity: payOnGross,
+    payableQuantity,
     cleaningServiceTotal,
     dryingServiceTotal,
     preliminaryServicesTotal,
@@ -242,7 +261,18 @@ async function createReceiptHandler(req, res) {
       return sendJson(res, 400, { error: "Impuritatile trebuie sa fie o valoare valida." });
     }
 
+    if (
+      body.payOnGrossQuantity !== undefined &&
+      body.payOnGrossQuantity !== null &&
+      typeof body.payOnGrossQuantity !== "boolean"
+    ) {
+      return sendJson(res, 400, {
+        error: "Campul „plata pe masa cu umiditate” trebuie sa fie adevarat sau fals."
+      });
+    }
+
     const estimate = computeReceiptEstimate({
+      payOnGrossQuantity: body.payOnGrossQuantity === true,
       quantity: normalizedQuantity,
       price: normalizedPrice,
       humidity: normalizedHumidity,
@@ -372,12 +402,23 @@ async function completeWeighingHandler(req, res, id) {
     const partner = config.partners.find((item) => item.id === Number(receipt.supplierId));
     const fiscalProfile = config.fiscalProfiles.find((item) => item.name === partner?.fiscalProfile);
 
+    // Normele se citesc de pe DOCUMENT, nu din nomenclatorul de acum. Intre cele doua
+    // cantariri cineva poate schimba `humidityNorm` sau sterge produsul, iar recalcularea
+    // ar rescrie retroactiv baza de plata a unei receptii deja intrate — inclusiv anuland
+    // tacit intelegerea de plata pe masa cu apa. Normele sunt inghetate la creare exact
+    // pentru asta; config-ul ramane fallback doar pentru documentele vechi, fara ele.
+    const normeDocument = {
+      humidityNorm: Number(receipt.humidityNorm ?? product?.humidityNorm ?? 0),
+      impurityNorm: Number(receipt.impurityNorm ?? product?.impurityNorm ?? 0)
+    };
+
     const estimate = computeReceiptEstimate({
+      payOnGrossQuantity: receipt.payOnGrossQuantity === true,
       quantity: quantityTons,
       price: Number(receipt.price || 0),
       humidity: Number(receipt.humidity || 0),
       impurity: Number(receipt.impurity || 0),
-      product: product || { humidityNorm: 0, impurityNorm: 0 },
+      product: normeDocument,
       tariffs: config.tariffs,
       fiscalProfile
     });
@@ -397,9 +438,79 @@ async function completeWeighingHandler(req, res, id) {
   }
 }
 
+// Corectie de conditii pe o receptie deja intrata (doar admin): bifa „plata pe masa cu
+// umiditate" si/sau pretul. Recalculam estimarea AICI, ca la creare si la a doua cantarire —
+// stratul de persistenta nu citeste nomenclatorul.
+async function correctReceiptTermsHandler(req, res, id) {
+  const body = req.body || {};
+  try {
+    const receipts = await listReceipts();
+    const receipt = receipts.find((item) => Number(item.id) === Number(id));
+    if (!receipt) {
+      return sendJson(res, 404, { error: "Receptia nu a fost gasita." });
+    }
+
+    if (
+      body.payOnGrossQuantity !== undefined &&
+      body.payOnGrossQuantity !== null &&
+      typeof body.payOnGrossQuantity !== "boolean"
+    ) {
+      return sendJson(res, 400, {
+        error: "Campul „plata pe masa cu umiditate” trebuie sa fie adevarat sau fals."
+      });
+    }
+
+    const price = body.price === undefined ? Number(receipt.price || 0) : Number(body.price);
+    if (!Number.isFinite(price) || price < 0) {
+      return sendJson(res, 400, { error: "Pretul trebuie sa fie un numar pozitiv." });
+    }
+
+    const config = await getConfig();
+    const partner = config.partners.find((item) => item.id === Number(receipt.supplierId));
+    const fiscalProfile = config.fiscalProfiles.find((item) => item.name === partner?.fiscalProfile);
+    const product = config.products.find(
+      (item) => item.id === Number(receipt.productId) || item.name === receipt.product
+    );
+    // Normele de pe DOCUMENT, nu din nomenclatorul de acum: o corectie de conditii nu are
+    // voie sa rescrie si normele dupa care s-a calculat apa la receptie.
+    const normeDocument = {
+      humidityNorm: Number(receipt.humidityNorm ?? product?.humidityNorm ?? 0),
+      impurityNorm: Number(receipt.impurityNorm ?? product?.impurityNorm ?? 0)
+    };
+
+    const estimate = computeReceiptEstimate({
+      payOnGrossQuantity: body.payOnGrossQuantity === true,
+      // Cantitatea ramane cea cantarita: se corecteaza conditiile, nu marfa.
+      quantity: Number(receipt.quantity || 0),
+      price,
+      humidity: Number(receipt.humidity || 0),
+      impurity: Number(receipt.impurity || 0),
+      product: normeDocument,
+      tariffs: config.tariffs,
+      fiscalProfile
+    });
+
+    const updated = await correctReceiptTerms(id, {
+      estimate,
+      payOnGrossQuantity: estimate.payOnGrossQuantity,
+      price,
+      reason: body.reason,
+      actorRole: req.currentUser && req.currentUser.roleCode,
+      changedBy: getActorLabel(req)
+    });
+    return sendJson(res, 200, receiptForRequest(req, updated));
+  } catch (error) {
+    console.error("Failed to correct receipt terms:", error.message);
+    return sendJson(res, error.statusCode || 400, {
+      error: error.message || "Nu am putut corecta conditiile receptiei."
+    });
+  }
+}
+
 module.exports = {
   closeReceiptHandler,
   completeWeighingHandler,
+  correctReceiptTermsHandler,
   createReceiptHandler,
   healthHandler,
   listReceiptsHandler,
