@@ -1858,11 +1858,56 @@ dialog.details-dialog { width: min(680px, 94vw); max-height: 88vh; overflow-y: a
   font-size: 0.8rem;
   border: 1px solid #d1d5db;
   background: #f9fafb;
+  /* Regula globala `button { color: white }` de mai sus facea textul alb pe fundal alb:
+     butoanele de schimbare a statutului („Inchis", „Redeschis") erau CITIBILE doar la hover.
+     Culoarea se scrie explicit aici. */
+  color: var(--ink);
+  font-weight: 600;
   border-radius: 4px;
   cursor: pointer;
 }
 .delivery-action:hover {
   background: #e5e7eb;
+}
+
+/* Randul de livrare: toate actiunile pe O SINGURA banda orizontala, care se rupe cand nu
+   incape. Inainte fiecare grup (status, tranzitii, anulare, retur, tipar) statea pe randul
+   lui, deci randul crestea in inaltime si celula impingea tabelul in latime. */
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  /* Limita se pune pe cutia din celula, nu pe <td>: tabelul isi calculeaza singur latimile
+     si ignora `max-width` pe celula. */
+  max-width: 320px;
+}
+.row-actions .cell-btn,
+.row-actions .delivery-action {
+  margin-left: 0;
+}
+.row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+/* Tabelul de livrari are 13 coloane: coloane mai stranse, ca sa incapa fara derulare laterala. */
+#deliveries-table thead th,
+#deliveries-table tbody td,
+#deliveries-table tfoot td {
+  padding: 6px 8px;
+}
+#deliveries-table .delivery-action {
+  padding: 2px 8px;
+  font-size: 0.72rem;
+}
+#deliveries-table .cell-btn,
+#deliveries-table .doc-print-btn {
+  padding: 3px 8px;
+  font-size: 0.68rem;
 }
 
 /* Sidebar responsive drawer — placed at end to override base rules */
@@ -2066,12 +2111,6 @@ dialog.details-dialog { width: min(680px, 94vw); max-height: 88vh; overflow-y: a
 .pay-anulat { background: rgba(17, 33, 26, 0.06); color: var(--muted); }
 
 /* Document print buttons in livrari (Etapa 6) */
-.doc-print-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 6px;
-}
 .doc-print-btn {
   padding: 3px 8px;
   font-size: 0.7rem;
@@ -3020,3 +3059,30 @@ dialog.details-dialog { width: min(680px, 94vw); max-height: 88vh; overflow-y: a
   color: var(--muted);
   white-space: nowrap;
 }
+
+/* Bifa „plata pe masa cu umiditate" de pe formularul de receptie. E o intelegere
+   comerciala, nu un camp tehnic: se vede din prima, nu ascunsa in detalii optionale. */
+.inline-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--border, #d8dee9);
+  border-radius: 10px;
+  background: rgba(240, 173, 78, 0.08);
+  cursor: pointer;
+}
+.inline-check input[type="checkbox"] {
+  width: auto;
+  margin-top: 0.15rem;
+  flex: 0 0 auto;
+}
+.inline-check .field-hint {
+  display: block;
+  margin-top: 0.2rem;
+}
+
+/* Delta din dialogul de corectare a conditiilor: cat creste sau scade datoria. */
+.rc-delta { font-weight: 600; margin-left: 0.4rem; font-size: 0.9em; }
+.rc-delta.rc-up { color: #b3261e; }
+.rc-delta.rc-down { color: #1b6e3c; }

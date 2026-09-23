@@ -164,6 +164,106 @@ introducă. Îl creează în status **`Proiect`**.
 - **Nu ascunde un rând negativ.** Se afișează tot ce nu e zero. Un minus ascuns rămâne fără
   butonul „Corectează" — vizibil în „Mișcarea stocului", imposibil de închis din „Stoc".
 
+### 9. Plata pe masa cu umiditate (`payOnGrossQuantity`)
+Când umiditatea depășește norma, înțelegerea poate fi ca furnizorul să fie plătit pe marfa
+**cu apă**, la prețul convenit, iar uscarea să nu se taxeze. Marfa fizică rămâne aceeași:
+apa tot se evaporă.
+- **Stocul NU se atinge.** `provisionalNetQuantity` (masa fără apă) intră în cilindru exact ca
+  înainte. Flagul schimbă DOAR banii. Dacă vreodată îl legi de stoc, ai inventat marfă care
+  nu există — cântarul de la ieșire o va contrazice.
+- Se pune la loc **doar apa**, nu și impuritățile: `payableQuantity =
+  provisionalNetQuantity + estimatedWaterLoss`. **Nu folosi `grossQuantity`** — brutul
+  conține și gunoiul peste normă, iar nimeni n-a convenit să plătească pământ ca marfă.
+  Când impuritățile sunt în normă cele două formule coincid, deci greșeala nu se vede la
+  primul test; se vede pe marfa murdară.
+- `dryingServiceTotal` devine **0**. Merge împreună cu cele de mai sus: dacă plătești apa
+  ca marfă, nu mai încasezi și uscarea ei.
+- **Nu există prag de umiditate.** Bifa ESTE regula: dacă e pusă, se plătește marfa cu tot
+  cu apă, oricât ar fi excesul; dacă nu e pusă, apa se scoate din calcul. Decizia e a omului,
+  nu a unei constante. (A existat un prag de 4 p.p. — a fost scos deliberat, nu uitat.)
+- Fiindcă nu există prag care să oprească o greșeală, apărarea e **confirmarea explicită**:
+  la bifare aplicația arată excesul de umiditate și kilogramele de apă plătite ca marfă, iar
+  omul trebuie să apese OK. Refuzul debifează. Debifarea nu cere confirmare — întoarcerea la
+  regula obișnuită nu e o decizie de bani. Fereastra conține **doar ce e specific acestei
+  decizii**: că în stoc intră masa fără apă e o regulă permanentă, nu ceva ce schimbă bifa,
+  deci nu se repetă acolo.
+- Textele din fereastră se traduc prin `bi()` pe **textul exact afișat, cu diacritice**.
+  „Umiditate peste norma" și „Umiditate peste normă" sunt chei diferite în `i18n-ru.js` —
+  o nepotrivire nu dă eroare, doar lasă textul netradus pentru operator.
+- Fără apă în exces flagul **nu se înregistrează** (nu există ce pune înapoi), în backend și
+  în frontend deopotrivă. Altfel ar rămâne recepții marcate „plătit cu apă" fără nicio apă.
+- **Implicit e NEBIFAT** = comportamentul dinainte (plata pe masa fără apă). Așa o recepție
+  veche, sau una unde nimeni n-a atins bifa, dă exact aceeași sumă ca înainte de regula asta.
+- Formula e **duplicată** în `getReceiptEstimate` din `public/app.js` (vezi regula 2). Se
+  schimbă în AMBELE locuri.
+- Cantitatea pe care se calculează banii are o **sursă unică**: `receiptPayableTonnes()` din
+  `src/local-storage.js`, folosită de valoarea recepției, de corecția manuală de sumă și de
+  extrasul de cont al furnizorului. Oglinda ei în frontend e `actReceiptFigures()`. Când
+  fiecare calcula pe cont propriu, actul semnat de furnizor arăta o sumă mai mică decât
+  datoria înregistrată, iar pe extras `cantitate × preț ≠ sumă`. Orice loc nou care
+  înmulțește cantitate cu preț le folosește.
+- Actul de achiziție se tipărește din **două** locuri (`buildPurchaseActHtml` din „Documente
+  tipar" și `buildPurchaseActPrintHtml` din Livrări). Amândouă trec prin `actReceiptFigures` —
+  a doua a avut o clipă formula copiată inline și cele două acte ale aceleiași recepții au
+  arătat cantități și prețuri unitare diferite, deși totalul coincidea. Nu o copia a treia oară.
+- Flagul se **persistă pe recepție**, nu se recalculează din context. Peste un an suma trebuie
+  să rămână explicabilă; `receiptPayableValue` folosește aceeași bază la fallback.
+- La cântarul în 2 pași flagul se citește de pe **recepție**, nu din body-ul celei de-a doua
+  cântăriri — ca prețul și umiditatea. Înțelegerea se ia la intrare, nu la ieșirea de sub pod.
+  Atenție: `ESTIMATE_FIELDS` din `completeReceiptWeighing` trece totul prin `sanitizeNumber`,
+  deci flagul (boolean) **nu se pune în listă**.
+- Tot la a doua cântărire, normele se citesc **de pe document** (`receipt.humidityNorm` /
+  `impurityNorm`), nu din nomenclatorul de atunci. Sunt înghețate la creare tocmai ca o
+  schimbare de normă între cele două cântăriri să nu rescrie retroactiv baza de plată.
+- Bifa apare în formular **doar când umiditatea depășește norma** și se debifează singură dacă
+  excesul dispare. O bifă fără efect e o invitație la greșeli.
+- Rândul recepției poartă badge-ul „plătit cu apă" lângă coloana de apă eliminată: altfel suma
+  nu se poate explica din cifrele de pe rând.
+- **Bifa se pune la creare**, de cine creează recepția (inclusiv operatorul): el e la cântar,
+  el vorbește cu șoferul. Compensația e confirmarea explicită plus auditul. Operatorul NU are
+  voie să modifice recepția ulterior: furnizorul și suma sunt rezervate contabilului/managerului,
+  închiderea și redeschiderea managerului, anularea și corectarea de condiții adminului.
+  Nu-i da operatorului o cale de editare „pentru comoditate" — ar ocoli confirmarea în două cereri.
+- **Corectarea ulterioară există, dar e a adminului** (`correctReceiptTerms`, rută
+  `PATCH /api/receipts/:id/correct-terms`). Înțelegerea se află uneori după ce marfa a fost
+  descarcată — furnizorul spune abia la decontare că achiziția a fost cu tot cu apă, sau
+  prețul n-a fost completat la cântar.
+  - Se corectează **intrările** (bifa, prețul), iar sumele se **recalculează** după aceeași
+    formulă ca la creare. Diferență față de `updateReceiptAmount` (✎), care scrie o sumă la
+    liber și deduce prețul din ea. Aici documentul rămâne aritmetic închis: cantitate × preț
+    = sumă, pe act și pe extras. Nu le confunda și nu le unifica.
+  - **Cantitatea și umiditatea nu se ating**, deci stocul nu se mișcă. Garanția nu e o
+    presupunere: `correctReceiptTerms` **aruncă** dacă recalculul ar da altă
+    `provisionalNetQuantity` decât cea stocată. `RECALCULATED` conține doar câmpuri de bani.
+  - **Tot ce s-a înghețat la recepție se citește de pe document**, nu din nomenclatorul de
+    acum: normele, **tarifele** (`cleaningTariff`/`dryingTariff`, persistate la creare) și
+    **cota de reținere la sursă**. Altfel o corectare de preț rescrie retroactiv o cifră
+    fiscală, iar adminul confirmă o sumă în timp ce serverul salvează alta.
+  - Previzualizarea din dialog (`rcEstimate`) e a cincea copie a formulei și **trebuie să dea
+    exact ce salvează serverul** — confirmarea e singurul control uman al operației. Folosește
+    aceleași surse: cantitatea, apa și cota de pe document.
+  - Refuzuri: datoria nu poate coborî sub cât s-a achitat deja (storno de plată întâi —
+    același precedent ca returul pe livrare cu încasări), plafon de sanitate pe sumă,
+    `payOnGrossQuantity` lipsă din body **păstrează** valoarea curentă (altfel un apel care
+    voia doar prețul ar scoate tăcut bifa).
+  - `termCorrections` e în `FINANCIAL_RECEIPT_FIELDS` — conține prețuri și sume, deci nu
+    pleacă prin API către operator și `control`. Pe document se păstrează ultimele 20;
+    istoricul complet rămâne în audit.
+  - Statutul de plată **nu se scrie** aici: se derivă la citire în `listReceipts` (FIFO pe
+    partener). Scris pe document ar fi greșit pentru o recepție stinsă printr-o plată făcută
+    pe altă recepție a aceluiași furnizor — și ar intra așa în audit.
+  - Motiv obligatoriu; istoricul stă **pe document** în `termCorrections` (bifă veche/nouă,
+    preț vechi/nou, sumă veche/nouă, cine, când, de ce) și se vede în „Detalii recepție",
+    nu doar în Audit. Rândul poartă badge-ul „corectat".
+  - Refuzată pe `Anulat`, pe `Inchis` (se redeschide întâi) și pe `In descarcare`.
+  - `paymentStatus` se recitește față de suma nouă — altfel o recepție rămâne „Achitat"
+    după ce datoria a crescut.
+- Celelalte scrieri pe o recepție existentă: **statusul** (mărginit de
+  `assertStatusChangePermission` + `assertReceiptStatusTransition`, cu motiv obligatoriu) și
+  **a doua cântărire**, care rulează o singură dată — nu se intră manual în „In descarcare" și
+  nu se iese din ea decât spre „Anulat". Dacă adaugi altă rută de editare, reverifică:
+  `receiptPayableTonnes` se încrede orbește în flagul stocat.
+
 ## Deploy
 - **Push pe `main` → Vercel publică automat** pe agroprofit-plus.vercel.app (integrare Git activă).
 - Lucrează pe o **ramură separată** (implicit `dev`), testează pe preview, apoi fă merge în `main`.
