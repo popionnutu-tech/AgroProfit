@@ -1735,6 +1735,14 @@ function receiptPayableValue(r) {
   return tonnes > 0 && priceKg > 0 ? Number((tonnes * 1000 * priceKg).toFixed(2)) : 0;
 }
 
+// Un singur document, BRUT, fara agregarile din `listReceipts` (alocare FIFO a platilor,
+// clonarea tuturor receptiilor, sortari). Pentru handlerele care au nevoie doar de campuri
+// de pe document: `listReceipts` costa de ordinul a 165x mai mult si arunca tot ce construieste.
+function getReceiptRaw(id) {
+  const state = readReceiptsState();
+  return (state.receipts || []).find((item) => item.id === Number(id)) || null;
+}
+
 async function listReceipts() {
   const state = readReceiptsState();
   const receiptById = new Map();
@@ -2019,6 +2027,9 @@ async function createReceipt(payload) {
     dryingServiceTotal: sanitizeNumber(payload.dryingServiceTotal),
     preliminaryServicesTotal: sanitizeNumber(payload.preliminaryServicesTotal),
     preliminaryMerchandiseValue: sanitizeNumber(payload.preliminaryMerchandiseValue),
+    // Tarifele aplicate la ACEASTA receptie, inghetate pe document ca normele de produs.
+    cleaningTariff: sanitizeNumber(payload.cleaningTariff),
+    dryingTariff: sanitizeNumber(payload.dryingTariff),
     // Intelegerea comerciala de pe ACEASTA receptie: s-a platit masa cu apa (fara scaderea
     // umiditatii peste norma) si nu s-a taxat uscarea. Se pastreaza pe document ca suma sa
     // fie explicabila si reproductibila mai tarziu.
@@ -2087,7 +2098,10 @@ async function completeReceiptWeighing(id, payload = {}) {
     "excessHumidity", "excessImpurity", "estimatedWaterLoss", "estimatedImpurityLoss",
     "provisionalNetQuantity", "cleaningServiceTotal", "dryingServiceTotal",
     "preliminaryServicesTotal", "preliminaryMerchandiseValue", "withholdingPercent",
-    "withholdingAmount", "preliminaryPayableAmount"
+    "withholdingAmount", "preliminaryPayableAmount",
+    // Tarifele de atunci, inghetate ca normele de produs: o corectare de peste luni nu are
+    // voie sa recalculeze serviciile cu tarifele de azi.
+    "cleaningTariff", "dryingTariff"
   ];
 
   receipt.tareWeight = sanitizeNumber(payload.tareWeight);
@@ -3961,8 +3975,13 @@ async function correctReceiptTerms(id, payload = {}) {
   if (receipt.status === "In descarcare") {
     throw new Error("Receptia asteapta a doua cantarire. Finalizeaz-o intai.");
   }
+  // Un proiect nu e in stoc si nu are datorie — nu are ce conditii sa i se corecteze
+  // (regula 7). Sursa unica, ca peste tot.
+  if (!isReceiptInStock(receipt)) {
+    throw new Error("Receptia nu e in stoc (proiect/anulata). Nu se pot corecta conditiile.");
+  }
 
-  const reason = String(payload.reason || "").trim();
+  const reason = String(payload.reason || "").trim().slice(0, 200);
   if (!reason) {
     throw new Error("Motivul este obligatoriu la corectarea conditiilor.");
   }
@@ -3979,22 +3998,52 @@ async function correctReceiptTerms(id, payload = {}) {
   };
 
   const newFlag = payload.payOnGrossQuantity === true;
+  if (typeof payload.price !== "number" && typeof payload.price !== "string") {
+    throw new Error("Pretul trebuie sa fie un numar.");
+  }
   const newPrice = sanitizeNumber(payload.price);
   if (!(newPrice >= 0)) {
     throw new Error("Pretul trebuie sa fie un numar pozitiv.");
+  }
+  // Acelasi plafon de sanitate ca la corectia manuala de suma: o tastare gresita nu are
+  // voie sa produca o datorie de ordinul miliardelor.
+  if (Number(estimate.preliminaryPayableAmount || 0) > 1000000000) {
+    throw new Error("Suma rezultata este nerealist de mare. Verifica pretul.");
+  }
+  // STOCUL nu are voie sa se miste. In fluxul normal recalculul da exact aceeasi cantitate
+  // (marfa si umiditatea nu se schimba); daca difera, documentul nu mai respecta formula —
+  // atunci cade ZGOMOTOS, nu muta tacit stocul (acelasi principiu ca la createStockSummary).
+  const stocVechi = Math.round(Number(receipt.provisionalNetQuantity || 0) * 1000);
+  const stocNou = Math.round(Number(estimate.provisionalNetQuantity || 0) * 1000);
+  if (stocVechi !== stocNou) {
+    throw new Error(
+      `Corectarea ar schimba cantitatea din stoc (${stocVechi} kg -> ${stocNou} kg). Refuzat: o corectare de conditii nu atinge marfa.`
+    );
   }
   if (newFlag === oldValue.payOnGrossQuantity && newPrice === oldValue.price) {
     throw new Error("Nu s-a schimbat nimic: aceeasi bifa si acelasi pret.");
   }
 
+  // Datoria nu poate cobori sub cat s-a achitat deja: restul ar deveni 0, receptia ar aparea
+  // „Achitat", iar banii dati in plus ar disparea din evidenta. Ordinea corecta e storno de
+  // plata intai, corectare dupa — acelasi precedent ca la retur pe livrare cu incasari.
+  const dejaAchitat = Number(receipt.paidAmount || 0);
+  const sumaNoua = Number(estimate.preliminaryPayableAmount || 0);
+  if (dejaAchitat > 0 && sumaNoua < dejaAchitat) {
+    throw new Error(
+      `Pe receptie s-au achitat deja ${dejaAchitat.toFixed(2)} lei, iar corectarea ar cobori datoria la ${sumaNoua.toFixed(2)} lei. Storneaza plata intai.`
+    );
+  }
+
   receipt.payOnGrossQuantity = newFlag;
   receipt.price = newPrice;
   // Aceleasi campuri ca la creare, ca documentul sa nu ramana cu jumatati din calculul vechi.
+  // DOAR bani. Campurile de STOC (`provisionalNetQuantity`, apa, impuritatile) si cele
+  // inghetate la receptie (norme, tarife, procentul de retinere) NU se rescriu: o corectie
+  // de conditii schimba pretul si baza de plata, nu marfa si nu istoria.
   const RECALCULATED = [
-    "excessHumidity", "excessImpurity", "estimatedWaterLoss", "estimatedImpurityLoss",
-    "provisionalNetQuantity", "cleaningServiceTotal", "dryingServiceTotal",
-    "preliminaryServicesTotal", "preliminaryMerchandiseValue", "withholdingPercent",
-    "withholdingAmount", "preliminaryPayableAmount"
+    "cleaningServiceTotal", "dryingServiceTotal", "preliminaryServicesTotal",
+    "preliminaryMerchandiseValue", "withholdingAmount", "preliminaryPayableAmount"
   ];
   for (const field of RECALCULATED) {
     if (estimate[field] !== undefined) {
@@ -4002,11 +4051,7 @@ async function correctReceiptTerms(id, payload = {}) {
     }
   }
 
-  // Suma tinta s-a schimbat, deci statutul de plata trebuie recitit fata de ea — altfel o
-  // receptie ramane „Achitat integral" dupa ce datoria a crescut.
-  const paid = Number(receipt.paidAmount || 0);
   const target = Number(receipt.preliminaryPayableAmount || 0);
-  receipt.paymentStatus = paid <= 0 ? "Neachitat" : paid < target ? "Partial" : "Achitat";
 
   const now = new Date().toISOString();
   // Istoricul ramane PE DOCUMENT, nu doar in audit: cine deschide receptia peste un an
@@ -4016,6 +4061,9 @@ async function correctReceiptTerms(id, payload = {}) {
     at: now,
     by: payload.changedBy || "dashboard",
     reason,
+    // Daca suma fusese pusa manual cu ✎, corectarea o inlocuieste — se consemneaza, altfel
+    // pe document raman doua justificari care se contrazic.
+    replacedManualAmount: Array.isArray(receipt.amountCorrections) && receipt.amountCorrections.length > 0,
     oldPayOnGrossQuantity: oldValue.payOnGrossQuantity,
     newPayOnGrossQuantity: newFlag,
     oldPrice: oldValue.price,
@@ -4023,6 +4071,11 @@ async function correctReceiptTerms(id, payload = {}) {
     oldAmount: oldValue.preliminaryPayableAmount,
     newAmount: target
   });
+  // Istoricul complet ramane in audit; pe documentul citit la fiecare cerere pastram
+  // ultimele intrari, ca sa nu creasca nelimitat blobul trimis la fiecare `/api/receipts`.
+  if (receipt.termCorrections.length > 20) {
+    receipt.termCorrections = receipt.termCorrections.slice(-20);
+  }
   receipt.updatedAt = now;
 
   createAuditEntry(state, {
@@ -4035,8 +4088,7 @@ async function correctReceiptTerms(id, payload = {}) {
     newValue: {
       payOnGrossQuantity: newFlag,
       price: newPrice,
-      preliminaryPayableAmount: target,
-      paymentStatus: receipt.paymentStatus
+      preliminaryPayableAmount: target
     }
   });
 
@@ -5811,6 +5863,7 @@ module.exports = {
   completeReceiptWeighing,
   updateReceiptSupplier,
   correctReceiptTerms,
+  getReceiptRaw,
   updateReceiptAmount,
   updateSystemSettings,
   updateTransaction,
