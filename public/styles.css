@@ -1878,13 +1878,13 @@ dialog.details-dialog { width: min(680px, 94vw); max-height: 88vh; overflow-y: a
   flex-wrap: wrap;
   align-items: center;
   gap: 4px;
+  /* Limita se pune pe cutia din celula, nu pe <td>: tabelul isi calculeaza singur latimile
+     si ignora `max-width` pe celula. */
+  max-width: 320px;
 }
 .row-actions .cell-btn,
 .row-actions .delivery-action {
   margin-left: 0;
-}
-.row-actions-cell {
-  max-width: 320px;
 }
 .row-meta {
   display: flex;
@@ -2111,12 +2111,6 @@ dialog.details-dialog { width: min(680px, 94vw); max-height: 88vh; overflow-y: a
 .pay-anulat { background: rgba(17, 33, 26, 0.06); color: var(--muted); }
 
 /* Document print buttons in livrari (Etapa 6) */
-.doc-print-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 6px;
-}
 .doc-print-btn {
   padding: 3px 8px;
   font-size: 0.7rem;

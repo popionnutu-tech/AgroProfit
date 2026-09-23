@@ -1647,176 +1647,53 @@ document.addEventListener("click", (e) => {
   printReportTable(btn.dataset.table, btn.dataset.title || "Raport");
 });
 
-function renderStockPeriod() {
-  const body = document.getElementById("stock-period-body");
-  if (!body) return;
-  const fromEl = document.getElementById("stock-period-from");
-  const toEl = document.getElementById("stock-period-to");
-  const from = fromEl && fromEl.value ? fromEl.value : "";
-  const to = toEl && toEl.value ? toEl.value : "";
-
-  const dayOf = (iso) => String(iso || "").slice(0, 10);
-  const products = new Set();
-
-  // Opening stock (counts as stoc inițial, always before any period).
-  // Sursa: summary-ul de stoc (openingByProduct), independent de rol — astfel „stoc inițial"
-  // apare la TOȚI cei cu drept de stoc (inclusiv operatorul). Nu folosim openingDocumentsCache,
-  // care e gol pentru cine nu are opening-read (financiar).
-  const opening = {};
-  const openingByProduct = (lastStockSummary && lastStockSummary.openingByProduct) || {};
-  Object.keys(openingByProduct).forEach((p) => {
-    products.add(p);
-    opening[p] = (opening[p] || 0) + Number(openingByProduct[p] || 0);
-  });
-
-  const inPeriod = (day) => (!from || day >= from) && (!to || day <= to);
-  const recBefore = {}, recIn = {};
-  const procBefore = {}, procIn = {};
-  const delBefore = {}, delIn = {};
-  const corrBefore = {}, corrIn = {};
-  const bucket = (beforeObj, inObj, p, day, qty) => {
-    // Acceptă și valori NEGATIVE: un retur scade dintr-o ieșire, la ziua lui.
-    if (!qty) return;
-    if (from && day < from) beforeObj[p] = (beforeObj[p] || 0) + qty;
-    else if (inPeriod(day)) inObj[p] = (inObj[p] || 0) + qty;
-  };
-
-  // Receptii (cantitate bruta de intrare) + pierderi de la procesarile vechi (receptie procesata)
-  (receiptsCache || []).forEach((r) => {
-    if (!isReceiptInStock(r)) return;
-    const p = r.product || "—";
-    products.add(p);
-    const provNet = Number(r.provisionalNetQuantity || r.quantity || 0);
-    const day = dayOf(r.createdAt || r.receivedAt);
-    bucket(recBefore, recIn, p, day, provNet);
-    const finalNet = r.finalNetQuantity != null ? Number(r.finalNetQuantity) : provNet;
-    bucket(procBefore, procIn, p, day, Math.max(provNet - finalNet, 0));
-  });
-
-  // Livrări: ce a ieșit REAL din stoc LA DATA LIVRĂRII — cantitatea BRUTĂ, dinainte de
-  // retururi. `deliveredQuantity` e micșorat de retur, deci singur ar rescrie retroactiv ziua
-  // livrării (marfa ar apărea ca și cum n-ar fi plecat niciodată în zilele dintre livrare și
-  // retur). Returul intră mai jos, ca intrare datată la ziua descărcării.
-  (deliveriesCache || []).forEach((d) => {
-    if (!d || d.status === "Anulat") return; // anularea șterge complet mișcarea
-    const p = d.product || "—";
-    products.add(p);
-    const gross = Number(d.deliveredQuantity || 0) + Number(d.returnedQuantity || 0);
-    if (gross > 0) bucket(delBefore, delIn, p, dayOf(d.deliveredAt || d.createdAt), gross);
-    // Descărcările se scad din ieșiri, fiecare la ziua ei reală.
-    const entries = Array.isArray(d.returns) && d.returns.length > 0
-      ? d.returns
-      : (Number(d.returnedQuantity || 0) > 0
-          ? [{ quantity: Number(d.returnedQuantity), returnedAt: d.returnedAt || d.createdAt }]
-          : []);
-    entries.forEach((e) => {
-      const qty = Number(e.quantity || 0);
-      if (qty > 0) bucket(delBefore, delIn, p, dayOf(e.returnedAt || d.createdAt), -qty);
-    });
-  });
-
-  // Corecții de inventar: adminul a numărat fizic și a așezat stocul la realitate.
-  // FĂRĂ ele, acest tabel ar arăta alt total decât „Stoc pe locații" de deasupra — exact
-  // divergența pe care regula 8 din CLAUDE.md o interzice. Semnul e al deltei: negativ =
-  // pierdere recunoscută, pozitiv = plus la inventar.
-  (stockCorrectionsCache || []).forEach((cr) => {
-    const p = cr.product || "—";
-    products.add(p);
-    bucket(corrBefore, corrIn, p, dayOf(cr.createdAt), Number(cr.delta || 0));
-  });
-
-  // Pierderi la procesarile noi (model miscare): intrare − iesire = deseu + apa.
-  (processingsCache || []).forEach((pr) => {
-    if (!pr || pr.movement !== true) return;
-    if (pr.status === "Anulat" || pr.status === "In lucru") return;
-    const p = pr.product || "—";
-    products.add(p);
-    // ACEEAȘI formulă ca în `createStockSummary` (backend). Erau două lanțuri de rezervă
-    // diferite pentru aceeași mărime: aici `outputQuantity ?? finalNetQuantity ?? 0`, acolo
-    // `outputQuantity ?? (intrare − deșeu − apă)`. Când `outputQuantity` lipsea, cele două
-    // ecrane calculau pierderi diferite pentru același document.
-    const input = Number(pr.processedQuantity || 0);
-    const output = Number(
-      pr.outputQuantity ??
-        Math.max(input - Number(pr.confirmedWaste || 0) - Number(pr.waterRemoved || 0), 0)
-    );
-    const loss = Math.max(input - output, 0);
-    bucket(procBefore, procIn, p, dayOf(pr.createdAt), loss);
-  });
-
-  const prodFilterEl = document.getElementById("stock-period-product");
-  const prodFilter = prodFilterEl ? prodFilterEl.value : "";
-  const rows = Array.from(products)
-    .filter((p) => !prodFilter || p === prodFilter)
-    .sort((a, b) => String(a).localeCompare(String(b), "ro"));
-  if (!rows.length) {
-    body.innerHTML = '<tr><td colspan="7" class="empty-state">Nu există date pentru perioada aleasă.</td></tr>';
-    return;
-  }
-  let tInit = 0, tRec = 0, tProc = 0, tDel = 0, tCorr = 0, tFin = 0;
-  body.innerHTML = rows.map((p) => {
-    const init = (opening[p] || 0) + (recBefore[p] || 0) - (delBefore[p] || 0)
-      - (procBefore[p] || 0) + (corrBefore[p] || 0);
-    const rec = recIn[p] || 0;
-    const proc = procIn[p] || 0;
-    const del = delIn[p] || 0;
-    const corr = corrIn[p] || 0;
-    const fin = init + rec - proc - del + corr;
-    tInit += init; tRec += rec; tProc += proc; tDel += del; tCorr += corr; tFin += fin;
-    return `<tr>
-      <td>${p}</td>
-      <td>${kgNum(init)}</td>
-      <td>${kgNum(rec)}</td>
-      <td>${kgNum(proc)}</td>
-      <td>${kgNum(del)}</td>
-      <td>${corr ? `<b>${kgNum(corr)}</b>` : "—"}</td>
-      <td><b>${kgNum(fin)}</b></td>
-    </tr>`;
-  }).join("") + `
-    <tr class="totals-row">
-      <td>TOTAL</td>
-      <td>${kgNum(tInit)}</td>
-      <td>${kgNum(tRec)}</td>
-      <td>${kgNum(tProc)}</td>
-      <td>${kgNum(tDel)}</td>
-      <td><b>${kgNum(tCorr)}</b></td>
-      <td>${kgNum(tFin)}</td>
-    </tr>`;
-  renderStockPeriodByLocation();
+function kgRound(value) {
+  // Aceeasi rotunjire ca `createStockSummary` (backend): la KILOGRAM, la sursa, cu `-0`
+  // normalizat. Altfel „Stoc pe locatii" si tabelele de miscare pornesc de la numere
+  // diferite pentru aceeasi realitate (regula 8 din CLAUDE.md).
+  return Math.round(Number(value || 0) * 1000) / 1000 + 0;
 }
 
-
-// Aceleasi miscari ca `renderStockPeriod`, dar desfasurate pe LOCATIE. Perechea de fata a
-// ecranului „Stoc pe locatii": acolo se vede soldul de acum, aici de unde a venit si unde a
-// plecat marfa in perioada aleasa. Formulele sunt cele din `createStockSummary` (backend):
-// receptia intra in locatia ei, transferul si procesarea muta intre locatii, livrarea se
-// scade DOAR din locatia ei, returul se crediteaza acolo unde s-a descarcat fizic.
-// Pierderea la procesare NU are coloana proprie pentru procesarile-miscare: ea e chiar
-// diferenta dintre „Iesit mutari" (intrarea in utilaj) si „Intrat mutari" (iesirea din el).
-// Coloana „Pierderi proc." numara doar pierderea din receptiile de model vechi (net final
-// mai mic decat cel provizoriu), care apartine locatiei receptiei.
-function renderStockPeriodByLocation() {
-  const body = document.getElementById("stock-period-loc-body");
-  if (!body) return;
-  const fromEl = document.getElementById("stock-period-loc-from");
-  const toEl = document.getElementById("stock-period-loc-to");
+// SURSA UNICA a celor doua tabele de miscare a stocului (pe produs si pe locatie).
+// Oglindeste `createStockSummary` din backend: receptia intra in locatia ei, transferul si
+// procesarea muta marfa intre locatii, livrarea se scade DOAR din locatia ei (iesirea BRUTA,
+// la ziua livrarii), returul se crediteaza la ziua si locatia descarcarii, iar corectiile de
+// inventar intra la ziua lor. Formulele au fost o vreme copiate in doua locuri; orice
+// divergenta intre ele insemna doua ecrane cu cifre diferite, fara explicatie.
+//
+// `before` = tot ce s-a intamplat INAINTE de perioada (formeaza stocul initial),
+// `now` = miscarile din perioada. Campuri: rec (receptii + sold initial), in/out (mutari
+// prin transfer sau procesare), del (livrari, minus retururi), loss (pierderea receptiilor
+// de model vechi), corr (corectii de inventar).
+function collectStockMovements(groupBy) {
+  const byLocation = groupBy === "location";
+  const fromEl = document.getElementById(byLocation ? "stock-period-loc-from" : "stock-period-from");
+  const toEl = document.getElementById(byLocation ? "stock-period-loc-to" : "stock-period-to");
   const from = fromEl && fromEl.value ? fromEl.value : "";
   const to = toEl && toEl.value ? toEl.value : "";
 
   const dayOf = (iso) => String(iso || "").slice(0, 10);
-  const normLoc = (v) => String(v || "Fara locatie").trim().toLowerCase();
   const inPeriod = (day) => (!from || day >= from) && (!to || day <= to);
+  const normCache = new Map();
+  const normLoc = (v) => {
+    const raw = String(v || "Fara locatie");
+    let out = normCache.get(raw);
+    if (out === undefined) {
+      out = raw.trim().toLowerCase();
+      normCache.set(raw, out);
+    }
+    return out;
+  };
 
-  // O linie per locatie+produs. `before` = inainte de perioada (intra in stocul initial),
-  // `now` = in perioada.
   const lines = new Map();
   const line = (location, product) => {
-    const key = `${normLoc(location)}::${product}`;
+    const prod = product || "—";
+    const key = byLocation ? `${normLoc(location)}::${prod}` : prod;
     let row = lines.get(key);
     if (!row) {
       row = {
         location: String(location || "Fara locatie").trim() || "Fara locatie",
-        product,
+        product: prod,
         before: { rec: 0, in: 0, out: 0, del: 0, loss: 0, corr: 0 },
         now: { rec: 0, in: 0, out: 0, del: 0, loss: 0, corr: 0 }
       };
@@ -1825,27 +1702,37 @@ function renderStockPeriodByLocation() {
     return row;
   };
   const add = (location, product, field, day, qty) => {
-    if (!product || !qty) return;
+    // Accepta si valori NEGATIVE: un retur scade dintr-o iesire, la ziua lui.
+    if (!qty) return;
     const row = line(location, product);
     if (from && day < from) row.before[field] += qty;
     else if (inPeriod(day)) row.now[field] += qty;
   };
 
-  // Sold initial (documentul de sold): mereu inainte de orice perioada.
-  const openingByLocation = (lastStockSummary && lastStockSummary.openingByLocation) || {};
-  Object.keys(openingByLocation).forEach((key) => {
-    const idx = key.lastIndexOf("::");
-    if (idx < 0) return;
-    const location = key.slice(0, idx);
-    const product = key.slice(idx + 2);
-    line(location, product).before.rec += Number(openingByLocation[key] || 0);
-  });
+  // Sold initial (documentul de sold): mereu inaintea oricarei perioade. Sursa e summary-ul
+  // de stoc, independent de rol — asa „stoc initial" apare la toti cei cu drept de stoc
+  // (inclusiv operatorul, care NU are opening-read financiar).
+  if (byLocation) {
+    const openingByLocation = (lastStockSummary && lastStockSummary.openingByLocation) || {};
+    Object.keys(openingByLocation).forEach((key) => {
+      const idx = key.lastIndexOf("::");
+      if (idx < 0) return;
+      line(key.slice(0, idx), key.slice(idx + 2)).before.rec += Number(openingByLocation[key] || 0);
+    });
+  } else {
+    const openingByProduct = (lastStockSummary && lastStockSummary.openingByProduct) || {};
+    Object.keys(openingByProduct).forEach((product) => {
+      line("", product).before.rec += Number(openingByProduct[product] || 0);
+    });
+  }
 
   (receiptsCache || []).forEach((r) => {
     if (!isReceiptInStock(r)) return;
     const provNet = Number(r.provisionalNetQuantity || r.quantity || 0);
     const day = dayOf(r.createdAt || r.receivedAt);
     add(r.location, r.product, "rec", day, provNet);
+    // Receptii de model vechi: procesarea a fost scrisa pe receptie (net final sub cel
+    // provizoriu), deci pierderea apartine locatiei receptiei.
     const finalNet = r.finalNetQuantity != null ? Number(r.finalNetQuantity) : provNet;
     add(r.location, r.product, "loss", day, Math.max(provNet - finalNet, 0));
   });
@@ -1862,6 +1749,9 @@ function renderStockPeriodByLocation() {
   (processingsCache || []).forEach((pr) => {
     if (!pr || pr.movement !== true) return;
     if (pr.status === "Anulat" || pr.status === "In lucru") return;
+    // ACEEASI formula ca in `createStockSummary`: cand `outputQuantity` lipseste, iesirea e
+    // intrarea minus deseul si apa. Doua lanturi de rezerva diferite pentru aceeasi marime
+    // au facut candva ca doua ecrane sa arate pierderi diferite pentru acelasi document.
     const input = Number(pr.processedQuantity || 0);
     const output = Number(
       pr.outputQuantity ??
@@ -1873,7 +1763,10 @@ function renderStockPeriodByLocation() {
   });
 
   (deliveriesCache || []).forEach((d) => {
-    if (!d || d.status === "Anulat") return;
+    if (!d || d.status === "Anulat") return; // anularea sterge complet miscarea
+    // Iesirea BRUTA, la ziua livrarii. `deliveredQuantity` singur e micsorat de retur, deci
+    // ar rescrie retroactiv ziua livrarii: marfa ar parea ca n-a plecat niciodata in zilele
+    // dintre livrare si descarcare.
     const gross = Number(d.deliveredQuantity || 0) + Number(d.returnedQuantity || 0);
     add(d.location, d.product, "del", dayOf(d.deliveredAt || d.createdAt), gross);
     const entries = Array.isArray(d.returns) && d.returns.length > 0
@@ -1887,24 +1780,82 @@ function renderStockPeriodByLocation() {
     });
   });
 
+  // Corectii de inventar: adminul a numarat fizic si a asezat stocul la realitate. FARA ele,
+  // tabelele ar arata alt total decat „Stoc pe locatii" — exact divergenta interzisa de
+  // regula 8. Semnul e al deltei: negativ = pierdere recunoscuta, pozitiv = plus la inventar.
   (stockCorrectionsCache || []).forEach((cr) => {
     add(cr.location, cr.product, "corr", dayOf(cr.createdAt), Number(cr.delta || 0));
   });
 
+  // Stocul de la care porneste perioada si cel cu care se incheie. Ambele rotunjite la kg,
+  // ca in backend.
+  lines.forEach((row) => {
+    row.init = kgRound(row.before.rec + row.before.in - row.before.out - row.before.del
+      - row.before.loss + row.before.corr);
+    row.fin = kgRound(row.init + row.now.rec + row.now.in - row.now.out - row.now.del
+      - row.now.loss + row.now.corr);
+  });
+  return lines;
+}
+
+function renderStockPeriod() {
+  const body = document.getElementById("stock-period-body");
+  if (!body) return;
+  const lines = collectStockMovements("product");
+  const prodFilterEl = document.getElementById("stock-period-product");
+  const prodFilter = prodFilterEl ? prodFilterEl.value : "";
+  const rows = Array.from(lines.values())
+    .filter((r) => !prodFilter || r.product === prodFilter)
+    .sort((a, b) => String(a.product).localeCompare(String(b.product), "ro"));
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="7" class="empty-state">Nu există date pentru perioada aleasă.</td></tr>';
+    return;
+  }
+  let tInit = 0, tRec = 0, tProc = 0, tDel = 0, tCorr = 0, tFin = 0;
+  body.innerHTML = rows.map((r) => {
+    // Pe PRODUS, transferurile se anuleaza reciproc (aceeasi marfa, alta locatie), iar din
+    // procesare ramane exact pierderea: intrarea in utilaj minus iesirea din el.
+    const proc = r.now.loss + (r.now.out - r.now.in);
+    tInit += r.init; tRec += r.now.rec; tProc += proc; tDel += r.now.del; tCorr += r.now.corr; tFin += r.fin;
+    return `<tr>
+      <td>${escapeComboHtml(r.product)}</td>
+      <td>${kgNum(r.init)}</td>
+      <td>${kgNum(r.now.rec)}</td>
+      <td>${kgNum(proc)}</td>
+      <td>${kgNum(r.now.del)}</td>
+      <td>${r.now.corr ? `<b>${kgNum(r.now.corr)}</b>` : "—"}</td>
+      <td><b>${kgNum(r.fin)}</b></td>
+    </tr>`;
+  }).join("") + `
+    <tr class="totals-row">
+      <td>TOTAL</td>
+      <td>${kgNum(tInit)}</td>
+      <td>${kgNum(tRec)}</td>
+      <td>${kgNum(tProc)}</td>
+      <td>${kgNum(tDel)}</td>
+      <td><b>${kgNum(tCorr)}</b></td>
+      <td>${kgNum(tFin)}</td>
+    </tr>`;
+}
+
+// Perechea de fata a ecranului „Stoc pe locatii": acolo se vede soldul de acum, aici de unde
+// a venit si unde a plecat marfa in perioada aleasa. Coloana „Pierderi receptie" numara doar
+// pierderea receptiilor de model vechi; pierderea la procesare se vede ca diferenta dintre
+// „Iesit" (intrarea in utilaj) si „Intrat" (iesirea din el).
+function renderStockPeriodByLocation() {
+  const body = document.getElementById("stock-period-loc-body");
+  if (!body) return;
+  const lines = collectStockMovements("location");
   const prodEl = document.getElementById("stock-period-loc-product");
   const locEl = document.getElementById("stock-period-loc-location");
   const prodFilter = prodEl ? prodEl.value : "";
   const locFilter = locEl ? locEl.value : "";
+  const normLoc = (v) => String(v || "Fara locatie").trim().toLowerCase();
 
   const rows = Array.from(lines.values())
     .filter((r) => !prodFilter || r.product === prodFilter)
     .filter((r) => !locFilter || normLoc(r.location) === normLoc(locFilter))
-    .map((r) => {
-      const init = r.before.rec + r.before.in - r.before.out - r.before.del - r.before.loss + r.before.corr;
-      const fin = init + r.now.rec + r.now.in - r.now.out - r.now.del - r.now.loss + r.now.corr;
-      return { ...r, init, fin };
-    })
-    // O linie fara nicio miscare si fara sold nu spune nimic: ar umple tabelul cu zerouri.
+    // O linie fara sold si fara nicio miscare nu spune nimic: ar umple tabelul cu zerouri.
     .filter((r) => [r.init, r.fin, r.now.rec, r.now.in, r.now.out, r.now.del, r.now.loss, r.now.corr]
       .some((v) => Math.round(v * 1000) !== 0))
     .sort((a, b) =>
@@ -3023,6 +2974,7 @@ function renderDeliveries(deliveries) {
   // Constant pe rol — ridicat din buclă. Contabilii nu au `delivery-write`, dar pot face
   // returul pe livrările facturate, deci butonul trebuie să le apară.
   const canDeliveryWrite = canAccess("delivery-write") || canReturnInvoicedDelivery();
+  const canFinance = canAccess("finance");
   deliveriesBodyEl.innerHTML = filtered
     .map((item) => {
       const status = item.status || "Proiect";
@@ -3040,7 +2992,7 @@ function renderDeliveries(deliveries) {
         ? `${formatNumber(money.unitForeign)} ${money.cur}/t`
         : (money.unitLei ? `${formatNumber(money.unitLei)} MDL/kg` : "-");
       const totalFactura = money.totalLei;
-      const canBill = canAccess("finance");
+      const canBill = canFinance;
       const paidSelect = canBill
         ? `<select class="delivery-paid-select" data-id="${item.id}">
              <option value="false" ${!item.invoicePaid ? "selected" : ""}>Neachitată</option>
@@ -3051,7 +3003,7 @@ function renderDeliveries(deliveries) {
         <tr>
           <td>Nr. ${item.id}</td>
           <td>${formatDateShort(item.createdAt || item.deliveredAt)}</td>
-          <td>${item.location || (item.receiptId ? `#${item.receiptId}` : "-")}</td>
+          <td>${escapeComboHtml(item.location) || (item.receiptId ? `#${item.receiptId}` : "-")}</td>
           <td>${escapeComboHtml(item.customer)}</td>
           <td class="col-fin">${item.seller || "-"}</td>
           <td>${escapeComboHtml(item.product)}${photosMini(item.photos)}</td>
@@ -3067,7 +3019,7 @@ function renderDeliveries(deliveries) {
               ${buttons}
               ${docActionsCell("delivery", item)}
               ${deliveryReturnCell(item, canDeliveryWrite)}
-            ${canAccess("finance") ? `
+            ${canFinance ? `
               <button type="button" class="cell-btn cell-btn-primary" data-action="edit-billing" data-id="${item.id}">Date factură</button>
               <details class="print-menu">
                 <summary class="doc-print-btn">Tipar ▾</summary>
@@ -3085,7 +3037,7 @@ function renderDeliveries(deliveries) {
             ${(() => {
               // Numarul facturii si comentariul stau sub butoane, pe un rand marunt: asa
               // celula nu se mai imparte in benzi verticale si randul ramane scund.
-              const inv = canAccess("finance") && item.invoiceNumber
+              const inv = canFinance && item.invoiceNumber
                 ? `<span>Factura ${escapeComboHtml(item.invoiceNumber)}</span>` : "";
               const note = item.note ? `<span class="row-note">${escapeComboHtml(item.note)}</span>` : "";
               return inv || note ? `<div class="row-meta">${inv}${note}</div>` : "";
@@ -3968,22 +3920,18 @@ function renderFilterOptions() {
     const prev = stockPeriodLocProductEl.value;
     stockPeriodLocProductEl.innerHTML = [
       '<option value="">Toate produsele</option>',
-      ...productNames.map((name) => `<option value="${name}">${name}</option>`)
+      ...productNames.map((name) => `<option value="${escapeComboHtml(name)}">${escapeComboHtml(name)}</option>`)
     ].join("");
     stockPeriodLocProductEl.value = productNames.includes(prev) ? prev : "";
   }
   const stockPeriodLocEl = document.getElementById("stock-period-loc-location");
   if (stockPeriodLocEl) {
     const prev = stockPeriodLocEl.value;
-    const fromDocs = [
-      ...(receiptsCache || []).map((r) => r.location),
-      ...(deliveriesCache || []).map((d) => d.location),
-      ...(transfersCache || []).flatMap((t) => [t.fromLocation, t.toLocation]),
-      ...(processingsCache || []).flatMap((pr) => [pr.sourceLocation, pr.destLocation])
-    ];
     const locNames = Array.from(new Set([
       ...(currentConfig?.storageLocations || []).map((l) => l.name),
-      ...fromDocs
+      // Sumarul de stoc e deja agregat pe locatie: aduce si locatiile scoase intre timp din
+      // nomenclator, fara sa reparcurgem toate documentele la fiecare salvare.
+      ...((lastStockSummary && lastStockSummary.byLocation) || []).map((i) => i.location)
     ].filter(Boolean))).sort((a, b) => String(a).localeCompare(String(b), "ro"));
     stockPeriodLocEl.innerHTML = [
       '<option value="">Toate locațiile</option>',
@@ -7778,8 +7726,13 @@ async function refreshViewData(view) {
     } else if (view === "financiar") {
       await Promise.all([loadTransactions(), loadReceipts(), loadDeliveries()]);
     } else if (view === "stoc") {
-      await Promise.all([loadStocks(), loadReceipts(), loadDeliveries()]);
+      // Transferurile si procesarile sunt mutarile INTRE locatii: fara ele, tabelul pe
+      // locatii ar arata alt stoc final decat „Stoc pe locatii" de deasupra.
+      await Promise.all([
+        loadStocks(), loadReceipts(), loadDeliveries(), loadTransfers(), loadProcessings()
+      ]);
       renderStockPeriod();
+      renderStockPeriodByLocation();
     } else if (view === "rapoarte") {
       // SINCRON, înainte de orice fetch: golește+ascunde panoul de activitate pentru non-admin,
       // ca setView (care afișează după data-view) să nu lase vizibil nicio clipă tabelul vechi.
