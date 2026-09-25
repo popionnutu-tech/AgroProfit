@@ -3086,3 +3086,7 @@ dialog.details-dialog { width: min(680px, 94vw); max-height: 88vh; overflow-y: a
 .rc-delta { font-weight: 600; margin-left: 0.4rem; font-size: 0.9em; }
 .rc-delta.rc-up { color: #b3261e; }
 .rc-delta.rc-down { color: #1b6e3c; }
+
+/* Creanta rezultata din pretul de pe factura, in dialogul de facturare a livrarii. */
+.billing-receivable { margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px dashed var(--border, #d8dee9); }
+.billing-receivable .field-hint { display: block; margin-top: 0.15rem; }

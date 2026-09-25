@@ -2155,6 +2155,35 @@ async function listTransactions() {
   return (state.transactions || []).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 }
 
+// Pretul de contract si cel de factura sunt ACELASI pret, exprimat in unitati diferite:
+// `contractPrice` e lei/TONA, `priceLei` e lei/KG, `priceForeign` e valuta/TONA.
+// Se deriva din ACELEASI intrari ca `deliveryInvoiceTotals` (public/app.js) — sursa unica a
+// totalului de pe factura — ca sa nu existe doua veritati despre cat datoreaza cumparatorul.
+//
+// NU trece prin `priceLei` la valuta: acolo campul pastreaza lei/TONA, nu lei/kg (vezi
+// recalculul din updateDelivery). Cine il citeste ca lei/kg greseste de 1000x.
+function deliveryTonnePriceFromBilling(delivery) {
+  if (!delivery) return 0;
+  const currency = String(delivery.currency || "MDL").trim().toUpperCase();
+  const foreign = Number(delivery.priceForeign || 0);
+  const rate = Number(delivery.exchangeRate || 0);
+  if (currency !== "MDL" && foreign > 0 && rate > 0) {
+    return foreign * rate; // (valuta/tona) x (lei/valuta) = lei/tona
+  }
+  return Number(delivery.priceLei || 0) * 1000; // (lei/kg) x 1000 = lei/tona
+}
+
+// Pretul pe TONA pe care se calculeaza CREANTA. Sursa unica pentru Incasari, extrasul de
+// cont, raportul de management si tabelul de livrari.
+// Fallback-ul pe datele de facturare vindeca livrarile vechi, la care `contractPrice` a
+// ramas 0 fiindca nu exista niciun camp in interfata prin care sa fie introdus — fara sa
+// rescrie istoricul printr-o migrare.
+function deliveryReceivableTonnePrice(delivery) {
+  const stored = Number((delivery && delivery.contractPrice) || 0);
+  if (stored > 0) return stored;
+  return deliveryTonnePriceFromBilling(delivery);
+}
+
 async function listDeliveries() {
   const state = readReceiptsState();
   return (state.deliveries || []).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
@@ -2245,7 +2274,7 @@ async function getSupplierStatement(partnerId, fromDate, toDate) {
         date: d.createdAt || d.deliveredAt || "",
         product: d.product || "",
         quantity: qty,
-        amount: Number(d.contractPrice || 0) * qty
+        amount: deliveryReceivableTonnePrice(d) * qty
       };
     })
     .sort((a, b) => new Date(a.date) - new Date(b.date));
@@ -2597,7 +2626,7 @@ async function createTransaction(payload) {
         0
       );
       const qty = Number(delivery.deliveredQuantity || delivery.netWeight || 0);
-      const targetAmount = Number(delivery.contractPrice || 0) * qty;
+      const targetAmount = deliveryReceivableTonnePrice(delivery) * qty;
       delivery.collectedAmount = totalCollected;
       delivery.collectionStatus =
         totalCollected <= 0 ? "Neincasat" : totalCollected < targetAmount ? "Partial incasat" : "Incasat";
@@ -2974,7 +3003,7 @@ function recomputeReferenceSettlement(state, transaction) {
     const delivery = (state.deliveries || []).find((d) => d.id === Number(transaction.deliveryId));
     if (!delivery) return;
     const qty = Number(delivery.deliveredQuantity || delivery.netWeight || 0);
-    const target = Number(delivery.contractPrice || 0) * qty;
+    const target = deliveryReceivableTonnePrice(delivery) * qty;
     const collected = txns
       .filter((t) => t.referenceType === "delivery"
         && Number(t.deliveryId) === Number(transaction.deliveryId) && isActiveTransaction(t))
@@ -3177,7 +3206,9 @@ async function createDelivery(payload) {
     trailer: payload.trailer || "",
     contractNumber: payload.contractNumber || "",
     contractDate: payload.contractDate || "",
-    contractPrice: sanitizeNumber(payload.contractPrice),
+    // ACELASI pret ca pe factura, in lei/TONA. Daca nu vine explicit, se deriva din datele
+    // de facturare — nu exista doua preturi (vezi `deliveryTonnePriceFromBilling`).
+    contractPrice: sanitizeNumber(payload.contractPrice) || 0,
     // Câmpuri de facturare (introduse de contabil) — Etapa 4 + Modul B
     seller: payload.seller || "",
     sellerId: payload.sellerId ? Number(payload.sellerId) : null,
@@ -3480,6 +3511,11 @@ async function updateDelivery(id, payload = {}) {
     priceLei: delivery.priceLei,
     priceForeign: delivery.priceForeign,
     currency: delivery.currency,
+    exchangeRate: delivery.exchangeRate,
+    vatRate: delivery.vatRate,
+    invoiceDate: delivery.invoiceDate,
+    invoicePaid: delivery.invoicePaid,
+    contractPrice: delivery.contractPrice,
     contractNumber: delivery.contractNumber,
     contractDate: delivery.contractDate,
     vehicle: delivery.vehicle,
@@ -3565,8 +3601,14 @@ async function updateDelivery(id, payload = {}) {
   if (payload.deliveryHumidity !== undefined) {
     delivery.deliveryHumidity = sanitizeNumber(payload.deliveryHumidity);
   }
+  // La MDL cursul e 1, indiferent ce a ramas pe document. Fara asta, cine punea EUR + curs
+  // si apoi comuta pe MDL fara sa goleasca cursul obtinea `priceLei = pret x curs_vechi` —
+  // un pret/kg de zeci de ori mai mare, fara niciun avertisment.
+  if (String(delivery.currency || "MDL").toUpperCase() === "MDL") {
+    delivery.exchangeRate = 1;
+  }
   // Recompute priceLei = preț valută × curs (if both present)
-  if (payload.priceForeign !== undefined || payload.exchangeRate !== undefined) {
+  if (payload.priceForeign !== undefined || payload.exchangeRate !== undefined || payload.currency !== undefined) {
     const pf = Number(delivery.priceForeign || 0);
     const rate = Number(delivery.exchangeRate || (delivery.currency === "MDL" ? 1 : 0));
     if (pf > 0 && rate > 0) {
@@ -3576,6 +3618,26 @@ async function updateDelivery(id, payload = {}) {
     }
   } else if (payload.priceLei !== undefined) {
     delivery.priceLei = sanitizeNumber(payload.priceLei);
+  }
+
+  // Pretul de contract NU e un al doilea pret: e ACELASI pret, in lei/TONA. Se deriva din
+  // datele de facturare ca sa nu existe doua veritati despre cat datoreaza cumparatorul.
+  // Pana acum nu exista NICIUN drum prin care sa fie completat din interfata, deci ramanea 0
+  // si tinta de incasat a fiecarei livrari era zero.
+  const derivedTonnePrice = deliveryTonnePriceFromBilling(delivery);
+  if (derivedTonnePrice > 0) {
+    // Tinta de incasat nu poate cobori sub cat s-a incasat deja: restul ar deveni 0, livrarea
+    // ar aparea „Incasat", iar banii primiti ar dispărea din Achitari/Incasari. Ordinea
+    // corecta e storno de incasare intai — acelasi precedent ca la retur (regula 6).
+    const incasat = Number(delivery.collectedAmount || 0);
+    const qty = Number(delivery.deliveredQuantity || delivery.netWeight || 0);
+    const tintaNoua = derivedTonnePrice * qty;
+    if (incasat > 0 && tintaNoua < incasat) {
+      throw new Error(
+        `Pe livrare s-au incasat deja ${incasat.toFixed(2)} lei, iar pretul nou ar cobori datoria la ${tintaNoua.toFixed(2)} lei. Storneaza incasarea intai.`
+      );
+    }
+    delivery.contractPrice = derivedTonnePrice;
   }
 
   delivery.updatedAt = new Date().toISOString();
@@ -3594,6 +3656,11 @@ async function updateDelivery(id, payload = {}) {
       priceLei: delivery.priceLei,
       priceForeign: delivery.priceForeign,
       currency: delivery.currency,
+      exchangeRate: delivery.exchangeRate,
+      vatRate: delivery.vatRate,
+      invoiceDate: delivery.invoiceDate,
+      invoicePaid: delivery.invoicePaid,
+      contractPrice: delivery.contractPrice,
       contractNumber: delivery.contractNumber,
       contractDate: delivery.contractDate,
       vehicle: delivery.vehicle,
@@ -5660,7 +5727,7 @@ async function getDashboardSnapshot(dateValue = new Date().toISOString().slice(0
     if (isVoidedDelivery(item)) return sum; // livrarea anulată/returnată nu mai e de încasat
     if (isDeliveryPendingStockExit(item)) return sum; // proiectul nu e marfă plecată
     const qty = Number(item.deliveredQuantity || item.netWeight || 0);
-    const target = Number(item.contractPrice || 0) * qty;
+    const target = deliveryReceivableTonnePrice(item) * qty;
     const collected = Number(item.collectedAmount || 0);
     return sum + Math.max(target - collected, 0);
   }, 0);
@@ -5889,6 +5956,8 @@ module.exports = {
   completeReceiptWeighing,
   updateReceiptSupplier,
   correctReceiptTerms,
+  deliveryReceivableTonnePrice,
+  deliveryTonnePriceFromBilling,
   getReceiptRaw,
   updateReceiptAmount,
   updateSystemSettings,

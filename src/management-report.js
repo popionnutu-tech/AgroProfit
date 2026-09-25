@@ -31,6 +31,25 @@ function isVoidedDelivery(item) {
   return status === "Anulat" || status === "Returnat";
 }
 
+// Oglinda lui `deliveryReceivableTonnePrice` din src/local-storage.js (modulul e intentionat
+// pur — fara require-uri — de aceea regula e oglindita, nu importata; la fel ca mai sus).
+// Pretul de contract si cel de factura sunt ACELASI pret in unitati diferite: `contractPrice`
+// e lei/TONA, `priceLei` lei/KG, `priceForeign` valuta/TONA. Fallback-ul pe datele de
+// facturare vindeca livrarile la care `contractPrice` a ramas 0.
+// ATENTIE: la valuta NU se trece prin `priceLei` — acolo campul pastreaza lei/TONA.
+function deliveryReceivableTonnePrice(item) {
+  const stored = Number((item && item.contractPrice) || 0);
+  if (stored > 0) return stored;
+  if (!item) return 0;
+  const currency = String(item.currency || "MDL").trim().toUpperCase();
+  const foreign = Number(item.priceForeign || 0);
+  const rate = Number(item.exchangeRate || 0);
+  if (currency !== "MDL" && foreign > 0 && rate > 0) {
+    return foreign * rate;
+  }
+  return Number(item.priceLei || 0) * 1000;
+}
+
 function sameDay(value, dateValue) {
   return String(value || "").slice(0, 10) === String(dateValue || "").trim();
 }
@@ -72,7 +91,7 @@ function getOutstandingFinancials(receipts, deliveries, openingDebtItems) {
     // livrarea anulata sau returnata integral nu mai e de incasat
     .filter((item) => !isVoidedDelivery(item))
     .map((item) => {
-      const targetAmount = Number(item.contractPrice || 0) * Number(item.deliveredQuantity || 0);
+      const targetAmount = deliveryReceivableTonnePrice(item) * Number(item.deliveredQuantity || 0);
       const collectedAmount = Number(item.collectedAmount || 0);
       const outstandingAmount = Math.max(targetAmount - collectedAmount, 0);
       return {
@@ -138,7 +157,9 @@ function getOperationalProblems(report, receipts, deliveries, complaints, auditL
   // nu au ce factura si nu au ce incasa.
   const billableDeliveries = deliveries.filter((item) => !isVoidedDelivery(item));
   const deliveriesWithoutInvoice = billableDeliveries.filter((item) => !String(item.invoiceNumber || "").trim());
-  const deliveriesWithoutContractPrice = billableDeliveries.filter((item) => Number(item.contractPrice || 0) <= 0);
+  const deliveriesWithoutContractPrice = billableDeliveries.filter(
+    (item) => deliveryReceivableTonnePrice(item) <= 0
+  );
   const openComplaints = complaints.filter((item) => String(item.status || "").toLowerCase() === "deschisa");
   const importantChangesToday = auditLogs.filter(
     (item) => sameDay(item.createdAt, dateValue) && item.action !== "create" && item.entityType !== "auth"
@@ -491,5 +512,8 @@ module.exports = {
   formatCurrency,
   formatNumber,
   getManagementSnapshot,
-  getManagementStatus: getExecutiveStatus
+  getManagementStatus: getExecutiveStatus,
+  // Expus DOAR pentru testul care verifica ca oglinda nu a divergat de sursa
+  // (`deliveryReceivableTonnePrice` din src/local-storage.js).
+  deliveryReceivableTonnePrice
 };

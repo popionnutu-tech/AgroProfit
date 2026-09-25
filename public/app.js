@@ -2704,7 +2704,7 @@ function transactionReferenceStanding(item) {
     const d = (deliveriesCache || []).find((x) => Number(x.id) === Number(item.deliveryId));
     if (d) {
       const qty = Number(d.deliveredQuantity || d.netWeight || 0);
-      return buildTxStanding(Number(d.contractPrice || 0) * qty, d.collectedAmount || 0, d.collectionStatus);
+      return buildTxStanding(deliveryReceivableTonnePrice(d) * qty, d.collectedAmount || 0, d.collectionStatus);
     }
   } else if (item.referenceType === "opening-debt") {
     for (const doc of (openingDocumentsCache || [])) {
@@ -2908,6 +2908,23 @@ function deliveryDisplayQuantity(item) {
 //  • Preț în valută (EUR/USD/RON) = valută / TONĂ → total valută = tone × preț; total lei = total valută × curs
 //    (ex: 26,16 t × 175 EUR × 20,1152 = 92.087,39 lei)
 // Un SINGUR loc de adevăr pentru sume — folosit în tabel, totaluri, factura tipărită și formularul de facturare.
+// Pretul pe TONA pe care se calculeaza CREANTA. Oglinda lui `deliveryReceivableTonnePrice`
+// din src/local-storage.js — se schimba in AMBELE locuri.
+// Pretul de contract si cel de factura sunt ACELASI pret in unitati diferite: `contractPrice`
+// e lei/TONA, `priceLei` lei/KG, `priceForeign` valuta/TONA. Fallback-ul pe datele de
+// facturare vindeca livrarile la care `contractPrice` a ramas 0, fara migrare.
+// ATENTIE: la valuta NU se trece prin `priceLei` — acolo campul pastreaza lei/TONA, nu lei/kg.
+function deliveryReceivableTonnePrice(item) {
+  const stored = Number((item && item.contractPrice) || 0);
+  if (stored > 0) return stored;
+  if (!item) return 0;
+  const cur = String(item.currency || "MDL").trim().toUpperCase();
+  const foreign = Number(item.priceForeign || 0);
+  const rate = Number(item.exchangeRate || 0);
+  if (cur !== "MDL" && foreign > 0 && rate > 0) return foreign * rate;
+  return Number(item.priceLei || 0) * 1000;
+}
+
 function deliveryInvoiceTotals(item) {
   const tonnes = deliveryDisplayQuantity(item);
   const kg = tonnes * 1000;
@@ -3261,7 +3278,7 @@ function renderOpenJournal() {
         <tr>
           <td>${item.id ? `#${item.id}` : "Sold initial"}</td>
           <td>${item.customer || item.partner}</td>
-          <td>${currency.format(Number(item.contractPrice || 0) * Number(item.deliveredQuantity || 0) || Number(item.amount || 0))}</td>
+          <td>${currency.format(deliveryReceivableTonnePrice(item) * Number(item.deliveredQuantity || 0) || Number(item.amount || 0))}</td>
           <td>${currency.format(Number(item.collectedAmount || item.settledAmount || 0))}</td>
           <td>${item.collectionStatus || item.status || "Neincasat"}</td>
         </tr>
@@ -5984,7 +6001,7 @@ function renderTransactionPreview() {
   const direction = transactionDirectionSelect.value;
 
   if (referenceType === "delivery" && delivery) {
-    const targetAmount = Number(delivery.contractPrice || 0) * Number(delivery.deliveredQuantity || 0);
+    const targetAmount = deliveryReceivableTonnePrice(delivery) * Number(delivery.deliveredQuantity || 0);
     transactionPartnerEl.textContent = delivery.customer || "-";
     transactionTargetEl.textContent = currency.format(targetAmount);
     transactionStatusEl.textContent =
@@ -9876,6 +9893,28 @@ function updateBillingPriceLei() {
       baseEl.textContent = formatNumber(Number(baza.toFixed(2)));
       vatEl.textContent = formatNumber(Number(tva.toFixed(2)));
       totalEl.textContent = formatNumber(Number(totalCuTva.toFixed(2)));
+    }
+
+    // Creanta: acelasi pret, in lei/TONA. Se arata aici fiindca pana acum contabilul punea
+    // pretul pe factura si nu vedea niciunde ca din el iese suma pe care o datoreaza
+    // cumparatorul in „Incasari". Trebuie sa coincida cu Total factura.
+    const recEl = document.getElementById("billing-receivable");
+    const recHintEl = document.getElementById("billing-receivable-hint");
+    if (recEl) {
+      const tonnePrice = isForeign ? pf * rate : pf * 1000;
+      const qty = Number(
+        billingDelivery
+          ? (billingDelivery.deliveredQuantity || billingDelivery.netWeight || 0)
+          : 0
+      );
+      const creanta = tonnePrice * qty;
+      recEl.textContent = formatNumber(Number(creanta.toFixed(2)));
+      if (recHintEl) {
+        const incasat = Number((billingDelivery && billingDelivery.collectedAmount) || 0);
+        recHintEl.textContent = incasat > 0 && creanta < incasat
+          ? `Atenție: s-au încasat deja ${formatNumber(incasat)} lei. Stornează încasarea înainte de a reduce prețul.`
+          : `${formatNumber(tonnePrice)} lei/tonă × ${formatNumber(qty)} t`;
+      }
     }
   }
 }

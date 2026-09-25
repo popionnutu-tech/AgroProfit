@@ -30,3 +30,20 @@ SECURITY-AUDIT-*.md
 # Repo-ul e public: un `git add -A` din hook le-ar publica ireversibil.
 *.pdf
 *.PDF
+# Un act fotografiat cu telefonul NU e PDF: vine ca .jpg/.heic. Se ignora in RADACINA
+# (unde ajung fisierele puse temporar pentru analiza); imaginile aplicatiei stau in
+# `public/` si nu sunt atinse de regulile astea.
+/*.jpg
+/*.JPG
+/*.jpeg
+/*.JPEG
+/*.png
+/*.PNG
+/*.heic
+/*.HEIC
+/*.webp
+/*.tif
+/*.tiff
+# Loc dedicat pentru documentele primite de la furnizori, daca e nevoie sa stea in folder.
+/scanuri/
+/documente/

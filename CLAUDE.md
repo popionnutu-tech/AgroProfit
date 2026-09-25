@@ -50,9 +50,35 @@ npm run dev          # aplicația WEB pe http://localhost:3000
 - **Sursa unică de calcul: `deliveryInvoiceTotals()` din `public/app.js`.** Aceeași formulă e duplicată intenționat în `updateBillingPriceLei` (formularul live) și în backend la `createComplaint`. Dacă schimbi formula, schimb-o în TOATE.
 - NU trata `priceLei` în valută ca lei/kg — a cauzat un bug de **1000×** (92 de milioane în loc de 92 de mii).
 
-### 3. `contractPrice` e PER TONĂ
-- Drum de bani SEPARAT (Achitări/Încasări + raport de management): `contractPrice × cantitate(tone)`.
-- Nu adăuga `×1000` și nu-l atinge când repari matematica facturii.
+### 3. `contractPrice` e PER TONĂ — și e ACELAȘI preț ca pe factură
+La livrare există **un singur preț**. Contabilul îl pune din „Date factură"; contractul e doar
+formular de tipar, nu face calcule. `contractPrice` nu e un al doilea preț — e același preț
+exprimat în **lei/TONĂ**, pe lângă `priceLei` (lei/KG) și `priceForeign` (valută/TONĂ).
+- Drum de bani SEPARAT de factură (Achitări/Încasări + raport de management):
+  `contractPrice × cantitate(tone)`. Nu adăuga `×1000`.
+- **Sursă unică: `deliveryReceivableTonnePrice()`** din `src/local-storage.js` — folosită de
+  Încasări, extrasul de cont, raportul de management și tabelul de livrări. Oglindită în
+  `public/app.js` (aceeași denumire) și în `src/management-report.js` (modul intenționat pur,
+  fără require-uri, ca `isVoidedDelivery`). Se schimbă în TOATE TREI; există test care verifică
+  că oglinzile nu au divergat.
+- Se **derivă** din datele de facturare (`deliveryTonnePriceFromBilling`) și se scrie pe
+  document la editare. Fallback-ul la citire vindecă livrările vechi, la care `contractPrice`
+  a rămas 0 fiindcă **nu exista niciun câmp în interfață prin care să fie introdus** — deci
+  ținta de încasat a fiecărei livrări era zero. Fără migrare, fără rescrierea istoricului.
+- **`priceLei` înseamnă lei/KG la MDL, dar lei/TONĂ la valută** (vezi recalculul din
+  `updateDelivery`). Totalurile facturii sunt corecte fiindcă `deliveryInvoiceTotals` ramifică
+  pe monedă și nu-l citește acolo. Dar cine îl citește ca lei/kg greșește de **1000×** —
+  derivarea ocolește deliberat câmpul și pornește din `priceForeign` + `exchangeRate`.
+- La **MDL cursul e forțat la 1**. Cine punea EUR + curs, apoi comuta pe MDL fără să golească
+  cursul, obținea `priceLei = preț × curs_vechi` — un preț/kg de zeci de ori mai mare, tăcut.
+- Prețul **nu poate coborî ținta sub cât s-a încasat deja**: restul ar deveni 0, livrarea ar
+  apărea „Încasat", iar banii primiți ar dispărea din evidență. Storno de încasare întâi —
+  același precedent ca la retur (regula 6).
+- **Drepturile nu se relaxează.** Prețul e câmp de facturare: `CAN_EDIT_BILLING_ROLES`, la
+  creare și la editare. Operatorul nu-l atinge. Motivul documentat al gărzii e `invoiceNumber`
+  (prin el se ocolea regula de retur pe livrare facturată) — nu-l scoate din listă.
+- Dialogul arată contabilului **creanța rezultată** lângă totalul facturii: până acum punea
+  prețul și nu vedea nicăieri că din el iese suma datorată de cumpărător.
 
 ### 4. Plată parțială / avans (Financiar)
 - Backend-ul ține deja cumulativ + status automat: `paidAmount/paymentStatus` (recepții),
