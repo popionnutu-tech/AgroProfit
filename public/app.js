@@ -2042,7 +2042,12 @@ function renderReceipts(receipts) {
   // Corectia de CONDITII (bifa de umiditate + pret) e rezervata adminului: recalculeaza
   // bani pe un document deja inregistrat. Butonul e separat de ✎ (care scrie o suma la
   // liber) tocmai ca sa nu se confunde cele doua operatii.
-  const canCorrectTerms = currentSessionUser?.roleCode === "admin";
+  // Oglinda lui `CAN_CORRECT_TERMS_ROLES` din backend (src/local-storage.js). Butonul doar
+  // se ascunde; garda reala e pe ruta si in magazie.
+  // Actul de achizitie e un document contabil: acelasi drept ca restul coloanelor de bani.
+  const canPrintAct = canAccess("finance");
+  const canCorrectTerms = ["accountant", "accountant-sef", "admin"]
+    .includes(String(currentSessionUser?.roleCode || ""));
   // Operatorul nu vede coloanele de plata (plata preliminara, data platii).
   const receiptsTable = document.getElementById("receipts-table");
   if (receiptsTable) {
@@ -2118,7 +2123,7 @@ function renderReceipts(receipts) {
           <td class="col-fin">${formatDateShort(item.lastPaymentDate)}</td>
           <td class="col-fin">${payBadge}</td>
           <td>${statusCell}</td>
-          <td><button type="button" class="cell-btn cell-btn-details" data-action="receipt-details" data-id="${item.id}">Detalii</button> ${docActionsCell("receipt", item)}</td>
+          <td><button type="button" class="cell-btn cell-btn-details" data-action="receipt-details" data-id="${item.id}">Detalii</button>${canPrintAct && isReceiptInStock(item) ? ` <button type="button" class="cell-btn cell-btn-primary" data-action="print-act" data-id="${item.id}" title="Tipărește actul de achiziție pentru această recepție">🖨 Act achiziție</button>` : ""} ${docActionsCell("receipt", item)}</td>
           <td class="col-fin">${actionCell}</td>
         </tr>
       `;
@@ -7825,6 +7830,29 @@ document.querySelectorAll(".view-tab").forEach((button) => {
 // Act de verificare buttons (Etapa 7)
 document.getElementById("statement-generate-btn")?.addEventListener("click", generateSupplierStatement);
 document.getElementById("statement-print-btn")?.addEventListener("click", printSupplierStatement);
+
+// Act de achizitie direct de pe randul de receptie. Foloseste ACELASI `buildPurchaseActHtml`
+// ca pagina „Documente tipar" (o receptie = un rand in act), ca sa nu apara a doua varianta a
+// aceluiasi document oficial, cu alte cifre.
+document.getElementById("receipts-body")?.addEventListener("click", (event) => {
+  const btn = event.target.closest('[data-action="print-act"]');
+  if (!btn) return;
+  const receipt = (receiptsCache || []).find((r) => Number(r.id) === Number(btn.dataset.id));
+  if (!receipt) return;
+  if (!isReceiptInStock(receipt)) {
+    window.alert("Recepția nu e în stoc (proiect sau anulată). Actul de achiziție s-ar emite pe marfă care n-a intrat.");
+    return;
+  }
+  const partner = findPartnerById(receipt.supplierId) || findPartnerByName(receipt.supplier);
+  if (!partner) {
+    window.alert("Furnizorul recepției nu a fost găsit în nomenclator. Completează-l înainte de a tipări actul.");
+    return;
+  }
+  openOfficialDocWindow(
+    buildPurchaseActHtml([receipt], partner, resolveCompany("")),
+    `Act de achizitie ${partner.name}`
+  );
+});
 
 // Delivery document print buttons (Etapa 6) — event delegation
 document.getElementById("deliveries-body")?.addEventListener("click", (event) => {

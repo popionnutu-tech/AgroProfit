@@ -387,11 +387,13 @@ app.post(
 );
 
 // Corectie de conditii pe o receptie deja intrata: bifa „plata pe masa cu umiditate" si/sau
-// pretul. DOAR admin — rescrie bani pe un document inregistrat. Motiv obligatoriu, istoric
-// pe document (`termCorrections`) si intrare de audit. Rolul se reverifica in storage.
+// pretul. Contabil, contabil-sef si admin — rescrie bani pe un document inregistrat, aceeasi
+// categorie cu ajustarea valorii receptiei (`finance-write`). Motiv obligatoriu, istoric pe
+// document (`termCorrections`) si intrare de audit. Rolul se reverifica in storage
+// (`CAN_CORRECT_TERMS_ROLES`), ca ruta si magazia sa nu poata divergea.
 app.patch(
   "/api/receipts/:id/correct-terms",
-  requireRoles(["admin"]),
+  requireRoles(["accountant", "accountant-sef", "admin"]),
   async (req, res) => {
     return correctReceiptTermsHandler(req, res, req.params.id);
   }

@@ -90,20 +90,33 @@ test("corectarea ramane pe document, cu motiv, autor si cifrele vechi", async ()
   });
 });
 
-test("doar adminul poate corecta conditiile", async () => {
+test("corectarea conditiilor: contabilii si adminul pot, restul nu", async () => {
   await withIsolatedWorkspace(async ({ load }) => {
     const storage = load("src/local-storage.js");
+    // Operatorul, managerul si controlul nu rescriu bani pe un document inregistrat.
     const r = await receptieInitiala(storage);
-    for (const rol of ["operator", "manager", "accountant", "accountant-sef", "control"]) {
+    for (const rol of ["operator", "manager", "control"]) {
       await assert.rejects(
         () => storage.correctReceiptTerms(r.id, {
           estimate: estimare({ payOnGrossQuantity: true }),
           payOnGrossQuantity: true, price: 5,
           reason: "incerc", actorRole: rol, changedBy: rol
         }),
-        /administratorul/i,
+        /contabilul sau administratorul/i,
         `rolul ${rol} nu trebuia sa poata`
       );
+    }
+    // Contabilul si contabilul-sef au deja `finance-write` (ajusteaza valoarea receptiei),
+    // deci corectarea conditiilor e aceeasi categorie de operatiune.
+    for (const rol of ["accountant", "accountant-sef"]) {
+      const receptie = await receptieInitiala(storage);
+      const corectata = await storage.correctReceiptTerms(receptie.id, {
+        estimate: estimare({ payOnGrossQuantity: true }),
+        payOnGrossQuantity: true, price: 5,
+        reason: `corectare ${rol}`, actorRole: rol, changedBy: rol
+      });
+      assert.equal(corectata.payOnGrossQuantity, true, `rolul ${rol} trebuia sa poata`);
+      assert.equal(corectata.termCorrections.at(-1).by, rol);
     }
   });
 });

@@ -222,10 +222,14 @@ apa tot se evaporă.
 - **Bifa se pune la creare**, de cine creează recepția (inclusiv operatorul): el e la cântar,
   el vorbește cu șoferul. Compensația e confirmarea explicită plus auditul. Operatorul NU are
   voie să modifice recepția ulterior: furnizorul și suma sunt rezervate contabilului/managerului,
-  închiderea și redeschiderea managerului, anularea și corectarea de condiții adminului.
+  închiderea și redeschiderea managerului, anularea adminului, iar corectarea de condiții
+  contabililor și adminului.
   Nu-i da operatorului o cale de editare „pentru comoditate" — ar ocoli confirmarea în două cereri.
-- **Corectarea ulterioară există, dar e a adminului** (`correctReceiptTerms`, rută
-  `PATCH /api/receipts/:id/correct-terms`). Înțelegerea se află uneori după ce marfa a fost
+- **Corectarea ulterioară e a contabilului, a contabilului-șef și a adminului**
+  (`CAN_CORRECT_TERMS_ROLES`, `correctReceiptTerms`, rută `PATCH /api/receipts/:id/correct-terms`).
+  Aceleași roluri ajustează deja valoarea recepției prin `finance-write` (✎), deci e aceeași
+  categorie de operațiune; stocul nu se atinge în niciun caz. Lista se verifică în DOUĂ locuri
+  (ruta și magazia) — schimb-o în amândouă, altfel una devine mai permisivă decât cealaltă. Înțelegerea se află uneori după ce marfa a fost
   descarcată — furnizorul spune abia la decontare că achiziția a fost cu tot cu apă, sau
   prețul n-a fost completat la cântar.
   - Se corectează **intrările** (bifa, prețul), iar sumele se **recalculează** după aceeași

@@ -253,6 +253,11 @@ const WAREHOUSE_ONLY_RETURN_ROLES = ["accountant", "accountant-sef"];
 // sa apuce sa le introduca). Proiectul NU misca stoc si NU creeaza datorie; operatorul il
 // confirma la cantar cu greutatile reale.
 const CAN_CREATE_DRAFT_ROLES = ["accountant", "accountant-sef", "admin"];
+// Cine poate corecta CONDITIILE unei receptii deja intrate (bifa „plata pe masa cu
+// umiditate" si/sau pretul). Rescrie bani pe un document inregistrat, deci nu e operatie de
+// zi cu zi — dar e aceeasi categorie cu ajustarea valorii receptiei, pe care contabilii o au
+// deja prin `finance-write`. Stocul nu se atinge in niciun caz.
+const CAN_CORRECT_TERMS_ROLES = ["accountant", "accountant-sef", "admin"];
 
 // Statusuri care NU se pot cere din body la crearea unei receptii:
 //   „Proiect" — se obtine doar prin `isDraft`, decis de ROL. Altfel oricine putea crea o
@@ -3963,8 +3968,8 @@ async function correctReceiptTerms(id, payload = {}) {
   // Fail-closed pe rol, ca la corectia de inventar: e o rescriere de bani pe un document
   // deja inregistrat, nu o operatie de zi cu zi.
   const role = normalizeRoleCode(payload.actorRole);
-  if (role !== "admin") {
-    throw forbiddenError("Doar administratorul poate corecta conditiile unei receptii.");
+  if (!CAN_CORRECT_TERMS_ROLES.includes(role)) {
+    throw forbiddenError("Doar contabilul sau administratorul poate corecta conditiile unei receptii.");
   }
   if (receipt.status === "Anulat") {
     throw new Error("Receptia este anulata. Nu se pot corecta conditiile.");
