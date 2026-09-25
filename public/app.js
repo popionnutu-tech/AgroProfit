@@ -2135,12 +2135,11 @@ function renderReceipts(receipts) {
           <td class="col-fin">${formatDateShort(item.lastPaymentDate)}</td>
           <td class="col-fin">${payBadge}</td>
           <td>${statusCell}</td>
-          <td><button type="button" class="cell-btn cell-btn-details" data-action="receipt-details" data-id="${item.id}">Detalii</button>${canPrintDocs && isReceiptInStock(item) ? ` <details class="print-menu">
+          <td><button type="button" class="cell-btn cell-btn-details" data-action="receipt-details" data-id="${item.id}">Detalii</button>${canPrintDocs ? ` <details class="print-menu">
               <summary class="doc-print-btn">🖨 Tipar ▾</summary>
               <div class="print-menu-list">
                 <button type="button" class="doc-print-btn" data-print-receipt="contract" data-id="${item.id}">Contract de vânzare-cumpărare</button>
                 <button type="button" class="doc-print-btn" data-print-receipt="act" data-id="${item.id}">Act de achiziție</button>
-                <button type="button" class="doc-print-btn" data-print-receipt="payment" data-id="${item.id}">Ordin de plată</button>
               </div>
             </details>` : ""} ${docActionsCell("receipt", item)}</td>
           <td class="col-fin">${actionCell}</td>
@@ -6652,11 +6651,6 @@ function receiptNetKg(receipt) {
   return Number(receipt.provisionalNetQuantity || receipt.quantity || 0) * 1000;
 }
 
-function receiptPrintValue(receipt) {
-  const stored = Number(receipt.amountToPay || receipt.preliminaryPayableAmount || 0);
-  if (stored > 0) return stored;
-  return receiptNetKg(receipt) * (Number(receipt.price) || 0);
-}
 
 
 // 1) ACT DE ACHIZITIE A MARFURILOR — fidel formularului oficial bilingv RO/RU (dintr-o receptie).
@@ -6681,7 +6675,7 @@ function actReceiptFigures(receipt) {
     + (receipt.payOnGrossQuantity === true ? Number(receipt.estimatedWaterLoss || 0) : 0);
   const netKg = payableTonnes * 1000 || Number(receipt.netWeight) || 0;
   // Valoarea BRUTĂ e cea de pe document (`preliminaryMerchandiseValue`), nu o recalculare din
-  // preț: după ajustarea manuală a sumei (✎) prețul e derivat și rotunjit la 4 zecimale, iar
+  // preț: prețul (și cel derivat de ✎, în lei/kg brut) e rotunjit la 4 zecimale, iar
   // „cantitate × preț" ar cădea la câțiva lei de brutul înregistrat — exact diferența care ar
   // reapărea apoi ca reținere fantomă. Aceeași bază ca actul tipărit din Livrări.
   const storedGross = Number(receipt.preliminaryMerchandiseValue) || 0;
@@ -6707,11 +6701,47 @@ function actNum(n, dec) {
     .replace(/\./g, " ");
 }
 
+// Textul din codul QR al actului: datele documentului, ca sa poata fi citite cu telefonul
+// fara cont si fara internet. Doar ASCII (diacriticele ar dubla octetii si ar scoate textul
+// din capacitatea codului) si scurtat la ce incape: identificarea partilor si banii.
+function actQrPayload({ company, partner, series, nr, dateText, rows, value, tax, netPay }) {
+  const ascii = (v) => String(v || "")
+    .replace(/[ăâ]/gi, (m) => (m === m.toUpperCase() ? "A" : "a"))
+    .replace(/[îí]/gi, (m) => (m === m.toUpperCase() ? "I" : "i"))
+    .replace(/[șş]/gi, (m) => (m === m.toUpperCase() ? "S" : "s"))
+    .replace(/[țţ]/gi, (m) => (m === m.toUpperCase() ? "T" : "t"))
+    .replace(/[^\x20-\x7E]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const bani = (n) => actNum(n, 2).replace(/\s/g, "");
+  const marfa = rows.length === 1
+    ? `${ascii(rows[0].r.product)} ${bani(rows[0].netKg)}kg x ${actNum(rows[0].price, 4).replace(/\s/g, "")}`
+    : `${rows.length} pozitii`;
+  const build = (numeFirma) => [
+    `${numeFirma} IDNO ${ascii(company.idno)}`,
+    `Act ${ascii(series) || "-"} ${ascii(nr)} din ${ascii(dateText)}`,
+    `Furnizor ${ascii(partner.name)}${partner.idno ? ` IDNP ${ascii(partner.idno)}` : ""}`,
+    marfa,
+    `Val ${bani(value)} Ret ${bani(tax)} Plata ${bani(netPay)} lei`
+  ].join("\n");
+
+  // Capacitatea codului e de 213 de octeti. Scurtam in ordinea importantei: intai numele
+  // firmei (IDNO-ul o identifica oricum), apoi detaliul marfii. Identificarea partilor si
+  // suma de plata raman mereu.
+  let text = build(ascii(company.name));
+  if (text.length > 213) text = build(ascii(company.name).slice(0, 40).trim());
+  if (text.length > 213) {
+    const linii = build(ascii(company.name).slice(0, 40).trim()).split("\n");
+    linii.splice(3, 1);
+    text = linii.join("\n");
+  }
+  return text.slice(0, 213);
+}
+
 function buildPurchaseActHtml(receipts, partner, company) {
   const p = partner || {};
   const co = company || DEFAULT_COMPANY;
   const rows = (receipts || []).filter(Boolean).map((r) => ({ r, ...actReceiptFigures(r) }));
-  const totalKg = rows.reduce((s, x) => s + x.netKg, 0);
   const value = Number(rows.reduce((s, x) => s + x.value, 0).toFixed(2));
   const taxPercent = partnerWithholdingPercent(p);
   // „Total de plata" = datoria INREGISTRATA pe document, nu o recalculare din cota de azi.
@@ -6727,10 +6757,6 @@ function buildPurchaseActHtml(receipts, partner, company) {
     return sum + (stored > 0 ? stored : x.value - (x.value * taxPercent) / 100);
   }, 0).toFixed(2));
   const tax = Math.max(Number((value - netPay).toFixed(2)), 0);
-  // Procentul scris pe act e cel EFECTIV, dedus din cifrele documentului. Cota din
-  // nomenclator se poate schimba dupa receptie, iar pe recepțiile vechi, fără reținere
-  // înregistrată, eticheta „(6%)" ar sta lângă „0,00" — act care se contrazice singur.
-  const effectivePercent = value > 0 ? Number(((tax / value) * 100).toFixed(2)) : 0;
   const nr = "____";
   const words = escapeComboHtml(numberToWordsRo(value));
   const dates = rows.map((x) => x.r.receivedAt || x.r.createdAt).filter(Boolean).sort();
@@ -6747,6 +6773,16 @@ function buildPurchaseActHtml(receipts, partner, company) {
           <td class="of-r">${actNum(x.price, 2)}</td>
           <td class="of-r">${actNum(x.value, 2)}</td>
         </tr>`).join("");
+  // Codul QR cu datele actului (generat local, vezi public/qr.js). Daca generatorul lipseste
+  // sau textul nu incape, actul se tipareste pur si simplu fara cod — hartia ramane valida.
+  const qrTag = (() => {
+    if (typeof qrMatrix !== "function" || typeof qrSvg !== "function") return "";
+    const matrix = qrMatrix(actQrPayload({
+      company: co, partner: p, series: co.series || co.shortName || "", nr,
+      dateText, rows, value, tax, netPay
+    }));
+    return matrix ? qrSvg(matrix, 96) : "";
+  })();
   // Rand gol: pe formularul tipizat tabelul are o linie libera sub cea numerotata.
   const emptyRow = `<tr><td>&nbsp;</td><td></td><td></td><td></td><td></td></tr>`;
   // Linie punctata cu eticheta dedesubt, ca pe formular.
@@ -6757,6 +6793,7 @@ function buildPurchaseActHtml(receipts, partner, company) {
   return `
     <table style="width:100%;border-collapse:collapse;margin-bottom:6px;"><tr>
       <td style="width:90px;vertical-align:top;">${co.logoUrl ? `<img src="${escapeComboHtml(co.logoUrl)}" style="max-width:80px;max-height:80px;">` : ""}</td>
+      <td style="vertical-align:top;">${qrTag}</td>
       <td></td>
     </tr></table>
     <table style="width:100%;border-collapse:collapse;"><tr>
@@ -6818,7 +6855,7 @@ function buildPurchaseActHtml(receipts, partner, company) {
     </tr></table>
 
     <div style="margin-top:16px;border-bottom:1px solid #000;text-align:center;padding-bottom:1px;">
-      ${escapeComboHtml([p.idno, p.idCard, p.address].filter(Boolean).join(", "))}</div>
+      ${escapeComboHtml([p.idno, p.address].filter(Boolean).join(", "))}</div>
     ${cap("Codul personal / IDNP , datele buletinului de identitate, adresa", "идентификационный номер / IDNP, данные удостоверения личности , адрес")}
 
     <table class="of-tbl" style="margin-top:10px;">
@@ -7229,54 +7266,6 @@ function buildInvoicePrintHtml(delivery) {
     <div style="margin-top:6px;"><span class="lbl">Data:</span> ${dateInv}</div>
     <div class="isign">Administrator&nbsp;&nbsp;&nbsp;<span class="iline">&nbsp;</span></div>
   </div>`;
-}
-
-function buildPurchaseActPrintHtml(delivery, company) {
-  // Act de achizitie is based on the source receipt's supplier
-  const receipt = (receiptsCache || []).find((r) => Number(r.id) === Number(delivery.receiptId));
-  if (!receipt) {
-    alert("Recepția sursă nu a fost găsită — reîncarcă pagina și încearcă din nou.");
-    return "";
-  }
-  const supplier = findPartnerByName(receipt.supplier);
-  // Actul de achizitie reflecta RECEPTIA (cumpararea de la furnizor): cantitatea PLATITA
-  // + pret lei/kg. Baza vine din `actReceiptFigures` — aceeasi folosita de actul din
-  // „Documente tipar" si oglinda lui `receiptPayableTonnes` din backend. Copiata inline,
-  // devenea a patra varianta a aceleiasi formule; exact asa au ajuns cele doua acte ale
-  // aceleiasi receptii sa arate cantitati si preturi unitare diferite.
-  const qty = Number(actReceiptFigures(receipt).netKg / 1000)
-    || Number((delivery.netWeight > 0 ? delivery.netWeight : delivery.deliveredQuantity) || 0); // tone
-  const priceRaw = Number(receipt.price || 0); // lei/kg
-  // Aceeasi regula ca la actul din pagina „Documente tipar": randul arata valoarea BRUTA
-  // (cantitate × pret), iar „Total de plata" e datoria REALA din registru (neta, dupa impozitul
-  // retinut la sursa). Reținerea se deduce ca diferenta, deci documentul se inchide aritmetic.
-  const gross = Number(receipt.preliminaryMerchandiseValue) || Number((qty * 1000 * priceRaw).toFixed(2));
-  // Acelasi lant ca in `buildPurchaseActHtml`: `amountToPay` e cifra imbogatita de server,
-  // dar pe un document citit direct (raspunsul unei salvari, pus optimist in cache) exista
-  // doar `preliminaryPayableAmount`. Fara al doilea termen, acelasi act arata cand datoria
-  // reala, cand valoarea bruta.
-  const netPay = Number(receipt.amountToPay ?? receipt.preliminaryPayableAmount ?? gross);
-  const tax = Math.max(Number((gross - netPay).toFixed(2)), 0);
-  // Pretul afisat se derivă din brut, ca „cantitate × preț = Sumă" să iasă exact pe hârtie.
-  const price = qty > 0 ? Number((gross / (qty * 1000)).toFixed(4)) : priceRaw;
-  return `${docHeader(company)}
-    <div class="doc-title">Act de achiziție</div>
-    <div class="doc-subtitle">${formatDateShort(delivery.createdAt)} · Recepție #${escapeComboHtml(String(delivery.receiptId))}</div>
-    <div class="doc-party" style="margin-bottom:14px;">
-      <h4>Furnizor</h4>
-      <div><b>${escapeComboHtml(receipt?.supplier || "-")}</b></div>
-      ${supplier?.idno ? `<div>IDNO: ${escapeComboHtml(supplier.idno)}</div>` : ""}
-      ${supplier?.address ? `<div>${escapeComboHtml(supplier.address)}</div>` : ""}
-      ${supplier?.bankName ? `<div>Banca: ${escapeComboHtml(supplier.bankName)} · IBAN: ${escapeComboHtml(supplier.iban || "-")}</div>` : ""}
-    </div>
-    <table class="doc-table">
-      <thead><tr><th>Produs</th><th>Cantitate</th><th>Preț</th><th>Sumă</th></tr></thead>
-      <tbody><tr><td>${escapeComboHtml(delivery.product || "")}</td><td>${formatNumber(qty * 1000)} kg</td><td>${moneyRo(price)}/kg</td><td>${moneyRo(gross)}</td></tr></tbody>
-      <tfoot><tr><td colspan="3">VALOARE TOTALĂ</td><td>${moneyRo(gross)} MDL</td></tr></tfoot>
-    </table>
-    ${tax > 0 ? `<div class="doc-grid"><div><b>Rețineri la buget:</b> ${moneyRo(tax)} MDL</div></div>` : ""}
-    <div class="doc-total">TOTAL DE PLATĂ: ${moneyRo(netPay)} MDL</div>
-    <div class="doc-sign"><div>Furnizor</div><div>Achizitor AgroProfit+</div></div>`;
 }
 
 function buildCertificatePrintHtml(delivery) {
@@ -7761,7 +7750,20 @@ function printDeliveryDocument(deliveryId, docType) {
       alert("Actul de achiziție este disponibil doar pentru livrări legate de o recepție (cu furnizor).");
       return;
     }
-    html = buildPurchaseActPrintHtml(delivery, headerCompany); title = `Act achizitie ${delivery.id}`;
+    // Acelasi formular tipizat ca pe randul receptiei: un singur act oficial, o singura
+    // macheta. Inainte existau doua machete pentru aceeasi cumparare.
+    const actReceipt = (receiptsCache || []).find((r) => Number(r.id) === Number(delivery.receiptId));
+    if (!actReceipt) {
+      alert("Recepția sursă nu a fost găsită — reîncarcă pagina și încearcă din nou.");
+      return;
+    }
+    const actPartner = findPartnerById(actReceipt.supplierId) || findPartnerByName(actReceipt.supplier);
+    if (!actPartner) {
+      alert("Furnizorul recepției nu a fost găsit în nomenclator.");
+      return;
+    }
+    html = buildPurchaseActHtml([actReceipt], actPartner, headerCompany);
+    title = `Act achizitie ${actPartner.name}`;
   }
   else if (docType === "certificate") { html = buildCertificatePrintHtml(delivery); title = `Certificat calitate ${delivery.id}`; }
   else if (docType === "bon") { html = buildBonCantarHtml(delivery, headerCompany); title = `Bon cantar ${delivery.id}`; }
@@ -8013,10 +8015,6 @@ bodyEl?.addEventListener("click", (event) => {
   if (!btn) return;
   const receipt = (receiptsCache || []).find((r) => Number(r.id) === Number(btn.dataset.id));
   if (!receipt) return;
-  if (!isReceiptInStock(receipt)) {
-    window.alert("Recepția nu e în stoc (proiect sau anulată). Documentele s-ar emite pe marfă care n-a intrat.");
-    return;
-  }
   const partner = findPartnerById(receipt.supplierId) || findPartnerByName(receipt.supplier);
   if (!partner) {
     window.alert("Furnizorul recepției nu a fost găsit în nomenclator. Completează-l înainte de a tipări documentele.");
@@ -8029,29 +8027,22 @@ bodyEl?.addEventListener("click", (event) => {
   // Meniul se inchide singur dupa alegere; altfel ramane deschis peste tabel.
   btn.closest("details")?.removeAttribute("open");
   if (kind === "contract") {
+    // Contractul e un document de PARTENER, fara cifre din receptie: se poate pregati si
+    // inainte ca marfa sa intre in stoc (exact cazul pentru care contabilul il vrea).
     openOfficialDocWindow(buildSaleContractHtml(partner, company), `Contract ${partner.name}`);
   } else if (kind === "act") {
-    openOfficialDocWindow(buildPurchaseActHtml([receipt], partner, company), `Act de achizitie ${partner.name}`);
-  } else if (kind === "payment") {
-    // Ordinul se emite pe RESTUL de plata al receptiei (cat mai are de primit furnizorul).
-    // Nu citim `transactionsCache`: pe ecranul Receptii el poate fi vechi, iar un ordin cu o
-    // suma veche e mai rau decat unul de completat.
-    const dePlata = Number(receipt.amountToPay ?? receipt.preliminaryPayableAmount ?? 0);
-    const achitat = Number(receipt.paidAmount || 0);
-    const rest = Number((dePlata - achitat).toFixed(2));
-    if (!(rest > 0)) {
-      window.alert("Recepția nu are rest de plată: ordinul de plată ar fi pe zero lei.");
+    // Actul insa vorbeste despre marfa cumparata: pe un proiect sau pe o receptie anulata ar
+    // fi o hartie fara acoperire (regula 7 din CLAUDE.md).
+    if (!isReceiptInStock(receipt)) {
+      window.alert("Recepția nu e în stoc (proiect sau anulată). Actul de achiziție s-ar emite pe marfă care n-a intrat.");
       return;
     }
-    openOfficialDocWindow(
-      buildCashPaymentOrderHtml(
-        { amount: rest, createdAt: new Date().toISOString(), receiptId: receipt.id, partnerId: partner.id, partner: partner.name },
-        partner,
-        company
-      ),
-      `Ordin de plata ${partner.name}`
-    );
+    openOfficialDocWindow(buildPurchaseActHtml([receipt], partner, company), `Act de achizitie ${partner.name}`);
   }
+  // Ordinul de plata NU se emite de aici: el iese dintr-o PLATA inregistrata, din ecranul
+  // Financiar (`printAccountingDocument("paymentOrder")`). Sintetizat din restul de plata, ar
+  // fi o dispozitie de casa fara corespondent in registru, retiparibila oricand pe aceeasi
+  // datorie — doua hartii semnabile pentru aceiasi bani.
 });
 
 // Delivery document print buttons (Etapa 6) — event delegation
