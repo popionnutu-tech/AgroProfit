@@ -290,6 +290,32 @@ apa tot se evaporă.
   nu se iese din ea decât spre „Anulat". Dacă adaugi altă rută de editare, reverifică:
   `receiptPayableTonnes` se încrede orbește în flagul stocat.
 
+### 10. Formularele de tipar (acte oficiale)
+- **Actul de achiziție are UN singur builder**, `buildPurchaseActHtml` (`public/app.js`), folosit
+  și de meniul „Tipar" de pe rândul recepției, și de pagina „Documente tipar", și de butonul din
+  Livrări. A existat o a doua machetă; aceeași cumpărare ieșea pe două hârtii diferite. Macheta
+  urmează formularul tipizat bilingv (RO/RU) primit de la proprietar — nu o „înfrumuseța".
+- **Meniul „Tipar" de pe recepție** e al contabilului, contabilului-șef și adminului
+  (`CONTABILI_SI_ADMIN` în `renderReceipts`). Conține contractul și actul.
+  - **Contractul** e document de PARTENER: se poate tipări și pe o recepție în „Proiect"
+    (contabilul îl pregătește înainte), dar nu pe una anulată.
+  - **Actul** cere marfă în stoc (`isReceiptInStock`) — altfel e o hârtie fără acoperire.
+- **Ordinul de plată NU se emite de pe recepție.** Iese din Financiar, dintr-o PLATĂ
+  înregistrată (`printAccountingDocument("paymentOrder")`). Sintetizat din restul de plată, ar
+  fi o dispoziție de casă fără corespondent în registru, retipăribilă oricând pe aceeași datorie.
+- **Codul QR** (`public/qr.js`, fără dependențe) poartă datele actului ca text ASCII: firma și
+  IDNO, seria/nr. și data, furnizorul și IDNP, marfa, valoarea, reținerea, suma de plată.
+  - Generatorul e local **intenționat**: unul extern ar primi datele actului la fiecare tipărire.
+  - Capacitatea e 213 octeți (versiunile 1-10, corecție M). `actQrPayload` scurtează în ordine:
+    întâi numele firmei, apoi detaliul mărfii. Identificarea părților și suma rămân mereu.
+  - Textul întors de `actQrPayload` **nu e escapat pentru HTML**. Ajunge doar în encoder; dacă
+    îl afișezi vreodată pe pagină, treci-l prin `escapeComboHtml`.
+  - QR-ul **nu e semnat**: e comoditate de citire, nu dovadă de autenticitate. Nu construi
+    peste el un flux de tip „scanez și validez documentul".
+  - Orice modificare în `qr.js` se verifică decodând rezultatul cu un decodor independent;
+    trei erori (polinom inversat, format transpus, aliniere sărită) au trecut neobservate la
+    citire și au ieșit doar așa.
+
 ## Deploy
 - **Push pe `main` → Vercel publică automat** pe agroprofit-plus.vercel.app (integrare Git activă).
 - Lucrează pe o **ramură separată** (implicit `dev`), testează pe preview, apoi fă merge în `main`.
