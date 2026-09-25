@@ -36,7 +36,7 @@ git add -A 2>/dev/null
 if ! git commit -q \
   -m "auto: modificare cod ($TS)" \
   -m "Commit automat (hook PostToolUse) pe ramura $BRANCH." \
-  -m "Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>" 2>/dev/null; then
+  -m "Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>" 2>/dev/null; then
   exit 0
 fi
 
