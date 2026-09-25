@@ -87,7 +87,7 @@ const {
   getReceiptDefaultsHandler
 } = require("./report-extensions-handlers");
 const storage = require("./storage");
-const { filterCanceledForRole } = require("./permissions");
+const { CAN_CORRECT_TERMS_ROLES, filterCanceledForRole } = require("./permissions");
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
@@ -393,7 +393,7 @@ app.post(
 // (`CAN_CORRECT_TERMS_ROLES`), ca ruta si magazia sa nu poata divergea.
 app.patch(
   "/api/receipts/:id/correct-terms",
-  requireRoles(["accountant", "accountant-sef", "admin"]),
+  requireRoles(CAN_CORRECT_TERMS_ROLES),
   async (req, res) => {
     return correctReceiptTermsHandler(req, res, req.params.id);
   }

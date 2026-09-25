@@ -5,7 +5,8 @@ const {
   getRoleName,
   getRolePermissions,
   listSystemRoles,
-  normalizeRoleCode
+  normalizeRoleCode,
+  CAN_CORRECT_TERMS_ROLES
 } = require("./permissions");
 const { backupRuntimeData } = require("./runtime-backup");
 const { writeJsonAtomic } = require("./atomic-write");
@@ -253,11 +254,6 @@ const WAREHOUSE_ONLY_RETURN_ROLES = ["accountant", "accountant-sef"];
 // sa apuce sa le introduca). Proiectul NU misca stoc si NU creeaza datorie; operatorul il
 // confirma la cantar cu greutatile reale.
 const CAN_CREATE_DRAFT_ROLES = ["accountant", "accountant-sef", "admin"];
-// Cine poate corecta CONDITIILE unei receptii deja intrate (bifa „plata pe masa cu
-// umiditate" si/sau pretul). Rescrie bani pe un document inregistrat, deci nu e operatie de
-// zi cu zi — dar e aceeasi categorie cu ajustarea valorii receptiei, pe care contabilii o au
-// deja prin `finance-write`. Stocul nu se atinge in niciun caz.
-const CAN_CORRECT_TERMS_ROLES = ["accountant", "accountant-sef", "admin"];
 
 // Statusuri care NU se pot cere din body la crearea unei receptii:
 //   „Proiect" — se obtine doar prin `isDraft`, decis de ROL. Altfel oricine putea crea o

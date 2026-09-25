@@ -454,8 +454,9 @@ async function completeWeighingHandler(req, res, id) {
   }
 }
 
-// Corectie de conditii pe o receptie deja intrata (doar admin): bifa „plata pe masa cu
-// umiditate" si/sau pretul. Recalculam estimarea AICI, ca la creare si la a doua cantarire —
+// Corectie de conditii pe o receptie deja intrata (contabili + admin, vezi
+// `CAN_CORRECT_TERMS_ROLES`): bifa „plata pe masa cu umiditate" si/sau pretul.
+// Recalculam estimarea AICI, ca la creare si la a doua cantarire —
 // stratul de persistenta nu citeste nomenclatorul.
 async function correctReceiptTermsHandler(req, res, id) {
   const body = req.body || {};

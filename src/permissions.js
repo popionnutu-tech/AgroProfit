@@ -178,7 +178,14 @@ function filterCanceledTransactionsForRole(docs, roleCode) {
 // handlerele decid regimul dupa ea, `local-storage` verifica dreptul cu ea.
 const DRAFT_ONLY_ROLES = ["accountant", "accountant-sef"];
 
+// Cine poate corecta CONDITIILE unei receptii deja intrate (bifa „plata pe masa cu
+// umiditate" si/sau pretul). Rescrie bani pe un document inregistrat, dar e aceeasi
+// categorie cu ajustarea valorii receptiei (✎), pe care contabilii o au prin `finance-write`.
+// SURSA UNICA: ruta o foloseste ca garda, magazia o reverifica fail-closed.
+const CAN_CORRECT_TERMS_ROLES = ["accountant", "accountant-sef", "admin"];
+
 module.exports = {
+  CAN_CORRECT_TERMS_ROLES,
   DRAFT_ONLY_ROLES,
   canRoleViewCanceled,
   canRoleViewCanceledTransaction,

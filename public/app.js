@@ -2039,19 +2039,21 @@ function renderReceipts(receipts) {
   const canEditStatuses = canAccess("receipt-write");
   const canChangeSupplier = canAccess("finance");
   const canEditAmount = canAccess("finance-write");
-  // Corectia de CONDITII (bifa de umiditate + pret) e rezervata adminului: recalculeaza
-  // bani pe un document deja inregistrat. Butonul e separat de ✎ (care scrie o suma la
-  // liber) tocmai ca sa nu se confunde cele doua operatii.
-  // Oglinda lui `CAN_CORRECT_TERMS_ROLES` din backend (src/local-storage.js). Butonul doar
-  // se ascunde; garda reala e pe ruta si in magazie.
-  // Actul de achizitie e un document contabil: acelasi drept ca restul coloanelor de bani.
-  const canPrintAct = canAccess("finance");
+  // Corectia de CONDITII (bifa de umiditate + pret) recalculeaza bani pe un document deja
+  // inregistrat. Butonul e separat de ✎ (care scrie o suma la liber) tocmai ca sa nu se
+  // confunde cele doua operatii. Oglinda lui `CAN_CORRECT_TERMS_ROLES` din src/permissions.js:
+  // aici butonul doar se ascunde, garda reala e pe ruta si in magazie.
+  // Drepturile financiare se citesc O SINGURA data per randare: `canAccess` reface listele de
+  // capabilitati la fiecare apel, iar tabelul are un rand per receptie. Actul de achizitie e
+  // un document contabil, deci acelasi drept ca restul coloanelor de bani.
+  const canFinance = canAccess("finance");
+  const canPrintAct = canFinance;
   const canCorrectTerms = ["accountant", "accountant-sef", "admin"]
     .includes(String(currentSessionUser?.roleCode || ""));
   // Operatorul nu vede coloanele de plata (plata preliminara, data platii).
   const receiptsTable = document.getElementById("receipts-table");
   if (receiptsTable) {
-    receiptsTable.classList.toggle("hide-fin", !canAccess("finance"));
+    receiptsTable.classList.toggle("hide-fin", !canFinance);
   }
   // Populează filtrul de furnizori (fiecare o singură dată, fără duplicate)
   if (receiptSupplierFilterEl) {
@@ -2088,7 +2090,7 @@ function renderReceipts(receipts) {
       const payBadge = isCanceled
         ? '<span class="pay-badge pay-anulat">—</span>'
         : paymentBadge(item.paymentStatus);
-      const canPay = canAccess("finance") && !isCanceled && rest > 0;
+      const canPay = canFinance && !isCanceled && rest > 0;
       // Cantar in 2 pasi: recepțiile „In descarcare" apar in lista, dar READ-ONLY (badge in loc de select,
       // cantitatea inca necunoscuta) — se finalizeaza din panoul „Recepții în descărcare".
       const isPendingWeighing = item.status === "In descarcare";
@@ -6688,8 +6690,19 @@ function buildPurchaseActHtml(receipts, partner, company) {
   const totalKg = rows.reduce((s, x) => s + x.netKg, 0);
   const value = Number(rows.reduce((s, x) => s + x.value, 0).toFixed(2));
   const taxPercent = partnerWithholdingPercent(p);
-  const tax = Number(((value * taxPercent) / 100).toFixed(2));
-  const netPay = Number((value - tax).toFixed(2));
+  // „Total de plata" = datoria INREGISTRATA pe document, nu o recalculare din cota de azi.
+  // Doua motive, amandoua vazute in date:
+  //  1. dupa ajustarea manuala a sumei (✎), `price` de pe receptie devine lei/kg NET, deci
+  //     `value` e deja suma neta — scazand inca o data impozitul, actul semnat de furnizor
+  //     arata 0,94 din datoria reala, iar extrasul de cont arata altceva;
+  //  2. cota se poate schimba in nomenclator dupa receptie, iar retinerea e INGHETATA pe
+  //     document (`withholdingAmount`) — reprintarea trebuie sa dea aceeasi cifra.
+  // Impozitul ramane diferenta brut − net, exact ca pe actul tiparit din livrare.
+  const netPay = Number(rows.reduce((sum, x) => {
+    const stored = Number(x.r.amountToPay ?? x.r.preliminaryPayableAmount ?? 0);
+    return sum + (stored > 0 ? stored : x.value - (x.value * taxPercent) / 100);
+  }, 0).toFixed(2));
+  const tax = Math.max(Number((value - netPay).toFixed(2)), 0);
   const nr = "____";
   const words = escapeComboHtml(numberToWordsRo(value));
   const dates = rows.map((x) => x.r.receivedAt || x.r.createdAt).filter(Boolean).sort();
@@ -6712,7 +6725,7 @@ function buildPurchaseActHtml(receipts, partner, company) {
       <td><div class="of-title">Act de achiziție a mărfurilor<small class="of-ru">Акт закупки товаров</small></div></td>
       <td style="width:150px;font-size:11px;">Seria <span class="of-fill">${escapeComboHtml(co.series || co.shortName || "")}</span><br>Nr. <span class="of-fill">${escapeComboHtml(nr)}</span></td>
     </tr></table>
-    <div class="of-row of-c">din <span class="of-fill">${dateText}</span></div>
+    <div class="of-row of-c">din <span class="of-fill">${escapeComboHtml(dateText)}</span></div>
 
     <div class="of-row"><span class="of-fill" style="min-width:340px;">${escapeComboHtml(co.name || "")}</span>, IDNO <span class="of-fill">${escapeComboHtml(co.idno || "")}</span>
       <div class="of-cap">Denumirea și rechizitele întreprinderii, adresa / Наименование, реквизиты предприятия, адрес</div></div>
@@ -7834,7 +7847,7 @@ document.getElementById("statement-print-btn")?.addEventListener("click", printS
 // Act de achizitie direct de pe randul de receptie. Foloseste ACELASI `buildPurchaseActHtml`
 // ca pagina „Documente tipar" (o receptie = un rand in act), ca sa nu apara a doua varianta a
 // aceluiasi document oficial, cu alte cifre.
-document.getElementById("receipts-body")?.addEventListener("click", (event) => {
+bodyEl?.addEventListener("click", (event) => {
   const btn = event.target.closest('[data-action="print-act"]');
   if (!btn) return;
   const receipt = (receiptsCache || []).find((r) => Number(r.id) === Number(btn.dataset.id));
@@ -7848,8 +7861,11 @@ document.getElementById("receipts-body")?.addEventListener("click", (event) => {
     window.alert("Furnizorul recepției nu a fost găsit în nomenclator. Completează-l înainte de a tipări actul.");
     return;
   }
+  // Firma emitenta se alege pe pagina Receptii, ca pe „Documente tipar": cu mai multe firme
+  // in nomenclator, un act tiparit tacit pe firma implicita iese pe persoana juridica gresita.
+  const company = resolveCompany(document.getElementById("receipt-doc-company")?.value || "");
   openOfficialDocWindow(
-    buildPurchaseActHtml([receipt], partner, resolveCompany("")),
+    buildPurchaseActHtml([receipt], partner, company),
     `Act de achizitie ${partner.name}`
   );
 });
@@ -9831,7 +9847,7 @@ bodyEl.addEventListener("click", async (event) => {
   }
 });
 
-// --- Corectie de CONDITII pe o receptie deja intrata (doar admin) ---
+// --- Corectie de CONDITII pe o receptie deja intrata (contabili + admin) ---
 // Intelegerea se afla uneori dupa ce marfa a fost descarcata: furnizorul spune abia la
 // decontare ca achizitia s-a facut cu tot cu apa, sau pretul n-a fost completat la cantar.
 // Diferenta fata de ✎ (ajustare de suma): aici se corecteaza INTRARILE (bifa, pretul), iar
