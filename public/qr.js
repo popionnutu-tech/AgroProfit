@@ -314,11 +314,14 @@
     const matches = (line, start) => pattern.every((p, i) => line[start + i] === p);
     const reversed = pattern.slice().reverse();
     const matchesRev = (line, start) => reversed.every((p, i) => line[start + i] === p);
-    for (let r = 0; r < size; r += 1) {
-      for (let c = 0; c + 11 <= size; c += 1) {
-        if (matches(modules[r], c) || matchesRev(modules[r], c)) score += 40;
-        const col = modules.map((row) => row[c === 0 ? r : r]); // coloana r
-        if (matches(col, c) || matchesRev(col, c)) score += 40;
+    // Coloanele se extrag O SINGURA data: reconstruite in bucla interioara, cautarea sablonului
+    // devenea cubica in latura codului.
+    const columns = [];
+    for (let c = 0; c < size; c += 1) columns.push(modules.map((row) => row[c]));
+    for (let i = 0; i < size; i += 1) {
+      for (let start = 0; start + 11 <= size; start += 1) {
+        if (matches(modules[i], start) || matchesRev(modules[i], start)) score += 40;
+        if (matches(columns[i], start) || matchesRev(columns[i], start)) score += 40;
       }
     }
 
@@ -356,6 +359,7 @@
       const score = penalty(state.modules, state.size);
       if (!best || score < best.score) best = { score, modules: state.modules, size: state.size };
     }
+    if (!best) return null; // `forcedMask` in afara intervalului 0-7
     return best.modules.map((row) => row.map((v) => v === true));
   }
 

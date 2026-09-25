@@ -6704,6 +6704,9 @@ function actNum(n, dec) {
 // Textul din codul QR al actului: datele documentului, ca sa poata fi citite cu telefonul
 // fara cont si fara internet. Doar ASCII (diacriticele ar dubla octetii si ar scoate textul
 // din capacitatea codului) si scurtat la ce incape: identificarea partilor si banii.
+// ATENTIE: textul intors NU e escapat pentru HTML (pastreaza < > " ' &). E facut sa intre
+// intr-un cod QR, unde ajunge sir de biti. Daca vreodata se afiseaza pe pagina (sub cod, in
+// `title`, oriunde), trece-l intai prin `escapeComboHtml`.
 function actQrPayload({ company, partner, series, nr, dateText, rows, value, tax, netPay }) {
   const ascii = (v) => String(v || "")
     .replace(/[ăâ]/gi, (m) => (m === m.toUpperCase() ? "A" : "a"))
@@ -8028,7 +8031,12 @@ bodyEl?.addEventListener("click", (event) => {
   btn.closest("details")?.removeAttribute("open");
   if (kind === "contract") {
     // Contractul e un document de PARTENER, fara cifre din receptie: se poate pregati si
-    // inainte ca marfa sa intre in stoc (exact cazul pentru care contabilul il vrea).
+    // inainte ca marfa sa intre in stoc (exact cazul pentru care contabilul il vrea). Pe o
+    // receptie ANULATA insa nu: documentul ar parea ca tine de o operatiune stearsa.
+    if (receipt.status === "Anulat") {
+      window.alert("Recepția e anulată. Contractul se tipărește de pe o recepție validă sau din „Documente tipar”.");
+      return;
+    }
     openOfficialDocWindow(buildSaleContractHtml(partner, company), `Contract ${partner.name}`);
   } else if (kind === "act") {
     // Actul insa vorbeste despre marfa cumparata: pe un proiect sau pe o receptie anulata ar
