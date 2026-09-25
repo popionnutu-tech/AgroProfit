@@ -5956,6 +5956,8 @@ module.exports = {
   completeReceiptWeighing,
   updateReceiptSupplier,
   correctReceiptTerms,
+  // Expusa pentru testul care verifica ca `actReceiptFigures` din public/app.js nu a divergat.
+  receiptPayableTonnes,
   deliveryReceivableTonnePrice,
   deliveryTonnePriceFromBilling,
   getReceiptRaw,

@@ -3022,6 +3022,12 @@ function renderDeliveries(deliveries) {
   // returul pe livrările facturate, deci butonul trebuie să le apară.
   const canDeliveryWrite = canAccess("delivery-write") || canReturnInvoicedDelivery();
   const canFinance = canAccess("finance");
+  // Aceeasi regula ca pe randul de receptie: actul de achizitie e al contabililor si al
+  // adminului. Managerul are `finance` (vede banii) dar nu emite acte — si pana acum tiparea
+  // exact acelasi document, pe drumul din Livrari.
+  const canIssueActs = ["accountant", "accountant-sef", "admin", "contabil"].includes(
+    String(currentSessionUser?.roleCode || "").trim().toLowerCase()
+  );
   deliveriesBodyEl.innerHTML = filtered
     .map((item) => {
       const status = item.status || "Proiect";
@@ -3077,7 +3083,7 @@ function renderDeliveries(deliveries) {
                   <button type="button" class="doc-print-btn" data-print="invoice" data-id="${item.id}">Invoice</button>
                   <button type="button" class="doc-print-btn" data-print="imputernicire" data-id="${item.id}">Împuternicire</button>
                   <button type="button" class="doc-print-btn" data-print="declaratie" data-id="${item.id}">Declarație</button>
-                  <button type="button" class="doc-print-btn" data-print="act" data-id="${item.id}">Act achiziție</button>
+                  ${canIssueActs ? `<button type="button" class="doc-print-btn" data-print="act" data-id="${item.id}">Act achiziție</button>` : ""}
                 </div>
               </details>` : ""}
             </div>
@@ -6704,7 +6710,7 @@ function actReceiptFigures(receipt) {
     : 0;
   // Pretul afisat se DERIVA din valoare, ca „col.5 = col.3 × col.4" sa fie adevarat pe
   // hartie. Aceeasi regula ca in actul din Livrari.
-  const price = netKg > 0 && value > 0 ? Number((value / netKg).toFixed(4)) : entryPrice;
+  const price = netKg > 0 && value > 0 ? actDerivePrice(value, netKg) : entryPrice;
   return { netKg, price, value };
 }
 
@@ -6712,6 +6718,40 @@ function actReceiptFigures(receipt) {
 // Impozitul la buget = valoare × procent (din nomenclator); Total de plata = valoare − impozit.
 // Numar cu separator de mii = SPATIU (ex. „8 220", „49 320,00") — fara echivoc pe actul oficial,
 // ca sa nu para 8220 kg drept 8,22 (in ro-RO punctul e separator de mii). Zecimala ramane virgula.
+// Capul de tabel al formularului tipizat afirma „5 = 3 x 4". Pretul de pe act e DERIVAT
+// (valoare / cantitate), iar tiparit cu 2 zecimale rupea relatia cu pana la cativa lei — pe
+// un document care e temeiul platii si al impozitului reținut la sursa. Mai rau: codul QR
+// purta pretul cu 4 zecimale, deci hartia si codul scanat de pe acelasi act aratau altceva.
+//
+// Regula NU e „cate zecimale are pretul" (nu ajunge: 836,16 kg x 6,1234 = 5 120,14 fata de
+// 5 120,16 inregistrat), ci „cate zecimale fac inmultirea sa se inchida". Se ia prima
+// precizie care iese; un pret rotund ramane „6,15", nu „6,1500".
+// Prețul de pe act, derivat din valoare, cu prima precizie (2..6 zecimale) la care
+// `cantitate x preț = valoare` se închide la ban. Rotunjirea fixă la 4 zecimale rupea
+// relația afirmată în capul de tabel al formularului tipizat.
+function actDerivePrice(value, netKg) {
+  for (const dec of [2, 3, 4, 5, 6]) {
+    const p = Number((value / netKg).toFixed(dec));
+    if (Math.abs(netKg * p - value) < 0.005) return p;
+  }
+  return Number((value / netKg).toFixed(6));
+}
+
+function actPriceDecimals(price, netKg, value) {
+  const p = Number(price) || 0;
+  const kg = Number(netKg) || 0;
+  const val = Number(value) || 0;
+  for (const dec of [2, 3, 4, 5, 6]) {
+    if (kg <= 0 || val <= 0) {
+      // Fara cantitate sau fara valoare nu exista relatie de inchis: se afiseaza pretul cum e.
+      if (Math.abs(p - Number(p.toFixed(dec))) < 1e-9) return dec;
+      continue;
+    }
+    if (Math.abs(kg * Number(p.toFixed(dec)) - val) < 0.005) return dec;
+  }
+  return 6;
+}
+
 function actNum(n, dec) {
   return new Intl.NumberFormat("ro-RO", { minimumFractionDigits: dec, maximumFractionDigits: dec })
     .format(Number(n) || 0)
@@ -6810,7 +6850,7 @@ function buildPurchaseActHtml(receipts, partner, company) {
           <td>${escapeComboHtml(x.r.product || "")}</td>
           <td class="of-c">kg</td>
           <td class="of-r">${actNum(x.netKg, 2)}</td>
-          <td class="of-r">${actNum(x.price, 2)}</td>
+          <td class="of-r">${actNum(x.price, actPriceDecimals(x.price, x.netKg, x.value))}</td>
           <td class="of-r">${actNum(x.value, 2)}</td>
         </tr>`).join("");
   // Codul QR cu datele actului (generat local, vezi public/qr.js). Daca generatorul lipseste
