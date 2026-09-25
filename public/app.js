@@ -6750,7 +6750,9 @@ function buildPurchaseActHtml(receipts, partner, company) {
   // Rand gol: pe formularul tipizat tabelul are o linie libera sub cea numerotata.
   const emptyRow = `<tr><td>&nbsp;</td><td></td><td></td><td></td><td></td></tr>`;
   // Linie punctata cu eticheta dedesubt, ca pe formular.
-  const ln = (value, min) => `<span class="of-fill" style="min-width:${min}px;">${escapeComboHtml(value || "")}</span>`;
+  // `text`, nu `value`: in functie exista deja `value` (valoarea totala a actului), iar un
+  // parametru cu acelasi nume ar umbri-o la prima editare a formularului.
+  const ln = (text, min) => `<span class="of-fill" style="min-width:${min}px;">${escapeComboHtml(text || "")}</span>`;
   const cap = (ro, ru) => `<div class="of-cap">${ro}${ru ? ` (${ru})` : ""}</div>`;
   return `
     <table style="width:100%;border-collapse:collapse;margin-bottom:6px;"><tr>

@@ -25,3 +25,8 @@ SECURITY-AUDIT-*.md
 /config*.json
 /stocks*.json
 /receipts*.json
+
+# Documente scanate / acte cu date personale puse temporar in folder pentru analiza.
+# Repo-ul e public: un `git add -A` din hook le-ar publica ireversibil.
+*.pdf
+*.PDF
