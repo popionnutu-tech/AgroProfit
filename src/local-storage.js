@@ -4122,12 +4122,31 @@ async function updateReceiptAmount(id, amount, changedBy, note) {
     throw new Error("Valoarea introdusa este nerealist de mare.");
   }
 
-  const oldValue = { preliminaryPayableAmount: receipt.preliminaryPayableAmount, price: receipt.price };
+  const oldValue = {
+    preliminaryPayableAmount: receipt.preliminaryPayableAmount,
+    preliminaryMerchandiseValue: receipt.preliminaryMerchandiseValue,
+    withholdingAmount: receipt.withholdingAmount,
+    price: receipt.price
+  };
   const now = new Date().toISOString();
   receipt.preliminaryPayableAmount = value; // valoare manuala (>0) -> are prioritate in receiptPayableValue
+  // Suma introdusa e cea DE PLATA (neta, dupa impozitul retinut la sursa) — exact cifra din
+  // coloana Valoare, din Achitari si din extras. Din ea derivam BRUTUL si RETINEREA, cu cota
+  // INGHETATA pe document, si abia apoi pretul (lei/kg BRUT). Altfel documentul nu se mai
+  // inchide aritmetic: pe actul de achizitie „cantitate × pret" dadea suma neta, iar rubrica
+  // „Retineri la buget" arata 0,00 pe o receptie de la care impozitul chiar s-a retinut.
+  const percent = Number(receipt.withholdingPercent || 0);
   const payableTonnes = receiptPayableTonnes(receipt);
+  const gross = percent > 0 && percent < 100
+    ? Number((value / (1 - percent / 100)).toFixed(2))
+    : value;
+  receipt.preliminaryMerchandiseValue = gross;
+  receipt.withholdingAmount = Number((gross - value).toFixed(2));
   if (payableTonnes > 0) {
-    receipt.price = Number((value / (payableTonnes * 1000)).toFixed(4)); // lei / kg, pentru afisare in act
+    // Pret INFORMATIV (lei/kg BRUT), cu 4 zecimale. Cifra care conteaza pe act e valoarea
+    // bruta de mai sus: actul isi deriva pretul afisat din ea, ca „cantitate × pret = valoare"
+    // sa fie adevarat pe hartie chiar si dupa rotunjire.
+    receipt.price = Number((gross / (payableTonnes * 1000)).toFixed(4));
   }
   // Istoric corectari (fiecare corectare pastreaza comentariul + cine/cand).
   if (!Array.isArray(receipt.amountCorrections)) receipt.amountCorrections = [];
@@ -4148,7 +4167,13 @@ async function updateReceiptAmount(id, amount, changedBy, note) {
     reason: `Corectare valoare: ${comment}`,
     user: changedBy || "dashboard",
     oldValue,
-    newValue: { preliminaryPayableAmount: receipt.preliminaryPayableAmount, price: receipt.price, note: comment }
+    newValue: {
+      preliminaryPayableAmount: receipt.preliminaryPayableAmount,
+      preliminaryMerchandiseValue: receipt.preliminaryMerchandiseValue,
+      withholdingAmount: receipt.withholdingAmount,
+      price: receipt.price,
+      note: comment
+    }
   });
 
   writeReceiptsState(state);

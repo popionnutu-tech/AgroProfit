@@ -209,12 +209,20 @@ apa tot se evaporă.
   al doilea builder a avut o clipă formula copiată inline și cele două acte ale aceleiași
   recepții au arătat cantități și prețuri unitare diferite, deși totalul coincidea. Nu o copia
   a treia oară.
-- **„Total de plată" de pe act = datoria ÎNREGISTRATĂ** (`amountToPay` /
-  `preliminaryPayableAmount`), nu o recalculare din cota de impozit de azi; reținerea rămâne
-  diferența brut − net. Altfel apar două cifre pentru aceeași datorie: după ajustarea manuală
-  a sumei (✎) prețul de pe recepție devine **lei/kg NET**, iar actul mai scădea o dată
-  impozitul (56.400 lei plătiți, 53.016 lei pe actul semnat de furnizor). În plus, cota se
-  poate schimba în nomenclator după recepție, iar reținerea e înghețată pe document.
+- **„Total de plată" de pe act = datoria ÎNREGISTRATĂ** (`amountToPay ?? preliminaryPayableAmount`),
+  nu o recalculare din cota de impozit de azi; reținerea e diferența brut − net, iar procentul
+  tipărit e cel EFECTIV (reținere ÷ valoare). Altfel apăreau două cifre pentru aceeași datorie:
+  actul mai scădea o dată impozitul (56.400 lei plătiți, 53.016 lei pe actul semnat de furnizor),
+  iar pe recepțiile vechi, fără reținere înregistrată, eticheta „(6%)" stătea lângă „0,00".
+- **Ajustarea manuală a sumei (✎, `updateReceiptAmount`) scrie un document COERENT**, nu doar
+  suma: valoarea introdusă e cea DE PLATĂ (netă), din ea se derivă brutul cu **cota înghețată
+  pe document** (`withholdingPercent`), apoi `withholdingAmount` și `price` (lei/kg **brut**,
+  informativ). Înainte rămâneau vechi `preliminaryMerchandiseValue` și `withholdingAmount`, iar
+  `price` devenea net/kg — de aici actul cu „Rețineri: 0,00" pe o recepție cu impozit reținut.
+- **Valoarea brută de pe act vine de pe document** (`preliminaryMerchandiseValue`), iar prețul
+  unitar tipărit se DERIVĂ din ea (valoare ÷ cantitate), ca „cantitate × preț = valoare" să fie
+  adevărat pe hârtie după rotunjirea la 4 zecimale. Ambele buildere folosesc aceeași bază și
+  același lanț pentru datorie — altfel aceeași recepție iese cu două seturi de cifre.
 - Firma emitentă se alege explicit (`select.doc-header-company`, pe Recepții, Livrări și
   „Documente tipar"). Cu mai multe firme în nomenclator, un act tipărit tăcut pe cea implicită
   iese pe persoana juridică greșită.

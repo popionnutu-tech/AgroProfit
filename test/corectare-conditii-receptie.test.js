@@ -262,3 +262,58 @@ test("istoricul de pe document nu creste nelimitat (ultimele 20)", async () => {
     assert.equal(logs.filter((l) => l.action === "receipt-correct-terms").length, 25);
   });
 });
+
+// Ajustarea manuala a sumei (✎) scrie suma DE PLATA. Documentul trebuie sa ramana coerent:
+// brut − retinere = de plata, iar pretul sa fie lei/kg BRUT. Altfel actul de achizitie
+// tiparit din acelasi document arata pret net, valoare neta si „Retineri: 0,00" pe o
+// receptie de la care impozitul chiar s-a retinut (56.400 platiti, 53.016 pe act).
+test("ajustarea manuala a sumei pastreaza documentul coerent: brut − retinere = de plata", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const r = await receptieInitiala(storage);
+    assert.equal(Number(r.withholdingPercent), 6, "receptia porneste cu cota inghetata pe document");
+
+    const dePlata = 56400;
+    const corectat = await storage.updateReceiptAmount(r.id, dePlata, "contabil", "pretul nu a fost completat la cantar");
+
+    const brut = Number(corectat.preliminaryMerchandiseValue);
+    const retinere = Number(corectat.withholdingAmount);
+    assert.equal(Number(corectat.preliminaryPayableAmount), dePlata);
+    // Brutul iese din cota inghetata pe document (6%): 56.400 / 0,94 ≈ 60.000. Pretul are
+    // 4 zecimale, deci brutul se aseaza pe cativa lei distanta — diferenta cade in retinere,
+    // NU in suma de plata.
+    assert.ok(Math.abs(brut - 60000) < 20, `brut derivat din cota inghetata: ${brut}`);
+    assert.ok(Math.abs(brut - retinere - dePlata) < 0.01, "brut − retinere = de plata");
+
+    // Pretul ramane INFORMATIV, in lei/kg BRUT (nu net, cum era inainte): pe act se deriva
+    // oricum din valoarea bruta, ca inmultirea sa iasa exact pe hartie.
+    const tone = Number(corectat.provisionalNetQuantity);
+    const pretAsteptat = Number((brut / (tone * 1000)).toFixed(4));
+    assert.equal(Number(corectat.price), pretAsteptat, "pretul e brut/kg, nu net/kg");
+    assert.ok(Number(corectat.price) > 0.6 && Number(corectat.price) < 0.62, "ordin de marime brut");
+
+    // Istoricul si auditul pastreaza si cifrele derivate, nu doar suma introdusa.
+    assert.equal(corectat.amountCorrections.at(-1).newAmount, dePlata);
+  });
+});
+
+// Persoana juridica (fara retinere la sursa): suma introdusa e si bruta, si de plata.
+test("ajustarea manuala fara retinere la sursa: brut = de plata", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const est = computeReceiptEstimate({
+      quantity: 100, price: 5, humidity: 17, impurity: 2,
+      product: PRODUS, tariffs: TARIFFS, fiscalProfile: { withholdingPercent: 0 }
+    });
+    const r = await storage.createReceipt({
+      supplier: "Agro SRL", supplierId: 2, product: "Grau", productId: 1,
+      quantity: 100, grossQuantity: 100, unit: "tone", price: 5,
+      location: "Cilindru 1", locationId: 1, ...est
+    });
+
+    const corectat = await storage.updateReceiptAmount(r.id, 48000, "contabil", "corectare pret");
+    assert.equal(Number(corectat.preliminaryPayableAmount), 48000);
+    assert.equal(Number(corectat.preliminaryMerchandiseValue), 48000);
+    assert.equal(Number(corectat.withholdingAmount), 0);
+  });
+});

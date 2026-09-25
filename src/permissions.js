@@ -176,13 +176,13 @@ function filterCanceledTransactionsForRole(docs, roleCode) {
 
 // Rolurile care pot DOAR pregati documente in „Proiect" (nu misca stoc). Sursa unica:
 // handlerele decid regimul dupa ea, `local-storage` verifica dreptul cu ea.
-const DRAFT_ONLY_ROLES = ["accountant", "accountant-sef"];
+const DRAFT_ONLY_ROLES = Object.freeze(["accountant", "accountant-sef"]);
 
 // Cine poate corecta CONDITIILE unei receptii deja intrate (bifa „plata pe masa cu
 // umiditate" si/sau pretul). Rescrie bani pe un document inregistrat, dar e aceeasi
 // categorie cu ajustarea valorii receptiei (✎), pe care contabilii o au prin `finance-write`.
 // SURSA UNICA: ruta o foloseste ca garda, magazia o reverifica fail-closed.
-const CAN_CORRECT_TERMS_ROLES = ["accountant", "accountant-sef", "admin"];
+const CAN_CORRECT_TERMS_ROLES = Object.freeze(["accountant", "accountant-sef", "admin"]);
 
 module.exports = {
   CAN_CORRECT_TERMS_ROLES,
