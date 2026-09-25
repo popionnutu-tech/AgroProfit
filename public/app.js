@@ -6708,7 +6708,19 @@ function actNum(n, dec) {
 // intr-un cod QR, unde ajunge sir de biti. Daca vreodata se afiseaza pe pagina (sub cod, in
 // `title`, oriunde), trece-l intai prin `escapeComboHtml`.
 function actQrPayload({ company, partner, series, nr, dateText, rows, value, tax, netPay }) {
+  // Chirilicele din nomenclator (nomenclatorul e bilingv) s-ar pierde la filtrul ASCII, iar
+  // linia „Furnizor" ar ramane goala. Transliterare minima, ca numele sa fie recunoscibil.
+  const CHIRILICE = {
+    а: "a", б: "b", в: "v", г: "g", д: "d", е: "e", ё: "e", ж: "j", з: "z", и: "i", й: "i",
+    к: "k", л: "l", м: "m", н: "n", о: "o", п: "p", р: "r", с: "s", т: "t", у: "u", ф: "f",
+    х: "h", ц: "t", ч: "ci", ш: "s", щ: "sci", ъ: "", ы: "i", ь: "", э: "e", ю: "iu", я: "ia"
+  };
   const ascii = (v) => String(v || "")
+    .replace(/[\u0400-\u04FF]/g, (m) => {
+      const mic = CHIRILICE[m.toLowerCase()] || "";
+      return m === m.toUpperCase() && mic ? mic.charAt(0).toUpperCase() + mic.slice(1) : mic;
+    })
+    .replace(/[—–]/g, "-")
     .replace(/[ăâ]/gi, (m) => (m === m.toUpperCase() ? "A" : "a"))
     .replace(/[îí]/gi, (m) => (m === m.toUpperCase() ? "I" : "i"))
     .replace(/[șş]/gi, (m) => (m === m.toUpperCase() ? "S" : "s"))
@@ -6717,13 +6729,21 @@ function actQrPayload({ company, partner, series, nr, dateText, rows, value, tax
     .replace(/\s+/g, " ")
     .trim();
   const bani = (n) => actNum(n, 2).replace(/\s/g, "");
+  // IDNP-ul furnizorului NU intra in cod (decizia proprietarului, 25.09.2026). Pe hartie
+  // apare intreg, fiindca formularul il cere, dar in QR ar deveni extractibil automat din
+  // orice fotografie a actului. Documentul ramane identificabil prin firma si IDNO, seria,
+  // numarul si data actului.
   const marfa = rows.length === 1
     ? `${ascii(rows[0].r.product)} ${bani(rows[0].netKg)}kg x ${actNum(rows[0].price, 4).replace(/\s/g, "")}`
     : `${rows.length} pozitii`;
+  // `nr` e „____" (numarul se completeaza de mana pe formular), deci singurul identificator
+  // stabil sunt recepțiile din act: fara ele, doua acte ale aceluiasi furnizor din aceeasi zi
+  // ar avea coduri identice.
+  const idReceptii = rows.map((x) => x.r.id).filter(Boolean).join(",");
   const build = (numeFirma) => [
     `${numeFirma} IDNO ${ascii(company.idno)}`,
-    `Act ${ascii(series) || "-"} ${ascii(nr)} din ${ascii(dateText)}`,
-    `Furnizor ${ascii(partner.name)}${partner.idno ? ` IDNP ${ascii(partner.idno)}` : ""}`,
+    `Act ${ascii(series) || "-"} ${ascii(nr)} din ${ascii(dateText)}${idReceptii ? ` (rec. ${idReceptii})` : ""}`,
+    `Furnizor ${ascii(partner.name)}`,
     marfa,
     `Val ${bani(value)} Ret ${bani(tax)} Plata ${bani(netPay)} lei`
   ].join("\n");
@@ -6780,11 +6800,18 @@ function buildPurchaseActHtml(receipts, partner, company) {
   // sau textul nu incape, actul se tipareste pur si simplu fara cod — hartia ramane valida.
   const qrTag = (() => {
     if (typeof qrMatrix !== "function" || typeof qrSvg !== "function") return "";
-    const matrix = qrMatrix(actQrPayload({
-      company: co, partner: p, series: co.series || co.shortName || "", nr,
-      dateText, rows, value, tax, netPay
-    }));
-    return matrix ? qrSvg(matrix, 96) : "";
+    try {
+      const matrix = qrMatrix(actQrPayload({
+        company: co, partner: p, series: co.series || co.shortName || "", nr,
+        dateText, rows, value, tax, netPay
+      }));
+      return matrix ? qrSvg(matrix, 96) : "";
+    } catch (err) {
+      // Codul e o comoditate de citire; actul fara el ramane valid. O eroare la generare nu
+      // are voie sa lase contabilul fara document.
+      console.error("Cod QR nereusit pentru actul de achizitie:", err);
+      return "";
+    }
   })();
   // Rand gol: pe formularul tipizat tabelul are o linie libera sub cea numerotata.
   const emptyRow = `<tr><td>&nbsp;</td><td></td><td></td><td></td><td></td></tr>`;
@@ -7765,6 +7792,11 @@ function printDeliveryDocument(deliveryId, docType) {
       alert("Furnizorul recepției nu a fost găsit în nomenclator.");
       return;
     }
+    // Aceeasi regula ca pe randul receptiei: ce nu e in stoc nu are act de achizitie.
+    if (!isReceiptInStock(actReceipt)) {
+      alert(`Recepția #${actReceipt.id} nu e în stoc (${actReceipt.status}). Actul de achiziție s-ar emite pe marfă care n-a intrat.`);
+      return;
+    }
     html = buildPurchaseActHtml([actReceipt], actPartner, headerCompany);
     title = `Act achizitie ${actPartner.name}`;
   }
@@ -7774,7 +7806,10 @@ function printDeliveryDocument(deliveryId, docType) {
   else if (docType === "imputernicire") { html = buildImputernicireHtml(delivery); title = `Imputernicire ${delivery.id}`; }
   else if (docType === "declaratie") { html = buildDeclaratieHtml(delivery, headerCompany); title = `Declaratie ${delivery.id}`; }
   // Formele refăcute fidel modelelor originale se tipăresc alb-negru, fără antet AgroProfit.
-  const officialDocs = ["invoice", "certificate", "cmr", "imputernicire"];
+  // Actul de achizitie foloseste formularul tipizat, cu clasele `of-*` — definite DOAR in
+  // `openOfficialDocWindow`. Trimis in fereastra obisnuita, iesea fara chenare, cu alte
+  // margini si cu subsol „Generat de AgroProfit+" pe un formular de stat.
+  const officialDocs = ["invoice", "certificate", "cmr", "imputernicire", "act"];
   if (html) {
     if (officialDocs.includes(docType)) openOfficialDocWindow(html, title);
     else openPrintWindow(html, title);
@@ -8042,7 +8077,7 @@ bodyEl?.addEventListener("click", (event) => {
     // Actul insa vorbeste despre marfa cumparata: pe un proiect sau pe o receptie anulata ar
     // fi o hartie fara acoperire (regula 7 din CLAUDE.md).
     if (!isReceiptInStock(receipt)) {
-      window.alert("Recepția nu e în stoc (proiect sau anulată). Actul de achiziție s-ar emite pe marfă care n-a intrat.");
+      window.alert(`Recepția are statusul „${receipt.status}" și nu e în stoc. Actul de achiziție s-ar emite pe marfă care n-a intrat.`);
       return;
     }
     openOfficialDocWindow(buildPurchaseActHtml([receipt], partner, company), `Act de achizitie ${partner.name}`);

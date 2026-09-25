@@ -31,6 +31,7 @@ npm run dev          # aplicația WEB pe http://localhost:3000
 - `src/supabase-state-kv.js`, `src/supabase-storage.js`, `src/storage.js` — persistența.
 - `src/auth.js`, `src/security.js`, `src/permissions.js` — autentificare (parole scrypt), roluri, drepturi.
 - `public/app.js` — tot frontend-ul (randare tabele, formulare, calcule afișate).
+- `public/qr.js` — generator de coduri QR, fără dependențe (vezi regula 10).
 
 ## Stocare (important)
 - Toată starea „primară" e un singur blob JSON sub cheia KV `receipts`; nomenclatorul sub cheia `config`.
@@ -303,8 +304,15 @@ apa tot se evaporă.
 - **Ordinul de plată NU se emite de pe recepție.** Iese din Financiar, dintr-o PLATĂ
   înregistrată (`printAccountingDocument("paymentOrder")`). Sintetizat din restul de plată, ar
   fi o dispoziție de casă fără corespondent în registru, retipăribilă oricând pe aceeași datorie.
+- **Toate cele trei intrări ale actului se deschid cu `openOfficialDocWindow`.** Clasele `of-*`
+  (chenare, linii de completat, legende bilingve, margini) există DOAR acolo. Trimis în
+  fereastra obișnuită, actul iese fără chenare și cu subsol „Generat de AgroProfit+" pe un
+  formular de stat — vezi lista `officialDocs` din `printDeliveryDocument`.
 - **Codul QR** (`public/qr.js`, fără dependențe) poartă datele actului ca text ASCII: firma și
-  IDNO, seria/nr. și data, furnizorul și IDNP, marfa, valoarea, reținerea, suma de plată.
+  IDNO, seria/nr. și data actului (plus recepțiile din el), furnizorul, marfa, valoarea,
+  reținerea și suma de plată. **IDNP-ul furnizorului NU intră în cod** (decizia proprietarului,
+  25.09.2026): pe hârtie apare întreg, fiindcă formularul îl cere, dar în QR ar fi extractibil
+  automat din orice fotografie a actului.
   - Generatorul e local **intenționat**: unul extern ar primi datele actului la fiecare tipărire.
   - Capacitatea e 213 octeți (versiunile 1-10, corecție M). `actQrPayload` scurtează în ordine:
     întâi numele firmei, apoi detaliul mărfii. Identificarea părților și suma rămân mereu.
