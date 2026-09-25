@@ -87,7 +87,7 @@ const {
   getReceiptDefaultsHandler
 } = require("./report-extensions-handlers");
 const storage = require("./storage");
-const { filterCanceledForRole } = require("./permissions");
+const { CAN_CORRECT_TERMS_ROLES, filterCanceledForRole } = require("./permissions");
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
@@ -387,11 +387,13 @@ app.post(
 );
 
 // Corectie de conditii pe o receptie deja intrata: bifa „plata pe masa cu umiditate" si/sau
-// pretul. DOAR admin — rescrie bani pe un document inregistrat. Motiv obligatoriu, istoric
-// pe document (`termCorrections`) si intrare de audit. Rolul se reverifica in storage.
+// pretul. Contabil, contabil-sef si admin — rescrie bani pe un document inregistrat, aceeasi
+// categorie cu ajustarea valorii receptiei (`finance-write`). Motiv obligatoriu, istoric pe
+// document (`termCorrections`) si intrare de audit. Rolul se reverifica in storage
+// (`CAN_CORRECT_TERMS_ROLES`), ca ruta si magazia sa nu poata divergea.
 app.patch(
   "/api/receipts/:id/correct-terms",
-  requireRoles(["admin"]),
+  requireRoles(CAN_CORRECT_TERMS_ROLES),
   async (req, res) => {
     return correctReceiptTermsHandler(req, res, req.params.id);
   }

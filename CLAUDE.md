@@ -202,10 +202,30 @@ apa tot se evaporă.
   fiecare calcula pe cont propriu, actul semnat de furnizor arăta o sumă mai mică decât
   datoria înregistrată, iar pe extras `cantitate × preț ≠ sumă`. Orice loc nou care
   înmulțește cantitate cu preț le folosește.
-- Actul de achiziție se tipărește din **două** locuri (`buildPurchaseActHtml` din „Documente
-  tipar" și `buildPurchaseActPrintHtml` din Livrări). Amândouă trec prin `actReceiptFigures` —
-  a doua a avut o clipă formula copiată inline și cele două acte ale aceleiași recepții au
-  arătat cantități și prețuri unitare diferite, deși totalul coincidea. Nu o copia a treia oară.
+- Actul de achiziție se tipărește din **trei** locuri, cu **două** buildere:
+  `buildPurchaseActHtml` (pagina „Documente tipar" — toate recepțiile unui furnizor dintr-o
+  perioadă, un rând per recepție — și butonul de pe rândul recepției, pentru o singură
+  recepție) și `buildPurchaseActPrintHtml` (din Livrări). Toate trec prin `actReceiptFigures` —
+  al doilea builder a avut o clipă formula copiată inline și cele două acte ale aceleiași
+  recepții au arătat cantități și prețuri unitare diferite, deși totalul coincidea. Nu o copia
+  a treia oară.
+- **„Total de plată" de pe act = datoria ÎNREGISTRATĂ** (`amountToPay ?? preliminaryPayableAmount`),
+  nu o recalculare din cota de impozit de azi; reținerea e diferența brut − net, iar procentul
+  tipărit e cel EFECTIV (reținere ÷ valoare). Altfel apăreau două cifre pentru aceeași datorie:
+  actul mai scădea o dată impozitul (56.400 lei plătiți, 53.016 lei pe actul semnat de furnizor),
+  iar pe recepțiile vechi, fără reținere înregistrată, eticheta „(6%)" stătea lângă „0,00".
+- **Ajustarea manuală a sumei (✎, `updateReceiptAmount`) scrie un document COERENT**, nu doar
+  suma: valoarea introdusă e cea DE PLATĂ (netă), din ea se derivă brutul cu **cota înghețată
+  pe document** (`withholdingPercent`), apoi `withholdingAmount` și `price` (lei/kg **brut**,
+  informativ). Înainte rămâneau vechi `preliminaryMerchandiseValue` și `withholdingAmount`, iar
+  `price` devenea net/kg — de aici actul cu „Rețineri: 0,00" pe o recepție cu impozit reținut.
+- **Valoarea brută de pe act vine de pe document** (`preliminaryMerchandiseValue`), iar prețul
+  unitar tipărit se DERIVĂ din ea (valoare ÷ cantitate), ca „cantitate × preț = valoare" să fie
+  adevărat pe hârtie după rotunjirea la 4 zecimale. Ambele buildere folosesc aceeași bază și
+  același lanț pentru datorie — altfel aceeași recepție iese cu două seturi de cifre.
+- Firma emitentă se alege explicit (`select.doc-header-company`, pe Recepții, Livrări și
+  „Documente tipar"). Cu mai multe firme în nomenclator, un act tipărit tăcut pe cea implicită
+  iese pe persoana juridică greșită.
 - Flagul se **persistă pe recepție**, nu se recalculează din context. Peste un an suma trebuie
   să rămână explicabilă; `receiptPayableValue` folosește aceeași bază la fallback.
 - La cântarul în 2 pași flagul se citește de pe **recepție**, nu din body-ul celei de-a doua
@@ -222,10 +242,16 @@ apa tot se evaporă.
 - **Bifa se pune la creare**, de cine creează recepția (inclusiv operatorul): el e la cântar,
   el vorbește cu șoferul. Compensația e confirmarea explicită plus auditul. Operatorul NU are
   voie să modifice recepția ulterior: furnizorul și suma sunt rezervate contabilului/managerului,
-  închiderea și redeschiderea managerului, anularea și corectarea de condiții adminului.
+  închiderea și redeschiderea managerului, anularea adminului, iar corectarea de condiții
+  contabililor și adminului.
   Nu-i da operatorului o cale de editare „pentru comoditate" — ar ocoli confirmarea în două cereri.
-- **Corectarea ulterioară există, dar e a adminului** (`correctReceiptTerms`, rută
-  `PATCH /api/receipts/:id/correct-terms`). Înțelegerea se află uneori după ce marfa a fost
+- **Corectarea ulterioară e a contabilului, a contabilului-șef și a adminului**
+  (`CAN_CORRECT_TERMS_ROLES`, `correctReceiptTerms`, rută `PATCH /api/receipts/:id/correct-terms`).
+  Aceleași roluri ajustează deja valoarea recepției prin `finance-write` (✎), deci e aceeași
+  categorie de operațiune; stocul nu se atinge în niciun caz. Lista se verifică în DOUĂ locuri
+  pe server (ruta și magazia, prin aceeași constantă) și e OGLINDITĂ a treia oară în frontend,
+  ca să ascundă butonul. Schimb-o în toate trei: altfel ori butonul rămâne vizibil și dă 403,
+  ori una dintre gărzile serverului devine mai permisivă decât cealaltă. Înțelegerea se află uneori după ce marfa a fost
   descarcată — furnizorul spune abia la decontare că achiziția a fost cu tot cu apă, sau
   prețul n-a fost completat la cântar.
   - Se corectează **intrările** (bifa, prețul), iar sumele se **recalculează** după aceeași
