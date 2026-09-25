@@ -2044,16 +2044,17 @@ function renderReceipts(receipts) {
   // confunde cele doua operatii. Oglinda lui `CAN_CORRECT_TERMS_ROLES` din src/permissions.js:
   // aici butonul doar se ascunde, garda reala e pe ruta si in magazie.
   // Drepturile financiare se citesc O SINGURA data per randare: `canAccess` reface listele de
-  // capabilitati la fiecare apel, iar tabelul are un rand per receptie. Actul de achizitie e
-  // un document contabil, deci acelasi drept ca restul coloanelor de bani.
+  // capabilitati la fiecare apel, iar tabelul are un rand per receptie.
   const canFinance = canAccess("finance");
-  const canPrintAct = canFinance;
   // Aliasul vechi „contabil" exista in conturi mai vechi; serverul il normalizeaza
   // (`normalizeRoleCode`), deci si oglinda din interfata trebuie sa o faca — altfel butonul
   // lipseste unui contabil pe care serverul l-ar accepta.
   const sessionRole = String(currentSessionUser?.roleCode || "").trim().toLowerCase();
-  const canCorrectTerms = ["accountant", "accountant-sef", "admin", "contabil"]
-    .includes(sessionRole);
+  const CONTABILI_SI_ADMIN = ["accountant", "accountant-sef", "admin", "contabil"];
+  const canCorrectTerms = CONTABILI_SI_ADMIN.includes(sessionRole);
+  // Documentele contabile ale recepției (contract, act de achiziție, ordin de plată) sunt ale
+  // contabililor și ale adminului. Managerul are `finance` (vede banii), dar nu emite acte.
+  const canPrintDocs = CONTABILI_SI_ADMIN.includes(sessionRole);
   // Operatorul nu vede coloanele de plata (plata preliminara, data platii).
   const receiptsTable = document.getElementById("receipts-table");
   if (receiptsTable) {
@@ -2134,7 +2135,14 @@ function renderReceipts(receipts) {
           <td class="col-fin">${formatDateShort(item.lastPaymentDate)}</td>
           <td class="col-fin">${payBadge}</td>
           <td>${statusCell}</td>
-          <td><button type="button" class="cell-btn cell-btn-details" data-action="receipt-details" data-id="${item.id}">Detalii</button>${canPrintAct && isReceiptInStock(item) ? ` <button type="button" class="cell-btn cell-btn-primary" data-action="print-act" data-id="${item.id}" title="Tipărește actul de achiziție pentru această recepție">🖨 Act achiziție</button>` : ""} ${docActionsCell("receipt", item)}</td>
+          <td><button type="button" class="cell-btn cell-btn-details" data-action="receipt-details" data-id="${item.id}">Detalii</button>${canPrintDocs && isReceiptInStock(item) ? ` <details class="print-menu">
+              <summary class="doc-print-btn">🖨 Tipar ▾</summary>
+              <div class="print-menu-list">
+                <button type="button" class="doc-print-btn" data-print-receipt="contract" data-id="${item.id}">Contract de vânzare-cumpărare</button>
+                <button type="button" class="doc-print-btn" data-print-receipt="act" data-id="${item.id}">Act de achiziție</button>
+                <button type="button" class="doc-print-btn" data-print-receipt="payment" data-id="${item.id}">Ordin de plată</button>
+              </div>
+            </details>` : ""} ${docActionsCell("receipt", item)}</td>
           <td class="col-fin">${actionCell}</td>
         </tr>
       `;
@@ -6739,61 +6747,186 @@ function buildPurchaseActHtml(receipts, partner, company) {
           <td class="of-r">${actNum(x.price, 2)}</td>
           <td class="of-r">${actNum(x.value, 2)}</td>
         </tr>`).join("");
+  // Rand gol: pe formularul tipizat tabelul are o linie libera sub cea numerotata.
+  const emptyRow = `<tr><td>&nbsp;</td><td></td><td></td><td></td><td></td></tr>`;
+  // Linie punctata cu eticheta dedesubt, ca pe formular.
+  const ln = (value, min) => `<span class="of-fill" style="min-width:${min}px;">${escapeComboHtml(value || "")}</span>`;
+  const cap = (ro, ru) => `<div class="of-cap">${ro}${ru ? ` (${ru})` : ""}</div>`;
   return `
-    <table style="width:100%;border-collapse:collapse;"><tr>
-      <td style="width:60px;text-align:center;font-size:16px;">◯</td>
-      <td><div class="of-title">Act de achiziție a mărfurilor<small class="of-ru">Акт закупки товаров</small></div></td>
-      <td style="width:150px;font-size:11px;">Seria <span class="of-fill">${escapeComboHtml(co.series || co.shortName || "")}</span><br>Nr. <span class="of-fill">${escapeComboHtml(nr)}</span></td>
+    <table style="width:100%;border-collapse:collapse;margin-bottom:6px;"><tr>
+      <td style="width:90px;vertical-align:top;">${co.logoUrl ? `<img src="${escapeComboHtml(co.logoUrl)}" style="max-width:80px;max-height:80px;">` : ""}</td>
+      <td></td>
     </tr></table>
-    <div class="of-row of-c">din <span class="of-fill">${escapeComboHtml(dateText)}</span></div>
+    <table style="width:100%;border-collapse:collapse;"><tr>
+      <td><div style="font-weight:bold;font-size:15px;text-transform:uppercase;">Act de achiziție a mărfurilor</div></td>
+      <td style="width:230px;font-weight:bold;font-size:13px;">Seria ${ln(co.series || co.shortName || "", 60)} &nbsp; Nr. ${ln(nr, 70)}</td>
+    </tr></table>
 
-    <div class="of-row"><span class="of-fill" style="min-width:340px;">${escapeComboHtml(co.name || "")}</span>, IDNO <span class="of-fill">${escapeComboHtml(co.idno || "")}</span>
-      <div class="of-cap">Denumirea și rechizitele întreprinderii, adresa / Наименование, реквизиты предприятия, адрес</div></div>
-    <div class="of-row">${escapeComboHtml(co.address || "")}${co.vatCode ? " · Cod TVA " + escapeComboHtml(co.vatCode) : ""}</div>
-    <div class="of-row">Conducătorul unității: <span class="of-fill">${escapeComboHtml(co.admin || "")}</span> <span class="of-cap">/ Руководитель</span></div>
+    <table style="width:100%;border-collapse:collapse;margin-top:6px;"><tr>
+      <td style="width:55%;vertical-align:top;">
+        <div><span class="of-b">din</span> ${ln(dateText, 160)}</div>
+        <div class="of-ru" style="margin-left:2px;">от</div>
+      </td>
+      <td style="width:45%;vertical-align:top;font-size:11px;">
+        <div class="of-b">Primit în baza contractului</div>
+        <div class="of-ru">Принято в счет договора</div>
+        <div style="margin-top:10px;"><span class="of-b">nr.</span> ${ln("", 70)} <span class="of-b">din</span> ${ln("", 90)}</div>
+        <div class="of-ru">№ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; от</div>
+      </td>
+    </tr></table>
 
-    <div class="of-row">Primit marfa <span class="of-fill" style="min-width:260px;">${escapeComboHtml(co.admin || "")}</span>
-      <div class="of-cap">numele, prenumele / Принял товар — фамилия, имя</div></div>
-    <div class="of-row">Predat marfa <span class="of-fill" style="min-width:260px;">${escapeComboHtml(p.name || "")}</span>
-      <div class="of-cap">numele, prenumele / Сдал товар — фамилия, имя</div></div>
-    <div class="of-row">Codul personal / IDNP, datele buletinului de identitate, adresa:
-      <span class="of-fill" style="min-width:340px;">${escapeComboHtml([p.idno, p.address].filter(Boolean).join(", "))}</span></div>
+    <div style="margin-top:10px;border-bottom:1px solid #000;text-align:center;font-weight:bold;padding-bottom:1px;">
+      ${escapeComboHtml([co.name, co.address].filter(Boolean).join(", "))}</div>
+    ${cap("denumirea entitatii, adresa", "наименование субъекта, адрес")}
 
-    <table class="of-tbl">
+    <table style="width:100%;border-collapse:collapse;margin-top:10px;"><tr>
+      <td style="width:45%;vertical-align:top;">
+        <div><span class="of-b">Cod fiscal/IDNO</span> ${ln(co.idno, 150)}</div>
+        <div class="of-ru">Фискальный код/IDNO</div>
+      </td>
+      <td style="width:55%;vertical-align:top;">
+        <table style="width:100%;border-collapse:collapse;"><tr>
+          <td style="width:45%;font-size:11px;">
+            <div class="of-b">Conducătorul entitatii /</div>
+            <div class="of-b">persoana imputernicita</div>
+            <div class="of-ru">Руководитель субъекта /</div>
+            <div class="of-ru">уполномоченное лицо</div>
+          </td>
+          <td style="vertical-align:top;">
+            <div style="border-bottom:1px solid #000;text-align:center;font-weight:bold;padding-bottom:1px;">${escapeComboHtml(co.admin || "")}</div>
+            ${cap("numele, prenumele", "фамилия, имя")}
+          </td>
+        </tr></table>
+      </td>
+    </tr></table>
+
+    <table style="width:100%;border-collapse:collapse;margin-top:14px;"><tr>
+      <td style="width:22%;"><span class="of-b">Primit marfuri</span><div class="of-ru">Принял товары</div></td>
+      <td>
+        <div style="border-bottom:1px solid #000;text-align:center;font-weight:bold;padding-bottom:1px;">${escapeComboHtml(co.admin || "")}</div>
+        ${cap("numele, prenumele", "фамилия, имя")}
+      </td>
+    </tr></table>
+    <table style="width:100%;border-collapse:collapse;margin-top:10px;"><tr>
+      <td style="width:22%;"><span class="of-b">Predat marfuri</span><div class="of-ru">Сдал товары</div></td>
+      <td>
+        <div style="border-bottom:1px solid #000;text-align:center;font-weight:bold;padding-bottom:1px;">${escapeComboHtml(p.name || "")}</div>
+        ${cap("numele, prenumele", "фамилия, имя")}
+      </td>
+    </tr></table>
+
+    <div style="margin-top:16px;border-bottom:1px solid #000;text-align:center;padding-bottom:1px;">
+      ${escapeComboHtml([p.idno, p.idCard, p.address].filter(Boolean).join(", "))}</div>
+    ${cap("Codul personal / IDNP , datele buletinului de identitate, adresa", "идентификационный номер / IDNP, данные удостоверения личности , адрес")}
+
+    <table class="of-tbl" style="margin-top:10px;">
       <thead>
         <tr>
-          <th>Denumirea mărfurilor<br><span class="of-ru">Наименование товаров</span></th>
-          <th>Unit. de măsură<br><span class="of-ru">Единица измерения</span></th>
-          <th>Cantitate<br><span class="of-ru">Количество</span></th>
-          <th>Preț unitar, lei<br><span class="of-ru">Цена единицы, лей</span></th>
-          <th>Valoare, lei<br><span class="of-ru">Стоимость, лей</span></th>
+          <th style="text-align:left;">Denumirea mărfurilor<div class="of-ru">Наименование товаров</div></th>
+          <th style="text-align:left;width:70px;">Unit. de măsură<div class="of-ru">Единица измерения</div></th>
+          <th style="text-align:left;width:110px;">Cantitate<div class="of-ru">Количество</div></th>
+          <th style="text-align:left;width:90px;">Preț unitar, lei<div class="of-ru">Цена единицы, леев</div></th>
+          <th style="text-align:left;width:110px;">Valoare, lei<div class="of-ru">Стоимость, леев</div></th>
         </tr>
-        <tr><td class="of-c">1</td><td class="of-c">2</td><td class="of-c">3</td><td class="of-c">4</td><td class="of-c">5 = 3 × 4</td></tr>
+        <tr><td class="of-c">1</td><td class="of-c">2</td><td class="of-c">3</td><td class="of-c">4</td><td class="of-c">5= 3 x 4</td></tr>
       </thead>
-      <tbody>${bodyRows}
+      <tbody>${bodyRows}${emptyRow}
       </tbody>
       <tfoot>
-        <tr><td class="of-b">Total / Итого</td><td class="of-c">×</td><td class="of-r of-b">${actNum(totalKg, 2)}</td><td class="of-c">×</td><td class="of-r of-b">${actNum(value, 2)}</td></tr>
+        <tr><td class="of-b">Total / Итого</td><td class="of-c of-b">X</td><td class="of-c of-b">X</td><td class="of-c of-b">X</td><td class="of-r of-b">${actNum(value, 2)}</td></tr>
       </tfoot>
     </table>
 
-    <div class="of-row"><span class="of-b">Valoarea totală / Общая стоимость:</span> <span class="of-fill" style="min-width:320px;">${words}</span>
-      <div class="of-cap">în litere / прописью</div></div>
-    <div class="of-row of-b">Rețineri / Удержания:</div>
-    <div class="of-row">— la buget / в бюджет${effectivePercent > 0 ? ` (${formatNumber(effectivePercent)}%)` : ""}:
-      <span class="of-fill" style="min-width:260px;">${escapeComboHtml(numberToWordsRo(tax))}</span> <span class="of-fill" style="min-width:110px;">${actNum(tax, 2)}</span>
-      <div class="of-cap">în litere / прописью &nbsp;·&nbsp; în cifre / цифрами</div></div>
-    <div class="of-row">— avansuri achitate / уплаченные авансы: <span class="of-fill" style="min-width:230px;"></span> <span class="of-fill" style="min-width:110px;"></span>
-      <div class="of-cap">în litere / прописью &nbsp;·&nbsp; în cifre / цифрами</div></div>
-    <div class="of-row"><span class="of-b">Total de plată / Общая сумма к оплате:</span>
-      <span class="of-fill" style="min-width:270px;">${escapeComboHtml(numberToWordsRo(netPay))}</span> <span class="of-fill" style="min-width:110px;">${actNum(netPay, 2)}</span>
-      <div class="of-cap">în litere / прописью &nbsp;·&nbsp; în cifre / цифрами</div></div>
+    <table style="width:100%;border-collapse:collapse;margin-top:10px;"><tr>
+      <td style="width:22%;vertical-align:bottom;"><span class="of-b">Valoarea totală</span><div class="of-ru">Общая стоимость</div></td>
+      <td style="vertical-align:bottom;">
+        <div style="border-bottom:1px solid #000;padding-bottom:1px;">${words}</div>
+        ${cap("în litere", "прописью")}
+      </td>
+      <td style="width:150px;"></td>
+    </tr></table>
 
-    <p class="of-just" style="margin-top:8px;">Declarația pe propria răspundere a persoanei fizice care a predat mărfurile: confirm că marfa îmi aparține, este liberă de sarcini și corespunde cantității și calității indicate. / Декларация под собственную ответственность физического лица, передавшего товары.</p>
-    <div class="of-sign">
-      <div class="col">Predat marfa / Сдал товар<div class="ln of-cap">semnătura / подпись</div></div>
-      <div class="col">Primit marfa / Принял товар<div class="ln of-cap">semnătura / подпись</div></div>
-    </div>`;
+    <div style="margin-top:10px;"><span class="of-b">Rețineri:</span><div class="of-ru">Удержания</div></div>
+    <table style="width:100%;border-collapse:collapse;margin-top:6px;"><tr>
+      <td style="width:22%;vertical-align:bottom;"><span class="of-b">la buget</span><div class="of-ru">в бюджет</div></td>
+      <td style="vertical-align:bottom;">
+        <div style="border-bottom:1px solid #000;padding-bottom:1px;">${escapeComboHtml(numberToWordsRo(tax))}</div>
+        ${cap("în litere", "прописью")}
+      </td>
+      <td style="width:170px;vertical-align:bottom;padding-left:10px;">
+        <div style="border-bottom:1px solid #000;text-align:center;padding-bottom:1px;">${actNum(tax, 2)}</div>
+        ${cap("în cifre", "цифрами")}
+      </td>
+    </tr></table>
+    <table style="width:100%;border-collapse:collapse;margin-top:10px;"><tr>
+      <td style="width:22%;vertical-align:bottom;"><span class="of-b">avansuri achitate</span><div class="of-ru">уплаченные авансы</div></td>
+      <td style="vertical-align:bottom;">
+        <div style="border-bottom:1px solid #000;padding-bottom:1px;">&nbsp;</div>
+        ${cap("în litere", "прописью")}
+      </td>
+      <td style="width:170px;vertical-align:bottom;padding-left:10px;">
+        <div style="border-bottom:1px solid #000;padding-bottom:1px;">&nbsp;</div>
+        ${cap("în cifre", "цифрами")}
+      </td>
+    </tr></table>
+    <table style="width:100%;border-collapse:collapse;margin-top:10px;"><tr>
+      <td style="width:22%;vertical-align:bottom;"><span class="of-b">Total de plata</span><div class="of-ru">Общая сумма к оплате</div></td>
+      <td style="vertical-align:bottom;">
+        <div style="border-bottom:1px solid #000;padding-bottom:1px;">${escapeComboHtml(numberToWordsRo(netPay))}</div>
+        ${cap("în litere", "прописью")}
+      </td>
+      <td style="width:170px;vertical-align:bottom;padding-left:10px;">
+        <div style="border-bottom:1px solid #000;text-align:center;padding-bottom:1px;">${actNum(netPay, 2)}</div>
+        ${cap("în cifre", "цифрами")}
+      </td>
+    </tr></table>
+
+    <table style="width:100%;border-collapse:collapse;margin-top:14px;"><tr>
+      <td style="width:22%;"><span class="of-b">Predat marfuri</span><div class="of-ru">Сдал товары</div></td>
+      <td style="width:45%;vertical-align:bottom;">
+        <div style="border-bottom:1px solid #000;padding-bottom:1px;">&nbsp;</div>
+        ${cap("semnătura", "подпись")}
+      </td>
+      <td></td>
+    </tr></table>
+
+    <div style="margin-top:16px;"><span class="of-b">Declarația pe propria răspundere a persoanei fizice care a predat mărfurile.</span>
+      <div class="of-ru">Декларация под собственную ответственность физического лица, передавшего товары</div></div>
+
+    <div style="margin-top:12px;"><span class="of-b">Declar ca marfurile predate sint obținute integral pe teritoriul Republicii Moldova:</span>
+      <div class="of-ru">Заявляю, что переданные товары полностью получены на территории Республики Молдова:</div></div>
+    <table style="width:100%;border-collapse:collapse;margin-top:12px;"><tr>
+      <td style="width:40%;">
+        <div style="border-bottom:1px solid #000;padding-bottom:1px;">&nbsp;</div>
+        ${cap("numele, prenumele", "фамилия, имя")}
+      </td>
+      <td></td>
+    </tr></table>
+    <table style="width:100%;border-collapse:collapse;margin-top:10px;"><tr>
+      <td style="width:40%;">
+        <div style="border-bottom:1px solid #000;padding-bottom:1px;">&nbsp;</div>
+        ${cap("semnătura", "подпись")}
+      </td>
+      <td></td>
+    </tr></table>
+
+    <div style="margin-top:18px;"><span class="of-b">Declarațiile și înscrisurile false, precum și însușirea averii străine se pedepsește conform legislației în vigoare.</span>
+      <div class="of-ru">Ложные заявления и записи, а также присвоение чужого имущества наказывается согласно действующему законодательству.</div></div>
+
+    <table style="width:100%;border-collapse:collapse;margin-top:12px;"><tr>
+      <td style="width:22%;"><span class="of-b">Primit marfuri</span><div class="of-ru">Принял товары</div></td>
+      <td style="width:45%;vertical-align:bottom;">
+        <div style="border-bottom:1px solid #000;padding-bottom:1px;">&nbsp;</div>
+        ${cap("semnătura", "подпись")}
+      </td>
+      <td></td>
+    </tr></table>
+
+    <table style="width:100%;border-collapse:collapse;margin-top:16px;"><tr>
+      <td style="width:14%;padding-left:40px;"><span class="of-b">L. Ș.</span><div class="of-ru">М.П.</div></td>
+      <td style="width:30%;vertical-align:bottom;"><div style="border-bottom:1px solid #000;padding-bottom:1px;">&nbsp;</div></td>
+      <td></td>
+    </tr></table>`;
 }
 
 // 2) CONTRACT de cumparare-vanzare cereale — text integral, cadru, per furnizor.
@@ -6844,6 +6977,8 @@ function buildSaleContractHtml(partner, company) {
     ${pt("8.1. Neînțelegerile se rezolvă pe cale amiabilă, iar în caz contrar de instanța competentă, conform legislației Republicii Moldova.")}
     ${pt("8.2. Contractul este întocmit în două exemplare, câte unul pentru fiecare parte, cu aceeași valoare juridică.")}
     ${pt("8.3. Prezentul contract are aceeași valoare juridică pentru orice livrare efectuată de Vânzător, indiferent de actele de întocmire a livrării (anexă la contract, act de primire-predare, factură fiscală, act de verificare etc.).")}
+    ${pt("8.4. <b>Prelucrarea datelor cu caracter personal.</b> Prin semnarea prezentului contract, Vânzătorul — persoană fizică — își exprimă consimțământul liber, expres și neechivoc ca Cumpărătorul, în calitate de operator de date cu caracter personal, să prelucreze datele sale cu caracter personal: numele și prenumele, IDNP, datele actului de identitate, domiciliul, datele de contact și datele bancare. Scopul prelucrării este încheierea și executarea prezentului contract, întocmirea documentelor primare și a evidenței contabile, calcularea, reținerea și transferul impozitelor, precum și raportarea către autoritățile publice, conform <b>Legii nr. 133/2011 privind protecția datelor cu caracter personal</b> și legislației fiscale și contabile în vigoare.")}
+    ${pt("8.5. Datele se prelucrează pe durata contractului și se păstrează ulterior în termenele stabilite de legislația contabilă și fiscală; ele nu se transmit terților decât în cazurile prevăzute de lege sau autorităților îndreptățite. Vânzătorul are dreptul de acces, de intervenție și de opoziție asupra datelor sale, dreptul de a cere rectificarea sau ștergerea lor și dreptul de a se adresa Centrului Național pentru Protecția Datelor cu Caracter Personal ori instanței de judecată. Comunicarea datelor este necesară pentru executarea contractului și îndeplinirea obligațiilor legale ale Cumpărătorului; retragerea consimțământului nu afectează legalitatea prelucrării efectuate anterior și nici obligația legală de păstrare a documentelor.")}
     <table style="width:100%;margin-top:16px;border-collapse:collapse;font-size:11px;"><tr>
       <td style="width:50%;vertical-align:top;padding-right:10px;">
         <div class="of-b">CUMPĂRĂTOR</div>
@@ -7872,26 +8007,49 @@ document.getElementById("statement-print-btn")?.addEventListener("click", printS
 // ca pagina „Documente tipar" (o receptie = un rand in act), ca sa nu apara a doua varianta a
 // aceluiasi document oficial, cu alte cifre.
 bodyEl?.addEventListener("click", (event) => {
-  const btn = event.target.closest('[data-action="print-act"]');
+  const btn = event.target.closest("[data-print-receipt]");
   if (!btn) return;
   const receipt = (receiptsCache || []).find((r) => Number(r.id) === Number(btn.dataset.id));
   if (!receipt) return;
   if (!isReceiptInStock(receipt)) {
-    window.alert("Recepția nu e în stoc (proiect sau anulată). Actul de achiziție s-ar emite pe marfă care n-a intrat.");
+    window.alert("Recepția nu e în stoc (proiect sau anulată). Documentele s-ar emite pe marfă care n-a intrat.");
     return;
   }
   const partner = findPartnerById(receipt.supplierId) || findPartnerByName(receipt.supplier);
   if (!partner) {
-    window.alert("Furnizorul recepției nu a fost găsit în nomenclator. Completează-l înainte de a tipări actul.");
+    window.alert("Furnizorul recepției nu a fost găsit în nomenclator. Completează-l înainte de a tipări documentele.");
     return;
   }
   // Firma emitenta se alege pe pagina Receptii, ca pe „Documente tipar": cu mai multe firme
-  // in nomenclator, un act tiparit tacit pe firma implicita iese pe persoana juridica gresita.
+  // in nomenclator, un document tiparit tacit pe firma implicita iese pe persoana juridica gresita.
   const company = resolveCompany(document.getElementById("receipt-doc-company")?.value || "");
-  openOfficialDocWindow(
-    buildPurchaseActHtml([receipt], partner, company),
-    `Act de achizitie ${partner.name}`
-  );
+  const kind = btn.dataset.printReceipt;
+  // Meniul se inchide singur dupa alegere; altfel ramane deschis peste tabel.
+  btn.closest("details")?.removeAttribute("open");
+  if (kind === "contract") {
+    openOfficialDocWindow(buildSaleContractHtml(partner, company), `Contract ${partner.name}`);
+  } else if (kind === "act") {
+    openOfficialDocWindow(buildPurchaseActHtml([receipt], partner, company), `Act de achizitie ${partner.name}`);
+  } else if (kind === "payment") {
+    // Ordinul se emite pe RESTUL de plata al receptiei (cat mai are de primit furnizorul).
+    // Nu citim `transactionsCache`: pe ecranul Receptii el poate fi vechi, iar un ordin cu o
+    // suma veche e mai rau decat unul de completat.
+    const dePlata = Number(receipt.amountToPay ?? receipt.preliminaryPayableAmount ?? 0);
+    const achitat = Number(receipt.paidAmount || 0);
+    const rest = Number((dePlata - achitat).toFixed(2));
+    if (!(rest > 0)) {
+      window.alert("Recepția nu are rest de plată: ordinul de plată ar fi pe zero lei.");
+      return;
+    }
+    openOfficialDocWindow(
+      buildCashPaymentOrderHtml(
+        { amount: rest, createdAt: new Date().toISOString(), receiptId: receipt.id, partnerId: partner.id, partner: partner.name },
+        partner,
+        company
+      ),
+      `Ordin de plata ${partner.name}`
+    );
+  }
 });
 
 // Delivery document print buttons (Etapa 6) — event delegation
