@@ -31,6 +31,7 @@ npm run dev          # aplicația WEB pe http://localhost:3000
 - `src/supabase-state-kv.js`, `src/supabase-storage.js`, `src/storage.js` — persistența.
 - `src/auth.js`, `src/security.js`, `src/permissions.js` — autentificare (parole scrypt), roluri, drepturi.
 - `public/app.js` — tot frontend-ul (randare tabele, formulare, calcule afișate).
+- `public/qr.js` — generator de coduri QR, fără dependențe (vezi regula 10).
 
 ## Stocare (important)
 - Toată starea „primară" e un singur blob JSON sub cheia KV `receipts`; nomenclatorul sub cheia `config`.
@@ -49,9 +50,35 @@ npm run dev          # aplicația WEB pe http://localhost:3000
 - **Sursa unică de calcul: `deliveryInvoiceTotals()` din `public/app.js`.** Aceeași formulă e duplicată intenționat în `updateBillingPriceLei` (formularul live) și în backend la `createComplaint`. Dacă schimbi formula, schimb-o în TOATE.
 - NU trata `priceLei` în valută ca lei/kg — a cauzat un bug de **1000×** (92 de milioane în loc de 92 de mii).
 
-### 3. `contractPrice` e PER TONĂ
-- Drum de bani SEPARAT (Achitări/Încasări + raport de management): `contractPrice × cantitate(tone)`.
-- Nu adăuga `×1000` și nu-l atinge când repari matematica facturii.
+### 3. `contractPrice` e PER TONĂ — și e ACELAȘI preț ca pe factură
+La livrare există **un singur preț**. Contabilul îl pune din „Date factură"; contractul e doar
+formular de tipar, nu face calcule. `contractPrice` nu e un al doilea preț — e același preț
+exprimat în **lei/TONĂ**, pe lângă `priceLei` (lei/KG) și `priceForeign` (valută/TONĂ).
+- Drum de bani SEPARAT de factură (Achitări/Încasări + raport de management):
+  `contractPrice × cantitate(tone)`. Nu adăuga `×1000`.
+- **Sursă unică: `deliveryReceivableTonnePrice()`** din `src/local-storage.js` — folosită de
+  Încasări, extrasul de cont, raportul de management și tabelul de livrări. Oglindită în
+  `public/app.js` (aceeași denumire) și în `src/management-report.js` (modul intenționat pur,
+  fără require-uri, ca `isVoidedDelivery`). Se schimbă în TOATE TREI; există test care verifică
+  că oglinzile nu au divergat.
+- Se **derivă** din datele de facturare (`deliveryTonnePriceFromBilling`) și se scrie pe
+  document la editare. Fallback-ul la citire vindecă livrările vechi, la care `contractPrice`
+  a rămas 0 fiindcă **nu exista niciun câmp în interfață prin care să fie introdus** — deci
+  ținta de încasat a fiecărei livrări era zero. Fără migrare, fără rescrierea istoricului.
+- **`priceLei` înseamnă lei/KG la MDL, dar lei/TONĂ la valută** (vezi recalculul din
+  `updateDelivery`). Totalurile facturii sunt corecte fiindcă `deliveryInvoiceTotals` ramifică
+  pe monedă și nu-l citește acolo. Dar cine îl citește ca lei/kg greșește de **1000×** —
+  derivarea ocolește deliberat câmpul și pornește din `priceForeign` + `exchangeRate`.
+- La **MDL cursul e forțat la 1**. Cine punea EUR + curs, apoi comuta pe MDL fără să golească
+  cursul, obținea `priceLei = preț × curs_vechi` — un preț/kg de zeci de ori mai mare, tăcut.
+- Prețul **nu poate coborî ținta sub cât s-a încasat deja**: restul ar deveni 0, livrarea ar
+  apărea „Încasat", iar banii primiți ar dispărea din evidență. Storno de încasare întâi —
+  același precedent ca la retur (regula 6).
+- **Drepturile nu se relaxează.** Prețul e câmp de facturare: `CAN_EDIT_BILLING_ROLES`, la
+  creare și la editare. Operatorul nu-l atinge. Motivul documentat al gărzii e `invoiceNumber`
+  (prin el se ocolea regula de retur pe livrare facturată) — nu-l scoate din listă.
+- Dialogul arată contabilului **creanța rezultată** lângă totalul facturii: până acum punea
+  prețul și nu vedea nicăieri că din el iese suma datorată de cumpărător.
 
 ### 4. Plată parțială / avans (Financiar)
 - Backend-ul ține deja cumulativ + status automat: `paidAmount/paymentStatus` (recepții),
@@ -289,6 +316,64 @@ apa tot se evaporă.
   **a doua cântărire**, care rulează o singură dată — nu se intră manual în „In descarcare" și
   nu se iese din ea decât spre „Anulat". Dacă adaugi altă rută de editare, reverifică:
   `receiptPayableTonnes` se încrede orbește în flagul stocat.
+
+### 10. Formularele de tipar (acte oficiale)
+- **Actul de achiziție are UN singur builder**, `buildPurchaseActHtml` (`public/app.js`), folosit
+  și de meniul „Tipar" de pe rândul recepției, și de pagina „Documente tipar", și de butonul din
+  Livrări. A existat o a doua machetă; aceeași cumpărare ieșea pe două hârtii diferite. Macheta
+  urmează formularul tipizat bilingv (RO/RU) primit de la proprietar — nu o „înfrumuseța".
+- **Meniul „Tipar" de pe recepție** e al contabilului, contabilului-șef și adminului
+  (`CONTABILI_SI_ADMIN` în `renderReceipts`). Conține contractul și actul.
+  - **Contractul** e document de PARTENER: se poate tipări și pe o recepție în „Proiect"
+    (contabilul îl pregătește înainte), dar nu pe una anulată.
+  - **Actul** cere marfă în stoc (`isReceiptInStock`) — altfel e o hârtie fără acoperire.
+- **Ordinul de plată NU se emite de pe recepție.** Iese din Financiar, dintr-o PLATĂ
+  înregistrată (`printAccountingDocument("paymentOrder")`). Sintetizat din restul de plată, ar
+  fi o dispoziție de casă fără corespondent în registru, retipăribilă oricând pe aceeași datorie.
+- **Toate cele trei intrări ale actului se deschid cu `openOfficialDocWindow`.** Clasele `of-*`
+  (chenare, linii de completat, legende bilingve, margini) există DOAR acolo. Trimis în
+  fereastra obișnuită, actul iese fără chenare și cu subsol „Generat de AgroProfit+" pe un
+  formular de stat — vezi lista `officialDocs` din `printDeliveryDocument`.
+- **Codul QR** (`public/qr.js`, fără dependențe) poartă datele actului ca text ASCII: firma și
+  IDNO, seria/nr. și data actului (plus recepțiile din el), furnizorul, marfa, valoarea,
+  reținerea și suma de plată. **IDNP-ul furnizorului NU intră în cod** (decizia proprietarului,
+  25.09.2026): pe hârtie apare întreg, fiindcă formularul îl cere, dar în QR ar fi extractibil
+  automat din orice fotografie a actului.
+  - Generatorul e local **intenționat**: unul extern ar primi datele actului la fiecare tipărire.
+  - Capacitatea e 213 octeți (versiunile 1-10, corecție M). `actQrPayload` scurtează în ordine:
+    întâi numele firmei, apoi detaliul mărfii. Identificarea părților și suma rămân mereu.
+  - Textul întors de `actQrPayload` **nu e escapat pentru HTML**. Ajunge doar în encoder; dacă
+    îl afișezi vreodată pe pagină, treci-l prin `escapeComboHtml`.
+  - QR-ul **nu e semnat**: e comoditate de citire, nu dovadă de autenticitate. Nu construi
+    peste el un flux de tip „scanez și validez documentul".
+  - Orice modificare în `qr.js` se verifică decodând rezultatul cu un decodor independent;
+    trei erori (polinom inversat, format transpus, aliniere sărită) au trecut neobservate la
+    citire și au ieșit doar așa.
+
+### 10. Numărul actului de achiziție (`actNumber`)
+Actul de achiziție e document fiscal: numărul lui ajunge în dosarul de hârtie, semnat.
+- Se atribuie **o singură dată**, la prima tipărire, și se **persistă pe recepție**
+  (`actNumber`, `actSeries`, `actIssuedAt`). Orice reimprimare dă **același** număr.
+  Dacă îl calculezi la afișare, reimprimarea produce alt număr decât cel din dosar.
+- `nextActNumber()` = `max(atribuite) + 1`, cu plafon inferior `ACT_NUMBER_START = 914`
+  (actul lui Cojocari Ana din 02.10.2026, numerotat pe hârtie). **Derivat din date, nu
+  dintr-un contor separat** — un contor se desincronizează la restaurare din backup sau la
+  o scriere pierdută, iar un număr refolosit înseamnă două acte cu același număr în dosar.
+- Actele de **dinainte** de 02.10.2026 rămân nenumerotate în aplicație: au deja numere
+  scrise de mână și nu se rescrie nimic semnat (decizia utilizatorului, 03.10.2026).
+- **Doar achizițiile de la persoane fizice** consumă numere — acolo se întocmește actul,
+  fiindcă acolo se reține impozitul la sursă. „Persoană fizică" se decide pe SERVER, din
+  profilul fiscal al partenerului (`withholdingPercent > 0`), nu din body: altfel apelantul
+  ar consuma numere pe achiziții de la firme și ar lăsa găuri în șir.
+- Doar `CAN_ISSUE_ACTS_ROLES` (contabil, contabil-șef, admin) emit acte. Urmă în audit
+  (`receipt-act-number`). Refuzat pe o recepție care nu e în stoc — ar fi hârtie fără marfă.
+- Un act care acoperă **mai multe recepții** consumă UN număr, atribuit celei mai vechi:
+  actul e un singur document.
+- Seria e **per firmă** (`companies[].series`), nu globală — firma vine din cerere, seria se
+  rezolvă pe server.
+- La tipărire, fereastra se deschide **înainte** de `await` (cererea numărului). După un
+  `await`, `window.open` e blocat de blocatorul de pop-up și contabilul rămâne fără document.
+  Orice ieșire devreme trebuie să închidă fereastra deja deschisă.
 
 ## Deploy
 - **Push pe `main` → Vercel publică automat** pe agroprofit-plus.vercel.app (integrare Git activă).

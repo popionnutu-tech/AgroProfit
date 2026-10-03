@@ -1,4 +1,5 @@
 const {
+  assignActNumber,
   closeReceipt,
   completeReceiptWeighing,
   correctReceiptTerms,
@@ -557,7 +558,59 @@ async function correctReceiptTermsHandler(req, res, id) {
   }
 }
 
+// Numarul actului de achizitie. Se cere la TIPARIRE: prima data se atribuie si se salveaza
+// pe receptie, apoi orice reimprimare primeste acelasi numar.
+// „Persoana fizica" se decide pe SERVER, din profilul fiscal al partenerului — nu din body:
+// altfel apelantul ar putea consuma numere pentru achizitii de la firme, lasand gauri in
+// sirul din dosar.
+async function assignActNumberHandler(req, res, id) {
+  try {
+    const receipt = getReceiptRaw(id);
+    if (!receipt) {
+      return sendJson(res, 404, { error: "Receptia nu a fost gasita." });
+    }
+
+    const config = await getConfig();
+    const partner = config.partners.find((item) => item.id === Number(receipt.supplierId));
+    const fiscalProfile = config.fiscalProfiles.find(
+      (item) =>
+        String(item.name || "").trim().toLowerCase() ===
+        String(partner?.fiscalProfile || "").trim().toLowerCase()
+    );
+    // Persoana fizica = cea la care se retine impozit la sursa. Acelasi criteriu folosit de
+    // actul tiparit (`partnerWithholdingPercent`).
+    const isNaturalPerson = Number(fiscalProfile?.withholdingPercent || 0) > 0;
+    // Seria e per FIRMA (nomenclatorul „companies"), nu globala. Firma vine din cerere
+    // fiindca actul se poate emite pe oricare dintre firmele active; daca nu e trimisa sau
+    // nu se gaseste, se ia prima firma activa — ca pe actul tiparit.
+    const companies = Array.isArray(config.companies) ? config.companies : [];
+    const company =
+      companies.find((item) => Number(item.id) === Number((req.body || {}).companyId)) ||
+      companies.find((item) => item.active !== false) ||
+      companies[0];
+    const series = String(company?.series || company?.shortName || "").trim();
+
+    const updated = await assignActNumber(id, {
+      isNaturalPerson,
+      series,
+      actorRole: req.currentUser && req.currentUser.roleCode,
+      changedBy: getActorLabel(req)
+    });
+    return sendJson(res, 200, {
+      ok: true,
+      actNumber: updated.actNumber,
+      actSeries: updated.actSeries
+    });
+  } catch (error) {
+    console.error("Failed to assign act number:", error.message);
+    return sendJson(res, error.statusCode || 400, {
+      error: error.message || "Nu am putut atribui numarul actului."
+    });
+  }
+}
+
 module.exports = {
+  assignActNumberHandler,
   closeReceiptHandler,
   completeWeighingHandler,
   correctReceiptTermsHandler,

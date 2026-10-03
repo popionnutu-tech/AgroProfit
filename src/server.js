@@ -36,6 +36,7 @@ const {
 const {
   closeReceiptHandler,
   completeWeighingHandler,
+  assignActNumberHandler,
   correctReceiptTermsHandler,
   createReceiptHandler,
   healthHandler,
@@ -383,6 +384,16 @@ app.post(
       console.error("Failed to allocate document number:", error.message);
       return res.status(error.statusCode || 400).json({ error: error.message || "Nu am putut aloca numarul." });
     }
+  }
+);
+
+// Numarul actului de achizitie: se atribuie la prima tiparire si NU se mai schimba.
+// Doar contabil/admin — e un numar de document fiscal, nu o eticheta de interfata.
+app.post(
+  "/api/receipts/:id/act-number",
+  requireRoles(["accountant", "accountant-sef", "admin"]),
+  async (req, res) => {
+    return assignActNumberHandler(req, res, req.params.id);
   }
 );
 
