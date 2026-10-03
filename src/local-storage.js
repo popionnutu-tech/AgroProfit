@@ -1791,40 +1791,115 @@ function nextActNumber(state, companyId) {
 // UN numar, dar il primesc toate: altfel una dintre celelalte, tiparita ulterior individual,
 // apare nenumerotata si ARDE un numar nou pentru marfa deja acoperita de hartia 914 — dubla
 // invizibila, imposibil de prins din interfata.
+// `ids` = TOATE receptiile acoperite de act. Un act care acopera mai multe receptii consuma
+// UN numar, dar il primesc toate: marcat doar pe cea mai veche, una dintre celelalte tiparita
+// ulterior individual apare nenumerotata si ARDE un numar nou pentru marfa deja acoperita —
+// dubla invizibila, imposibil de prins din interfata.
 async function assignActNumber(ids, options = {}) {
   const state = readReceiptsState();
-  const lista = (Array.isArray(ids) ? ids : [ids]).map(Number);
+
+  // Intrare tipizata: `.map(Number)` accepta booleeni si tablouri imbricate.
+  const brute = Array.isArray(ids) ? ids : [ids];
+  // `Number(true)` e 1 si `Number([7])` e 7: fara verificarea de TIP, un boolean sau un
+  // tablou imbricat devine un id valid si marcheaza o receptie la intamplare.
+  if (!brute.length || brute.some((v) => typeof v !== "number" && typeof v !== "string")) {
+    throw new Error("Lista de receptii pentru act e invalida.");
+  }
+  const lista = [...new Set(brute.map(Number))];
+  if (lista.some((id) => !Number.isInteger(id) || id <= 0)) {
+    throw new Error("Lista de receptii pentru act e invalida.");
+  }
+  if (lista.length > 50) {
+    throw new Error("Un act nu poate acoperi mai mult de 50 de receptii.");
+  }
+
   const receipts = lista.map((id) => {
     const found = (state.receipts || []).find((item) => item.id === id);
     if (!found) throw new Error(`Receptia #${id} nu a fost gasita.`);
     return found;
   });
-  if (!receipts.length) {
-    throw new Error("Nicio receptie pentru act.");
-  }
   const receipt = receipts[0];
 
   const role = normalizeRoleCode(options.actorRole);
   if (!CAN_ISSUE_ACTS_ROLES.includes(role)) {
     throw forbiddenError("Doar contabilul sau administratorul pot emite acte de achizitie.");
   }
-  // Daca ORICARE dintre receptii are deja numar, actul e deja emis: se intoarce acela.
-  const dejaEmis = receipts.find((item) => Number(item.actNumber || 0) > 0);
-  if (dejaEmis) {
-    return dejaEmis; // acelasi numar, oricate reimprimari
-  }
+
+  // „In stoc" se verifica INAINTE de orice ieșire: altfel o retiparire cu o receptie-proiect
+  // in selectie scotea hartie pentru marfa care n-a intrat.
   for (const item of receipts) {
     if (!isReceiptInStock(item)) {
       throw new Error(`Receptia #${item.id} nu e in stoc (${item.status}). Nu se emite act pentru ea.`);
     }
   }
+
+  // ACT DEJA EMIS. Se intoarce acelasi numar, dar numai daca selectia e EXACT cea acoperita:
+  // o selectie amestecata (acoperit + marfa noua) reactiva actul vechi, tiparea alt conținut
+  // sub acelasi numar fiscal, iar marfa noua ramanea pe niciun act.
+  const dejaEmis = receipts.find((item) => Number(item.actNumber || 0) > 0);
+  if (dejaEmis) {
+    const purtator =
+      receipts.find((item) => item.actFigures) ||
+      (state.receipts || []).find(
+        (item) =>
+          item.actFigures &&
+          Number(item.actNumber) === Number(dejaEmis.actNumber) &&
+          Number(item.actCompanyId || 0) === Number(dejaEmis.actCompanyId || 0)
+      ) ||
+      dejaEmis;
+    const acoperite = [...new Set(
+      ((purtator.actFigures && purtator.actFigures.receiptIds) || [Number(dejaEmis.id)]).map(Number)
+    )];
+    // REIMPRIMARE: selectia e o parte din actul emis (ex. de pe randul unei singure receptii
+    // acoperite). Se intoarce actul INTREG, cu toate randurile lui — nu un act de un rand sub
+    // acelasi numar fiscal.
+    // EMITERE AMESTECATA: unele acoperite, altele nu. Refuzata: altfel actul vechi se reactiva
+    // cu alt conținut sub acelasi numar, iar marfa noua rămânea pe niciun act.
+    const neacoperite = lista.filter((id) => !acoperite.includes(id));
+    if (neacoperite.length) {
+      throw new Error(
+        `Receptiile ${acoperite.join(",")} sunt deja pe actul ${dejaEmis.actSeries || ""} ${dejaEmis.actNumber}, iar ${neacoperite.join(",")} nu. Emite un act separat pentru ele sau storneaza actul.`
+      );
+    }
+    // Reparare: o scriere partiala (purtator marcat, restul nu) nu are voie sa treaca drept
+    // succes la reincercare — altfel recepțiile nemarcate ard un numar nou mai tarziu.
+    let reparat = false;
+    const aleActului = (state.receipts || []).filter((item) => acoperite.includes(Number(item.id)));
+    for (const item of aleActului) {
+      if (Number(item.actNumber || 0) !== Number(dejaEmis.actNumber)) {
+        item.actNumber = dejaEmis.actNumber;
+        item.actSeries = dejaEmis.actSeries;
+        item.actCompanyId = dejaEmis.actCompanyId;
+        item.actIssuedAt = dejaEmis.actIssuedAt;
+        reparat = true;
+      }
+      if (!item.actFigures && purtator.actFigures) {
+        item.actFigures = purtator.actFigures;
+        reparat = true;
+      }
+    }
+    if (reparat) {
+      writeReceiptsState(state);
+      await flushPendingWrites();
+    }
+    return purtator;
+  }
+
   // Numar consumat degeaba = gaura in sirul din dosar, imposibil de explicat la control.
   if (options.isNaturalPerson !== true) {
     throw new Error("Actul de achizitie se intocmeste doar la cumpararea de la persoane fizice.");
   }
-
   if (!options.companyId) {
     throw new Error("Firma emitenta e obligatorie: seria si numarul se inregistreaza pe act.");
+  }
+  // Un act e al UNUI furnizor. Lipsa furnizorului pe ambele parti nu inseamna „acelasi".
+  for (const item of receipts) {
+    if (!Number(item.supplierId)) {
+      throw new Error(`Receptia #${item.id} nu are furnizor. Nu se emite act pe ea.`);
+    }
+    if (Number(item.supplierId) !== Number(receipt.supplierId)) {
+      throw new Error("Actul de achizitie acopera receptiile unui singur furnizor.");
+    }
   }
 
   const numar = nextActNumber(state, options.companyId);
@@ -1832,15 +1907,11 @@ async function assignActNumber(ids, options = {}) {
   const companie = Number(options.companyId);
   const acum = new Date().toISOString();
 
-  // CIFRELE SE INGHEATA. Fara asta, o corectie ulterioara de pret sau de bifa face ca
-  // retiparirea ACELUIASI numar sa arate alte cifre decat hartia semnata — exact riscul
-  // de care actul se apara deja pe cota de impozit.
-  // Se pastreaza primitivele (kg, valoare, retinere, net); pretul se derivă din ele la
-  // tiparire, ca sa nu existe o a doua regula de rotunjire.
-  // Se ingheata si RANDURILE, nu doar totalurile: randul se construia din receptie, deci
-  // dupa o corectie de suma actul se contrazicea pe aceeasi hartie (rand 35.756,10 fata de
-  // total 17.878,05). Capul de tabel afirma „5 = 3 x 4" — trebuie sa fie adevarat si la
-  // retiparire. Si denumirea produsului se pastreaza: nomenclatorul se poate redenumi.
+  // Se ingheata RANDURILE, nu doar totalurile: randul se construia din receptie, deci dupa o
+  // corectie de suma actul se contrazicea pe aceeasi hartie (rand 35.756,10 sub total
+  // 17.878,05, pe un formular care afirma „5 = 3 x 4"). Se pastreaza si denumirea produsului,
+  // DATELE (rubrica „din / от" intra si in codul QR) si identitatea parților: nomenclatorul
+  // se poate redenumi, iar furnizorul se poate schimba dupa emitere.
   const randuri = receipts.map((item) => {
     const kg = receiptPayableTonnes(item) * 1000;
     const brut = Number(item.preliminaryMerchandiseValue || 0) || kg * Number(item.price || 0);
@@ -1848,6 +1919,7 @@ async function assignActNumber(ids, options = {}) {
     return {
       id: item.id,
       product: String(item.product || ""),
+      date: item.receivedAt || item.createdAt || "",
       netKg: Number(kg.toFixed(3)),
       value: Number(brut.toFixed(2)),
       netPay: Number(net.toFixed(2))
@@ -1857,13 +1929,20 @@ async function assignActNumber(ids, options = {}) {
     (acc, r) => ({ kg: acc.kg + r.netKg, brut: acc.brut + r.value, net: acc.net + r.netPay }),
     { kg: 0, brut: 0, net: 0 }
   );
+  const partener = (state.partners || []).find(
+    (item) => Number(item.id) === Number(receipt.supplierId)
+  );
   const snapshot = {
     netKg: Number(total.kg.toFixed(3)),
     value: Number(total.brut.toFixed(2)),
     netPay: Number(total.net.toFixed(2)),
     tax: Math.max(Number((total.brut - total.net).toFixed(2)), 0),
     rows: randuri,
-    receiptIds: lista
+    receiptIds: lista,
+    companyId: companie,
+    series: serie,
+    supplierId: Number(receipt.supplierId),
+    supplierName: String(receipt.supplier || (partener && partener.name) || "")
   };
 
   for (const item of receipts) {
@@ -1871,8 +1950,9 @@ async function assignActNumber(ids, options = {}) {
     item.actSeries = serie;
     item.actCompanyId = companie;
     item.actIssuedAt = acum;
-    // Cifrele actului stau pe PURTATOR (prima receptie): actul e un singur document.
-    if (item.id === receipt.id) item.actFigures = snapshot;
+    // Pe TOATE, nu doar pe purtator: altfel tiparirea individuala a unei receptii acoperite
+    // cadea pe recalcul si scotea aceeasi serie+numar cu alte cifre.
+    item.actFigures = snapshot;
     item.updatedAt = acum;
   }
 
@@ -4189,6 +4269,9 @@ async function updateReceiptStatusWithAudit(id, status, payload = {}) {
 
   assertStatusChangePermission(receipt.status, status, payload.actorRole);
   assertReceiptStatusTransition(receipt.status, status);
+  if (status === "Anulat") {
+    assertNoIssuedAct(receipt, "anula");
+  }
   receipt.status = status;
   receipt.updatedAt = new Date().toISOString();
 
@@ -4232,6 +4315,7 @@ async function updateReceiptSupplier(id, partnerId, changedBy) {
   if (!receipt) {
     throw new Error("Receptia nu a fost gasita.");
   }
+  assertNoIssuedAct(receipt, "schimba furnizorul");
 
   const config = readConfigState();
   const partner = (config.partners || []).find((item) => item.id === Number(partnerId));
@@ -5014,6 +5098,18 @@ async function cancelTransfer(id, options = {}) {
 
 // Anulare receptie (admin/manager). Receptia anulata e deja exclusa din stoc.
 // Blocata daca are livrari active (altfel ar lasa stocul inconsistent).
+// Un act de achizitie EMIS e hartie semnata, cu numar, in dosarul fiscal. Orice operatie
+// care ar face documentul sa nu mai corespunda hartiei lasa numarul orfan: „Anulat" in
+// aplicatie (ascuns pe unele roluri) si o gaura in sir, imposibil de explicat la control.
+// Sursa UNICA: garda era scrisa doar in `cancelReceipt`, iar ruta de status o ocolea.
+function assertNoIssuedAct(receipt, operatie) {
+  if (Number((receipt && receipt.actNumber) || 0) > 0) {
+    throw new Error(
+      `Pe aceasta receptie s-a emis actul ${receipt.actSeries || ""} ${receipt.actNumber}. Nu se poate ${operatie}: storneaza actul intai.`
+    );
+  }
+}
+
 async function cancelReceipt(id, options = {}) {
   const state = readReceiptsState();
   const receipt = state.receipts.find((item) => item.id === Number(id));
@@ -5023,14 +5119,7 @@ async function cancelReceipt(id, options = {}) {
   if (receipt.status === "Anulat") {
     return receipt;
   }
-  // Un act de achizitie EMIS e hartie semnata, cu numar, in dosarul fiscal. Anularea
-  // receptiei ar lasa numarul orfan: document „Anulat" in aplicatie (ascuns pe unele roluri)
-  // si o gaura in sir, imposibil de explicat la control. Se storneaza actul pe hartie intai.
-  if (Number(receipt.actNumber || 0) > 0) {
-    throw new Error(
-      `Pe aceasta receptie s-a emis actul ${receipt.actSeries || ""} ${receipt.actNumber}. Nu se poate anula: storneaza actul intai.`
-    );
-  }
+  assertNoIssuedAct(receipt, "anula");
   const reason = String(options.reason || "").trim();
   if (!reason) {
     throw new Error("Motivul anularii este obligatoriu.");

@@ -2129,9 +2129,9 @@ function renderReceipts(receipts) {
           <td title="Apă eliminată la recepție (din umiditatea în exces)">${isPendingWeighing || !(Number(item.estimatedWaterLoss) > 0) ? "—" : formatNumber(Math.round(Number(item.estimatedWaterLoss) * 1000)) + " kg"}${item.payOnGrossQuantity === true ? ` <span class="status-badge badge-warn" title="${bi("Plata s-a făcut pe masa cu apă, uscarea nu s-a taxat. În stoc a intrat masa fără apă.")}">${bi("plătit cu apă")}</span>` : ""}</td>
           <td>${qtyCell}</td>
           <td>${item.location || "-"}</td>
-          <td class="col-fin" title="${Number(item.actNumber) > 0 ? `Act emis la ${formatDateShort(item.actIssuedAt)}` : "Actul nu a fost emis"}">${
+          <td class="col-fin" title="${escapeComboHtml(Number(item.actNumber) > 0 ? `Act emis la ${formatDateShort(item.actIssuedAt)}` : "Actul nu a fost emis")}">${
             Number(item.actNumber) > 0
-              ? `<b>${escapeComboHtml(String(item.actSeries || ""))} ${item.actNumber}</b>`
+              ? `<b>${escapeComboHtml(String(item.actSeries || ""))} ${escapeComboHtml(String(item.actNumber))}</b>`
               : "—"
           }</td>
           <td class="col-fin">${currency.format(valoare)}${canEditAmount && !isCanceled ? ` <button type="button" class="cell-btn change-amount-btn" data-action="adjust-amount" data-id="${item.id}" title="Ajustează valoarea recepției">✎</button>` : ""}${canCorrectTerms && !isCanceled && !isPendingWeighing && item.status !== "Inchis" && item.status !== "Proiect" ? ` <button type="button" class="cell-btn change-amount-btn" data-action="correct-terms" data-id="${item.id}" title="Corectează condițiile: plata pe masa cu umiditate și/sau prețul">⚖</button>` : ""}${Array.isArray(item.termCorrections) && item.termCorrections.length ? ` <span class="status-badge badge-warn" title="Condițiile au fost corectate de ${escapeComboHtml(item.termCorrections[item.termCorrections.length - 1].by || "")} — vezi Detalii">corectat</span>` : ""}</td>
@@ -6845,10 +6845,19 @@ async function ensureActNumber(receipts, company) {
   const emisa = receipts.find((r) => Number(r.actNumber || 0) > 0) || null;
   if (emisa) {
     const cuCifre = receipts.find((r) => r.actFigures) || emisa;
+    if (!cuCifre.actFigures) {
+      // Numar fara cifre inghetate = act vechi (dinainte de captura). Tiparit, ar scoate
+      // aceeasi serie si acelasi numar cu cifre recalculate azi.
+      alert(
+        `Actul ${emisa.actSeries || ""} ${emisa.actNumber} a fost emis fara captura cifrelor. ` +
+        "Nu se poate retipari identic — foloseste hartia din dosar."
+      );
+      return null;
+    }
     return {
       actNumber: emisa.actNumber,
       actSeries: emisa.actSeries || "",
-      actFigures: cuCifre.actFigures || null
+      actFigures: cuCifre.actFigures
     };
   }
   try {
@@ -6881,8 +6890,17 @@ async function ensureActNumber(receipts, company) {
 }
 
 function buildPurchaseActHtml(receipts, partner, company, act) {
-  const p = partner || {};
-  const co = company || DEFAULT_COMPANY;
+  const inghetatFirma = act && act.actFigures ? act.actFigures : null;
+  // Pe un act emis, firma si furnizorul sunt cei de la EMITERE: altfel reselectarea unei alte
+  // firme in „Documente tipar" scotea antetul firmei B cu seria si numarul firmei A, iar
+  // redenumirea furnizorului schimba numele vanzatorului de pe hartia deja semnata.
+  const firmaEmitenta = inghetatFirma && inghetatFirma.companyId
+    ? resolveCompany(inghetatFirma.companyId)
+    : null;
+  const p = inghetatFirma && inghetatFirma.supplierName
+    ? { ...(partner || {}), name: inghetatFirma.supplierName }
+    : partner || {};
+  const co = firmaEmitenta || company || DEFAULT_COMPANY;
   // Pe un act DEJA EMIS randurile vin din cifrele INGHEȚATE atunci, nu din recalculul de
   // acum: altfel, dupa o corectie de suma, actul se contrazicea pe aceeasi hartie — rand
   // 35.756,10 sub un total de 17.878,05, pe un formular care afirma „5 = 3 x 4".
@@ -6927,7 +6945,10 @@ function buildPurchaseActHtml(receipts, partner, company, act) {
   const nr = act && Number(act.actNumber) > 0 ? String(act.actNumber) : "____";
   const seria = (act && act.actSeries) || co.series || co.shortName || "";
   const words = escapeComboHtml(numberToWordsRo(valueTiparit));
-  const dates = rows.map((x) => x.r.receivedAt || x.r.createdAt).filter(Boolean).sort();
+  const dates = (inghetatIn && Array.isArray(inghetatIn.rows)
+    ? inghetatIn.rows.map((r) => r.date)
+    : rows.map((x) => x.r.receivedAt || x.r.createdAt)
+  ).filter(Boolean).sort();
   const dateText = dates.length
     ? (dates[0] === dates[dates.length - 1]
       ? formatDateShort(dates[0])

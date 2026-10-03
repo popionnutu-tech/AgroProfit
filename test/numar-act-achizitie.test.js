@@ -227,10 +227,11 @@ test("actul acopera un singur furnizor", async () => {
       quantity: 1, grossQuantity: 1, provisionalNetQuantity: 1,
       unit: "tone", price: 6, location: "Cilindru 1", locationId: 1
     });
-    // Garda e in handler (pe supplierId); magazia accepta lista, deci verificam ca numarul
-    // se pune pe ambele doar cand sunt trimise deliberat impreuna.
-    const act = await storage.assignActNumber([a.id, b.id], PF);
-    assert.equal(act.actNumber, START);
+    // Un act e al UNUI furnizor: magazia refuza amestecul, nu doar handlerul.
+    await assert.rejects(
+      () => storage.assignActNumber([a.id, b.id], PF),
+      /singur furnizor/i
+    );
   });
 });
 
@@ -274,5 +275,100 @@ test("randurile inghetate dau exact totalul, si pe act multi-receptie", async ()
     assert.equal(Number(f.rows.reduce((s, x) => s + x.netKg, 0).toFixed(3)), f.netKg);
     // Retinerea e diferenta brut - net, consecventa cu randurile.
     assert.equal(f.tax, Number((f.value - f.netPay).toFixed(2)));
+  });
+});
+
+test("reimprimarea de pe o receptie acoperita da actul INTREG", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const a = await receptie(storage, "Cojocari Ana");
+    const b = await receptie(storage, "Cojocari Ana");
+    const c = await receptie(storage, "Cojocari Ana");
+    const emis = await storage.assignActNumber([a.id, b.id, c.id], PF);
+
+    // Cifrele stau pe TOATE, nu doar pe purtator: altfel tiparirea individuala a lui b
+    // cadea pe recalcul si scotea aceeasi serie+numar cu alte cifre.
+    const toate = (await storage.listReceipts()).filter((r) => [a.id, b.id, c.id].includes(r.id));
+    for (const r of toate) {
+      assert.ok(r.actFigures, `receptia #${r.id} nu are cifrele actului`);
+      assert.equal(r.actFigures.rows.length, 3, `actul de pe #${r.id} nu are 3 randuri`);
+      assert.equal(r.actFigures.value, emis.actFigures.value);
+    }
+    // Reimprimarea de pe oricare: acelasi act, intreg.
+    const reimprimat = await storage.assignActNumber([b.id], PF);
+    assert.equal(reimprimat.actNumber, emis.actNumber);
+    assert.equal(reimprimat.actFigures.rows.length, 3);
+  });
+});
+
+test("emiterea AMESTECATA (acoperit + marfa noua) e refuzata", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const a = await receptie(storage, "Cojocari Ana");
+    const b = await receptie(storage, "Cojocari Ana");
+    await storage.assignActNumber([a.id, b.id], PF);
+
+    const noua = await receptie(storage, "Cojocari Ana");
+    await assert.rejects(
+      () => storage.assignActNumber([b.id, noua.id], PF),
+      /deja pe actul/i
+    );
+    // Marfa noua NU a fost atinsa: poate primi propriul act.
+    const dupa = (await storage.listReceipts()).find((r) => r.id === noua.id);
+    assert.ok(!Number(dupa.actNumber), "marfa noua a fost marcata degeaba");
+    assert.equal((await storage.assignActNumber([noua.id], PF)).actNumber, START + 1);
+  });
+});
+
+test("data si furnizorul se ingheata pe act", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const r = await receptie(storage, "Cojocari Ana");
+    const emis = await storage.assignActNumber([r.id], PF);
+    assert.ok(emis.actFigures.rows[0].date, "lipseste data pe randul inghetat");
+    assert.equal(emis.actFigures.supplierName, "Cojocari Ana");
+    assert.equal(emis.actFigures.companyId, 1);
+    assert.equal(emis.actFigures.series, "AP");
+  });
+});
+
+test("furnizorul nu se mai poate schimba dupa emiterea actului", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const r = await receptie(storage, "Cojocari Ana");
+    await storage.assignActNumber([r.id], PF);
+    await assert.rejects(
+      () => storage.updateReceiptSupplier(r.id, 2, "admin"),
+      /storneaza actul intai/i
+    );
+  });
+});
+
+test("anularea prin ruta de STATUS e blocata la fel ca `cancelReceipt`", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const r = await receptie(storage, "Cojocari Ana");
+    await storage.assignActNumber([r.id], PF);
+    await assert.rejects(
+      () => storage.updateReceiptStatusWithAudit(r.id, "Anulat", {
+        changeReason: "incerc pe alt drum", actorRole: "admin", changedBy: "admin"
+      }),
+      /storneaza actul intai/i
+    );
+  });
+});
+
+test("lista de receptii e tipizata si plafonata", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const r = await receptie(storage, "Cojocari Ana");
+    for (const rea of [[true], [[r.id]], [-1], [0], [1.5], []]) {
+      await assert.rejects(() => storage.assignActNumber(rea, PF), /invalida|niciuna/i,
+        `intrarea ${JSON.stringify(rea)} nu trebuia acceptata`);
+    }
+    await assert.rejects(
+      () => storage.assignActNumber(Array.from({ length: 51 }, (_, i) => i + 1), PF),
+      /50 de receptii/
+    );
   });
 });

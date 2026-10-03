@@ -400,6 +400,27 @@ Actul de achiziție e document fiscal: numărul lui ajunge în dosarul de hârti
   tipărire, ca să nu existe a doua regulă de rotunjire. **Codul QR poartă aceleași cifre**
   înghețate: altfel codul scanat ar contrazice hârtia de lângă el. Un act cu alte cifre
   cere număr nou.
+- Captura stă pe **TOATE** recepțiile acoperite, nu doar pe purtător. Ținută doar pe purtător,
+  tipărirea individuală a oricăreia dintre celelalte cădea pe recalcul și scotea **aceeași
+  serie și același număr** cu alte cifre. Tipărirea de pe o recepție acoperită dă actul
+  **întreg** (toate rândurile), nu un act de un rând sub același număr.
+- Captura îngheață și **datele** (rubrica „din / от" intră și în QR), **firma emitentă** și
+  **numele furnizorului**: firma se reselectează în „Documente tipar" (antetul firmei B cu
+  seria firmei A), iar furnizorul se putea schimba după emitere. De aceea
+  `updateReceiptSupplier` refuză pe o recepție cu act emis.
+- **Emiterea amestecată e refuzată**: dacă o parte din selecție e deja pe un act și restul nu,
+  cererea cade cu mesaj explicit. Altfel actul vechi se reactiva cu alt conținut sub același
+  număr, iar marfa nouă rămânea pe niciun act.
+- O reîncercare după o scriere parțială **repară** marcajele lipsă pe toate recepțiile actului;
+  nu le ignoră, altfel cele nemarcate ardeau un număr nou mai târziu.
+- Garda „act emis" e o **sursă unică** (`assertNoIssuedAct`), apelată din `cancelReceipt`,
+  din `updateReceiptStatusWithAudit` (statusul „Anulat" o ocolea) și din
+  `updateReceiptSupplier`.
+- `actFigures` e în `FINANCIAL_RECEIPT_FIELDS`: conține valoarea, reținerea și netul, pe
+  fiecare rând — exact datele pentru care se șterg `price` și `preliminaryMerchandiseValue`.
+- Lista de recepții e **tipizată** (doar numere/șiruri numerice, întregi pozitivi) și plafonată
+  la 50, în ambele straturi: `Number(true)` e 1 și `Number([7])` e 7, deci fără verificarea de
+  tip un boolean marchează o recepție la întâmplare.
 - Rândul recepției arată coloana **„Act nr."** (serie + număr, cu data emiterii în tooltip),
   ca registrul din aplicație să poată fi confruntat cu dosarul de hârtie.
 - Seria e **per firmă** (`companies[].series`), nu globală — firma vine din cerere, seria se

@@ -147,7 +147,11 @@ const FINANCIAL_RECEIPT_FIELDS = [
   "actNumber",
   "actSeries",
   "actIssuedAt",
-  "actCompanyId"
+  "actCompanyId",
+  // Cifrele INGHEȚATE ale actului: valoare, retinere, net, si pe fiecare rand. Exact datele
+  // pentru care se sterg `price` si `preliminaryMerchandiseValue` — fara asta ajungeau la
+  // operator si la `control` prin GET /api/receipts si prin raspunsul de schimbare de status.
+  "actFigures"
 ];
 
 function stripReceiptFinancials(receipt) {
@@ -578,9 +582,17 @@ async function assignActNumberHandler(req, res, id) {
     // Un act poate acoperi mai multe receptii ale aceluiasi furnizor. TOATE primesc numarul,
     // altfel una tiparita ulterior individual ar arde un numar nou pentru marfa deja
     // acoperita. Se accepta doar receptii ale ACELUIASI furnizor — un act e al unui furnizor.
-    const cerute = Array.isArray((req.body || {}).receiptIds)
-      ? (req.body || {}).receiptIds.map(Number).filter(Boolean)
-      : [];
+    // Tipizat: `.map(Number)` accepta booleeni si tablouri imbricate (`true` -> 1, `[7]` -> 7).
+    const brute = Array.isArray((req.body || {}).receiptIds) ? (req.body || {}).receiptIds : [];
+    if (brute.length > 50) {
+      return sendJson(res, 400, { error: "Un act nu poate acoperi mai mult de 50 de receptii." });
+    }
+    const cerute = brute
+      .map((v) => (typeof v === "number" || typeof v === "string" ? Number(v) : NaN))
+      .filter((v) => Number.isInteger(v) && v > 0);
+    if (brute.length && cerute.length !== brute.length) {
+      return sendJson(res, 400, { error: "Lista de receptii pentru act e invalida." });
+    }
     const ids = cerute.length ? [...new Set([Number(id), ...cerute])] : [Number(id)];
     for (const altId of ids) {
       const alta = getReceiptRaw(altId);
