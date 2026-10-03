@@ -7276,19 +7276,8 @@ async function printAccountingDocument(docType, refId, companyId) {
 }
 
 // Cere serverului un numar oficial (crescator, per companie+tip). Idempotent: acelasi document -> acelasi numar.
-async function allocatePrintNumber(docType, refId, companyId) {
-  const res = await fetch("/api/print-docs/allocate-number", {
-    method: "POST",
-    credentials: "same-origin",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ docType, refId, companyId })
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || "Nu am putut aloca numărul documentului.");
-  }
-  return res.json();
-}
+// `allocatePrintNumber` STERS: era wrapper-ul mecanismului vechi de numerotare, fara niciun
+// apelant. Actul de achizitie se numeroteaza prin `ensureActNumber` (regula 10 din CLAUDE.md).
 
 // Build invoice / certificate / purchase act from a delivery + config
 function findPartnerByName(name) {
@@ -7876,7 +7865,13 @@ async function printDeliveryDocument(deliveryId, docType) {
   if (!assertPrintableDelivery(delivery)) return renunta();
   // Compania de antet aleasă în pagina Livrări (gol → AgroProfit+ implicit). Se aplică documentelor
   // „interne" cu antet de firmă (Bon, Act de achiziție, Declarație).
-  const headerCompany = printHeaderCompany(document.getElementById("delivery-doc-company")?.value);
+  const alegereFirma = document.getElementById("delivery-doc-company")?.value;
+  const headerCompany = printHeaderCompany(alegereFirma);
+  // Actul de achizitie e document fiscal: numarul si SERIA se ingheata pe receptie la prima
+  // tiparire. `printHeaderCompany` intoarce null pe „implicit", iar atunci actul ieșea fara
+  // emitent, dar cu seria primei firme active — numar ars, serie greșita, fara cale de
+  // corectie. Aici se rezolva mereu o firma reala, ca pe randul de receptie.
+  const actCompany = resolveCompany(alegereFirma);
   let html = "";
   let title = "";
   if (docType === "invoice") { html = buildInvoicePrintHtml(delivery); title = `Factura ${delivery.invoiceNumber || delivery.id}`; }
@@ -7900,8 +7895,8 @@ async function printDeliveryDocument(deliveryId, docType) {
     if (!isReceiptInStock(actReceipt)) {
       return renunta(`Recepția #${actReceipt.id} nu e în stoc (${actReceipt.status}). Actul de achiziție s-ar emite pe marfă care n-a intrat.`);
     }
-    const act = await ensureActNumber([actReceipt], headerCompany);
-    html = buildPurchaseActHtml([actReceipt], actPartner, headerCompany, act);
+    const act = await ensureActNumber([actReceipt], actCompany);
+    html = buildPurchaseActHtml([actReceipt], actPartner, actCompany, act);
     title = `Act achizitie ${actPartner.name}`;
   }
   else if (docType === "certificate") { html = buildCertificatePrintHtml(delivery); title = `Certificat calitate ${delivery.id}`; }

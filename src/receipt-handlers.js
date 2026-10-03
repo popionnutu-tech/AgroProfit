@@ -141,7 +141,13 @@ const FINANCIAL_RECEIPT_FIELDS = [
   // desi interfata nu le arata.
   "termCorrections",
   "cleaningTariff",
-  "dryingTariff"
+  "dryingTariff",
+  // Metadatele actului de achizitie: nu sunt sume, dar sunt date ale unui document fiscal pe
+  // care doar contabilii il emit. Sirul ar permite unui rol fara `finance` sa numere actele.
+  "actNumber",
+  "actSeries",
+  "actIssuedAt",
+  "actCompanyId"
 ];
 
 function stripReceiptFinancials(receipt) {
@@ -583,16 +589,23 @@ async function assignActNumberHandler(req, res, id) {
     // Seria e per FIRMA (nomenclatorul „companies"), nu globala. Firma vine din cerere
     // fiindca actul se poate emite pe oricare dintre firmele active; daca nu e trimisa sau
     // nu se gaseste, se ia prima firma activa — ca pe actul tiparit.
+    // Firma se cere EXPLICIT: seria intra pe un document fiscal si se ingheata pe receptie.
+    // Un fallback „prima firma activa" ingheta tacit seria altei firme decat cea pe care
+    // omul credea ca emite — numar ars, serie greșita, fara cale de corectie din aplicatie.
     const companies = Array.isArray(config.companies) ? config.companies : [];
-    const company =
-      companies.find((item) => Number(item.id) === Number((req.body || {}).companyId)) ||
-      companies.find((item) => item.active !== false) ||
-      companies[0];
-    const series = String(company?.series || company?.shortName || "").trim();
+    const cerutId = (req.body || {}).companyId;
+    const company = companies.find((item) => Number(item.id) === Number(cerutId));
+    if (!company) {
+      return sendJson(res, 400, {
+        error: "Alege firma emitenta inainte de a tipari actul: seria si numarul se inregistreaza pe document."
+      });
+    }
+    const series = String(company.series || company.shortName || "").trim();
 
     const updated = await assignActNumber(id, {
       isNaturalPerson,
       series,
+      companyId: company.id,
       actorRole: req.currentUser && req.currentUser.roleCode,
       changedBy: getActorLabel(req)
     });

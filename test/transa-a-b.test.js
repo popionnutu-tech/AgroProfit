@@ -994,24 +994,14 @@ test("DOC: allocateDocumentNumber e crescator per tip si idempotent per document
   await withIsolatedWorkspace(async ({ load }) => {
     const storage = load("src/local-storage.js");
     const r1 = await seedReceipt(storage, { preliminaryPayableAmount: 1000 });
-    const r2 = await seedReceipt(storage, { preliminaryPayableAmount: 2000 });
 
-    // Prima alocare pentru fiecare receptie, compania 1 -> 1, 2 (crescator).
-    const a1 = storage.allocateDocumentNumber("purchaseAct", r1.id, 1, "contabil");
-    const a2 = storage.allocateDocumentNumber("purchaseAct", r2.id, 1, "contabil");
-    assert.equal(a1.number, 1);
-    assert.equal(a1.allocated, true);
-    assert.equal(a2.number, 2);
-
-    // Re-tiparire acelasi document (aceeasi companie) -> ACELASI numar, fara increment.
-    const a1again = storage.allocateDocumentNumber("purchaseAct", r1.id, 1, "contabil");
-    assert.equal(a1again.number, 1);
-    assert.equal(a1again.allocated, false);
-
-    // Alta COMPANIE are secventa PROPRIE (incepe de la 1 pentru acelasi tip).
-    const r3 = await seedReceipt(storage, { preliminaryPayableAmount: 3000 });
-    const c2 = storage.allocateDocumentNumber("purchaseAct", r3.id, 2, "contabil");
-    assert.equal(c2.number, 1);
+    // `purchaseAct` a fost SCOS din acest mecanism: actul de achizitie se numeroteaza prin
+    // `assignActNumber` (sir per firma, pornit la 914, cu verificare de persistenta).
+    // Lasat aici, era un al doilea numar, invizibil, pe aceeasi receptie.
+    assert.throws(
+      () => storage.allocateDocumentNumber("purchaseAct", r1.id, 1, "contabil"),
+      /tip de document/i
+    );
 
     // Ordinul de plata are secventa PROPRIE per companie (incepe de la 1).
     const tx = await storage.createTransaction({

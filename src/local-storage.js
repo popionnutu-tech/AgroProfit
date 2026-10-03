@@ -246,6 +246,16 @@ const CAN_EDIT_BILLING_ROLES = ["accountant", "accountant-sef", "manager", "admi
 // Monedele permise. Lista se verifica pe SERVER: selectul din interfata are 4 optiuni, dar
 // un apel direct il ocoleste, iar moneda se randeaza in tabelul de livrari.
 const VALID_CURRENCIES = ["MDL", "EUR", "USD", "RON"];
+// Sursa unica, folosita la CREARE si la EDITARE. Selectul din interfata nu e o garda: un apel
+// direct il ocoleste, iar o moneda necunoscuta comuta calculul pe ramura „valuta" si intra in
+// capul facturii.
+function normalizeCurrency(value) {
+  const cerut = String(value || "MDL").trim().toUpperCase() || "MDL";
+  if (!VALID_CURRENCIES.includes(cerut)) {
+    throw new Error(`Moneda "${cerut}" nu este permisa. Alege una din: ${VALID_CURRENCIES.join(", ")}.`);
+  }
+  return cerut;
+}
 // Numerotarea actelor de achizitie. Primul act emis din aplicatie e cel al lui Cojocari Ana
 // din 02.10.2026, care pe hartie are numarul 914 — deci sirul porneste de acolo. Actele de
 // DINAINTE rămân nenumerotate in aplicatie: au deja numere scrise de mana si nu se rescrie
@@ -1336,7 +1346,10 @@ async function appendAuditLog(payload) {
 // pe inregistrarea sursa (receipt.purchaseActNo / transaction.paymentOrderNo), deci re-tiparirea
 // aceluiasi document intoarce ACELASI numar (idempotent). Contractul-cadru nu primeste numar aici.
 const DOCUMENT_NUMBER_TYPES = {
-  purchaseAct: { collection: "receipts", stampField: "purchaseActNo", entityType: "receipt" },
+  // `purchaseAct` SCOS deliberat: actul de achizitie se numeroteaza prin `assignActNumber`
+  // (regula 10 din CLAUDE.md) — sir per firma, pornit la 914, cu verificare de persistenta.
+  // Lasat aici, era un al DOILEA numar, invizibil, stampilat pe aceeasi receptie printr-o
+  // ruta deschisa si managerului, incrementand un contor pe care nimeni nu-l mai citeste.
   paymentOrder: { collection: "transactions", stampField: "paymentOrderNo", entityType: "transaction" }
 };
 
@@ -1760,11 +1773,14 @@ function getReceiptRaw(id) {
 // Derivat din date, nu dintr-un contor separat — un contor se poate desincroniza de la
 // documentele reale (restaurare din backup, scriere pierduta), iar un numar de act refolosit
 // inseamna doua acte cu acelasi numar in dosar.
-function nextActNumber(state) {
-  const maxim = (state.receipts || []).reduce(
-    (max, item) => Math.max(max, Number(item.actNumber || 0)),
-    0
-  );
+// Sir SEPARAT pe firma emitenta. Seria e per firma (`companies[].series`), deci un sir
+// global ar lasa gauri in registrul fiecareia: „PAT 915", „AGR 916", „PAT 917" — in dosarul
+// PAT lipseste 916, imposibil de explicat la control.
+// Se numara si receptiile ANULATE: numarul lor a fost tiparit si nu se refoloseste.
+function nextActNumber(state, companyId) {
+  const maxim = (state.receipts || [])
+    .filter((item) => Number(item.actCompanyId || 0) === Number(companyId || 0))
+    .reduce((max, item) => Math.max(max, Number(item.actNumber || 0)), 0);
   return Math.max(maxim + 1, ACT_NUMBER_START);
 }
 
@@ -1793,8 +1809,12 @@ async function assignActNumber(id, options = {}) {
     throw new Error("Actul de achizitie se intocmeste doar la cumpararea de la persoane fizice.");
   }
 
-  receipt.actNumber = nextActNumber(state);
+  if (!options.companyId) {
+    throw new Error("Firma emitenta e obligatorie: seria si numarul se inregistreaza pe act.");
+  }
+  receipt.actNumber = nextActNumber(state, options.companyId);
   receipt.actSeries = String(options.series || "").trim();
+  receipt.actCompanyId = options.companyId ? Number(options.companyId) : null;
   receipt.actIssuedAt = new Date().toISOString();
   receipt.updatedAt = receipt.actIssuedAt;
 
@@ -1809,6 +1829,41 @@ async function assignActNumber(id, options = {}) {
   });
 
   writeReceiptsState(state);
+
+  // Numarul NU se intoarce pana nu e DURABIL si UNIC in baza.
+  //
+  // Persistenta e un blob JSON unic, scris cu upsert necondiționat (fara versiune, fara
+  // compare-and-set) si cu debounce. Deci o scriere concurenta — operatorul salveaza o
+  // receptie in timp ce contabilul tipareste — poate reincarca blobul DE DINAINTE de
+  // atribuire si il poate suprascrie: hartia iese cu 914, datele nu mai stiu de el, iar
+  // actul urmator ia din nou 914. Doua acte cu acelasi numar in dosarul fiscal.
+  //
+  // Mitigarea nu elimina cursa (pentru asta e nevoie de alocare atomica in baza), dar o
+  // face VIZIBILA: fortam scrierea, recitim din KV si verificam. Daca numarul nu s-a
+  // persistat sau apare de doua ori, aruncam — mai bine fara act decat cu numar dublat.
+  const atribuit = receipt.actNumber;
+  await flushPendingWrites();
+  if (USE_SUPABASE && kvBackend) {
+    let persistat = null;
+    try {
+      persistat = await kvBackend.loadKv("receipts", null);
+    } catch (err) {
+      throw new Error(
+        "Nu am putut confirma salvarea numarului de act. Nu tipari actul: reincearca."
+      );
+    }
+    const cuNumar = ((persistat && persistat.receipts) || []).filter(
+      (item) =>
+        Number(item.actNumber || 0) === atribuit &&
+        Number(item.actCompanyId || 0) === Number(receipt.actCompanyId || 0)
+    );
+    if (cuNumar.length !== 1 || Number(cuNumar[0].id) !== Number(receipt.id)) {
+      throw new Error(
+        `Numarul ${atribuit} nu s-a inregistrat corect (o alta operatie a scris in acelasi timp). Nu tipari actul: reincearca.`
+      );
+    }
+    receiptsCache = persistat;
+  }
   return receipt;
 }
 
@@ -3291,14 +3346,33 @@ async function createDelivery(payload) {
     trailer: payload.trailer || "",
     contractNumber: payload.contractNumber || "",
     contractDate: payload.contractDate || "",
-    // ACELASI pret ca pe factura, in lei/TONA. Daca nu vine explicit, se deriva din datele
-    // de facturare — nu exista doua preturi (vezi `deliveryTonnePriceFromBilling`).
-    contractPrice: sanitizeNumber(payload.contractPrice) || 0,
+    // ACELASI pret ca pe factura, in lei/TONA. Daca nu vine explicit, se DERIVA din datele
+    // de facturare — nu exista doua preturi. Trimis explicit, trece prin acelasi plafon de
+    // sanitate ca la editare: acceptat necontrolat, o valoare uriasa ajungea direct in
+    // Achitari/Incasari si in raportul de management.
+    contractPrice: (() => {
+      const moneda = normalizeCurrency(payload.currency);
+      const explicit = sanitizeNumber(payload.contractPrice);
+      const curs = moneda === "MDL" ? 1 : sanitizeNumber(payload.exchangeRate);
+      const pretValuta = sanitizeNumber(payload.priceForeign);
+      const derivat = deliveryTonnePriceFromBilling({
+        currency: moneda,
+        priceForeign: pretValuta,
+        exchangeRate: curs,
+        priceLei: pretValuta * curs || sanitizeNumber(payload.priceLei)
+      });
+      const pret = explicit > 0 ? explicit : derivat;
+      const cantitate = sanitizeNumber(payload.deliveredQuantity ?? payload.plannedQuantity);
+      if (pret * cantitate > 1000000000) {
+        throw new Error("Creanta rezultata este nerealist de mare. Verifica pretul si cursul.");
+      }
+      return pret;
+    })(),
     // Câmpuri de facturare (introduse de contabil) — Etapa 4 + Modul B
     seller: payload.seller || "",
     sellerId: payload.sellerId ? Number(payload.sellerId) : null,
     priceForeign: sanitizeNumber(payload.priceForeign),
-    currency: String(payload.currency || "MDL").trim().toUpperCase() || "MDL",
+    currency: normalizeCurrency(payload.currency),
     exchangeRate: sanitizeNumber(payload.exchangeRate) || (String(payload.currency || "MDL").toUpperCase() === "MDL" ? 1 : 0),
     // priceLei calculat din preț valută × curs (sau direct dacă MDL)
     priceLei: sanitizeNumber(payload.priceForeign) * (sanitizeNumber(payload.exchangeRate) || (String(payload.currency || "MDL").toUpperCase() === "MDL" ? 1 : 0)) || sanitizeNumber(payload.priceLei),
@@ -3643,11 +3717,7 @@ async function updateDelivery(id, payload = {}) {
     delivery.priceForeign = sanitizeNumber(payload.priceForeign);
   }
   if (payload.currency !== undefined) {
-    const cerut = String(payload.currency || "MDL").trim().toUpperCase() || "MDL";
-    if (!VALID_CURRENCIES.includes(cerut)) {
-      throw new Error(`Moneda "${cerut}" nu este permisa. Alege una din: ${VALID_CURRENCIES.join(", ")}.`);
-    }
-    delivery.currency = cerut;
+    delivery.currency = normalizeCurrency(payload.currency);
   }
   if (payload.exchangeRate !== undefined) {
     delivery.exchangeRate = sanitizeNumber(payload.exchangeRate);
@@ -3712,6 +3782,11 @@ async function updateDelivery(id, payload = {}) {
       delivery.priceLei = pf * rate;
     } else if (payload.priceLei !== undefined) {
       delivery.priceLei = sanitizeNumber(payload.priceLei);
+    } else if (payload.priceForeign !== undefined && pf === 0) {
+      // Pretul golit EXPLICIT (storno de factura) goleste si `priceLei`. Altfel ramanea
+      // valoarea veche, iar creanta se calcula in continuare din ea: factura fara pret,
+      // Incasari cu tinta veche.
+      delivery.priceLei = 0;
     }
   } else if (payload.priceLei !== undefined) {
     delivery.priceLei = sanitizeNumber(payload.priceLei);
@@ -3722,6 +3797,19 @@ async function updateDelivery(id, payload = {}) {
   // Pana acum nu exista NICIUN drum prin care sa fie completat din interfata, deci ramanea 0
   // si tinta de incasat a fiecarei livrari era zero.
   const derivedTonnePrice = touchesBilling ? deliveryTonnePriceFromBilling(delivery) : 0;
+  // Pretul GOLIT (factura stornata) nu are voie sa lase creanta veche in picioare: factura
+  // ar arata fara pret, iar Incasarile ar cere in continuare tinta veche — exact „doua
+  // veritati despre cat datoreaza cumparatorul".
+  if (touchesBilling && derivedTonnePrice === 0 && Number(delivery.contractPrice || 0) > 0) {
+    const incasatDeja = Number(delivery.collectedAmount || 0);
+    if (incasatDeja > 0) {
+      throw new Error(
+        `Pe livrare s-au incasat ${incasatDeja.toFixed(2)} lei. Nu se poate goli pretul: storneaza incasarea intai.`
+      );
+    }
+    delivery.contractPrice = 0;
+    delivery.collectionStatus = "Neincasat";
+  }
   if (derivedTonnePrice > 0) {
     // Tinta de incasat nu poate cobori sub cat s-a incasat deja: restul ar deveni 0, livrarea
     // ar aparea „Incasat", iar banii primiti ar dispărea din Achitari/Incasari. Ordinea
@@ -4876,6 +4964,14 @@ async function cancelReceipt(id, options = {}) {
   }
   if (receipt.status === "Anulat") {
     return receipt;
+  }
+  // Un act de achizitie EMIS e hartie semnata, cu numar, in dosarul fiscal. Anularea
+  // receptiei ar lasa numarul orfan: document „Anulat" in aplicatie (ascuns pe unele roluri)
+  // si o gaura in sir, imposibil de explicat la control. Se storneaza actul pe hartie intai.
+  if (Number(receipt.actNumber || 0) > 0) {
+    throw new Error(
+      `Pe aceasta receptie s-a emis actul ${receipt.actSeries || ""} ${receipt.actNumber}. Nu se poate anula: storneaza actul intai.`
+    );
   }
   const reason = String(options.reason || "").trim();
   if (!reason) {

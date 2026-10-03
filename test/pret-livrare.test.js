@@ -123,3 +123,79 @@ test("operatorul nu poate atinge pretul (drepturile ramân neschimbate)", async 
     );
   });
 });
+
+test("moneda e validata si la CREARE, nu doar la editare", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const receipt = await storage.createReceipt({
+      supplier: "Agro Nord", supplierId: 1, product: "Grau", productId: 1,
+      quantity: 100, grossQuantity: 100, provisionalNetQuantity: 100,
+      unit: "tone", price: 5, location: "Cilindru 1", locationId: 1
+    });
+    const baza = {
+      receiptId: receipt.id, customerId: 2, customer: "Cumparator SRL",
+      product: "Grau", location: "Cilindru 1",
+      plannedQuantity: 50, deliveredQuantity: 50, netWeight: 50,
+      actorRole: "accountant"
+    };
+    for (const rea of ["<img src=x onerror=alert(1)>", "&#60;SCRIPT&#62;", "XYZ", "__proto__"]) {
+      await assert.rejects(
+        () => storage.createDelivery({ ...baza, currency: rea, priceForeign: 4 }),
+        /nu este permisa/i,
+        `moneda "${rea}" nu trebuia acceptata`
+      );
+    }
+    // Monedele reale trec.
+    const ok = await storage.createDelivery({ ...baza, currency: "MDL", priceForeign: 4 });
+    assert.equal(ok.currency, "MDL");
+    // Si pretul de contract se deriva din prima clipa: 4 lei/kg = 4000 lei/tona.
+    assert.equal(Number(ok.contractPrice), 4000);
+  });
+});
+
+test("plafon de sanitate pe creanta si la CREARE", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const receipt = await storage.createReceipt({
+      supplier: "Agro Nord", supplierId: 1, product: "Grau", productId: 1,
+      quantity: 100, grossQuantity: 100, provisionalNetQuantity: 100,
+      unit: "tone", price: 5, location: "Cilindru 1", locationId: 1
+    });
+    await assert.rejects(
+      () => storage.createDelivery({
+        receiptId: receipt.id, customerId: 2, customer: "Cumparator SRL",
+        product: "Grau", location: "Cilindru 1",
+        plannedQuantity: 50, deliveredQuantity: 50, netWeight: 50,
+        currency: "EUR", priceForeign: 1e12, exchangeRate: 1e12,
+        actorRole: "accountant"
+      }),
+      /nerealist de mare/i
+    );
+  });
+});
+
+test("golirea pretului nu lasa creanta veche in picioare", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const receipt = await storage.createReceipt({
+      supplier: "Agro Nord", supplierId: 1, product: "Grau", productId: 1,
+      quantity: 100, grossQuantity: 100, provisionalNetQuantity: 100,
+      unit: "tone", price: 5, location: "Cilindru 1", locationId: 1
+    });
+    const d = await storage.createDelivery({
+      receiptId: receipt.id, customerId: 2, customer: "Cumparator SRL",
+      product: "Grau", location: "Cilindru 1",
+      plannedQuantity: 50, deliveredQuantity: 50, netWeight: 50,
+      currency: "MDL", priceForeign: 4, actorRole: "accountant"
+    });
+    assert.equal(Number(d.contractPrice), 4000);
+
+    // Factura stornata: pretul se goleste.
+    const golit = await storage.updateDelivery(d.id, {
+      currency: "MDL", priceForeign: 0, changeReason: "storno factura",
+      actorRole: "accountant"
+    });
+    assert.equal(Number(golit.contractPrice), 0, "creanta veche a rămas in picioare");
+    assert.equal(golit.collectionStatus, "Neincasat");
+  });
+});
