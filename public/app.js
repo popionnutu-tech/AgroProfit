@@ -6558,8 +6558,11 @@ function resolveCompany(companyId) {
 
 // Fereastra de tipar „oficiala" — reproduce fidel formularele originale (fara branding AgroProfit,
 // fara subsol). Alb-negru, Times New Roman, format A4. Fiecare builder isi aduce structura proprie.
-function openOfficialDocWindow(bodyHtml, title) {
-  const win = window.open("", "_blank");
+// `win` opțional: fereastra se poate deschide INAINTE, in gestul utilizatorului. Dupa un
+// `await` (ex. cererea numarului de act), `window.open` e blocat de blocatorul de pop-up,
+// fiindca s-a pierdut contextul gestului — iar contabilul ar rămâne fara document.
+function openOfficialDocWindow(bodyHtml, title, win) {
+  win = win || window.open("", "_blank");
   if (!win) {
     alert("Permite ferestrele pop-up pentru a printa documentul.");
     return;
@@ -6576,6 +6579,10 @@ function openOfficialDocWindow(bodyHtml, title) {
   .of-ru { font-style:italic; font-size:9px; font-weight:400; }
   .of-cap { font-size:8px; font-style:italic; text-align:center; }
   .of-row { margin:5px 0; }
+  /* Actul de achizitie incepe mai jos pe foaie: formularul tipizat se stampileaza si se
+     indosariaza, deci are nevoie de spatiu liber sus. Scoped la act — contractul si
+     celelalte documente isi pastreaza incadrarea. */
+  .of-act { padding-top:14mm; }
   .of-fill { border-bottom:1px solid #000; display:inline-block; min-width:80px; padding:0 4px; }
   .of-b { font-weight:bold; }
   .of-c { text-align:center; }
@@ -6818,7 +6825,37 @@ function actQrPayload({ company, partner, series, nr, dateText, rows, value, tax
   return text.slice(0, 213);
 }
 
-function buildPurchaseActHtml(receipts, partner, company) {
+// Numarul actului de achizitie, cerut de la server. La un act care acopera mai multe
+// receptii, numarul se atribuie celei mai VECHI: actul e un singur document, deci consuma
+// un singur numar, iar sirul rămâne compact fata de dosarul de hartie.
+// Daca serverul refuza (achizitie de la firma, receptie nelivrabila, rol fara drept), actul
+// se tipareste cu linia goala, ca inainte — numarul nu e o conditie ca hartia sa fie valida.
+async function ensureActNumber(receipts, company) {
+  const purtator = [...receipts]
+    .sort((a, b) => new Date(a.receivedAt || a.createdAt) - new Date(b.receivedAt || b.createdAt))[0];
+  if (!purtator) return null;
+  if (Number(purtator.actNumber || 0) > 0) {
+    return { actNumber: purtator.actNumber, actSeries: purtator.actSeries || "" };
+  }
+  try {
+    const res = await fetch(`/api/receipts/${purtator.id}/act-number`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ companyId: company?.id })
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    // Se pune si pe cache, ca o reimprimare imediata sa nu mai ceara serverul.
+    purtator.actNumber = data.actNumber;
+    purtator.actSeries = data.actSeries;
+    return { actNumber: data.actNumber, actSeries: data.actSeries };
+  } catch (err) {
+    console.error("Nu am putut obtine numarul actului:", err);
+    return null;
+  }
+}
+
+function buildPurchaseActHtml(receipts, partner, company, act) {
   const p = partner || {};
   const co = company || DEFAULT_COMPANY;
   const rows = (receipts || []).filter(Boolean).map((r) => ({ r, ...actReceiptFigures(r) }));
@@ -6837,7 +6874,8 @@ function buildPurchaseActHtml(receipts, partner, company) {
     return sum + (stored > 0 ? stored : x.value - (x.value * taxPercent) / 100);
   }, 0).toFixed(2));
   const tax = Math.max(Number((value - netPay).toFixed(2)), 0);
-  const nr = "____";
+  const nr = act && Number(act.actNumber) > 0 ? String(act.actNumber) : "____";
+  const seria = (act && act.actSeries) || co.series || co.shortName || "";
   const words = escapeComboHtml(numberToWordsRo(value));
   const dates = rows.map((x) => x.r.receivedAt || x.r.createdAt).filter(Boolean).sort();
   const dateText = dates.length
@@ -6859,7 +6897,7 @@ function buildPurchaseActHtml(receipts, partner, company) {
     if (typeof qrMatrix !== "function" || typeof qrSvg !== "function") return "";
     try {
       const matrix = qrMatrix(actQrPayload({
-        company: co, partner: p, series: co.series || co.shortName || "", nr,
+        company: co, partner: p, series: seria, nr,
         dateText, rows, value, tax, netPay
       }));
       return matrix ? qrSvg(matrix, 96) : "";
@@ -6878,6 +6916,7 @@ function buildPurchaseActHtml(receipts, partner, company) {
   const ln = (text, min) => `<span class="of-fill" style="min-width:${min}px;">${escapeComboHtml(text || "")}</span>`;
   const cap = (ro, ru) => `<div class="of-cap">${ro}${ru ? ` (${ru})` : ""}</div>`;
   return `
+    <div class="of-act">
     <table style="width:100%;border-collapse:collapse;margin-bottom:6px;"><tr>
       <td style="width:90px;vertical-align:top;">${co.logoUrl ? `<img src="${escapeComboHtml(co.logoUrl)}" style="max-width:80px;max-height:80px;">` : ""}</td>
       <td style="vertical-align:top;">${qrTag}</td>
@@ -6885,7 +6924,7 @@ function buildPurchaseActHtml(receipts, partner, company) {
     </tr></table>
     <table style="width:100%;border-collapse:collapse;"><tr>
       <td><div style="font-weight:bold;font-size:15px;text-transform:uppercase;">Act de achiziție a mărfurilor</div></td>
-      <td style="width:230px;font-weight:bold;font-size:13px;">Seria ${ln(co.series || co.shortName || "", 60)} &nbsp; Nr. ${ln(nr, 70)}</td>
+      <td style="width:230px;font-weight:bold;font-size:13px;">Seria ${ln(seria, 60)} &nbsp; Nr. ${ln(nr, 70)}</td>
     </tr></table>
 
     <table style="width:100%;border-collapse:collapse;margin-top:6px;"><tr>
@@ -7052,7 +7091,8 @@ function buildPurchaseActHtml(receipts, partner, company) {
       <td style="width:14%;padding-left:40px;"><span class="of-b">L. Ș.</span><div class="of-ru">М.П.</div></td>
       <td style="width:30%;vertical-align:bottom;"><div style="border-bottom:1px solid #000;padding-bottom:1px;">&nbsp;</div></td>
       <td></td>
-    </tr></table>`;
+    </tr></table>
+    </div>`;
 }
 
 // 2) CONTRACT de cumparare-vanzare cereale — text integral, cadru, per furnizor.
@@ -7209,7 +7249,9 @@ async function printAccountingDocument(docType, refId, companyId) {
         .filter((r) => printDocInRange(r.receivedAt || r.createdAt, from, to))
         .sort((a, b) => new Date(a.receivedAt || a.createdAt) - new Date(b.receivedAt || b.createdAt));
       if (!receipts.length) { alert("Nu există recepții pentru acest furnizor în perioada aleasă."); return; }
-      openOfficialDocWindow(buildPurchaseActHtml(receipts, partner, company), `Act de achizitie ${partner.name}`);
+      const win = window.open("", "_blank");
+      const act = await ensureActNumber(receipts, company);
+      openOfficialDocWindow(buildPurchaseActHtml(receipts, partner, company, act), `Act de achizitie ${partner.name}`, win);
     } else if (docType === "paymentOrder") {
       const tx = (transactionsCache || []).find((t) => Number(t.id) === Number(refId));
       if (!tx) { alert("Plata nu a fost găsită."); return; }
@@ -7820,10 +7862,18 @@ function assertPrintableDelivery(delivery) {
   return true;
 }
 
-function printDeliveryDocument(deliveryId, docType) {
+async function printDeliveryDocument(deliveryId, docType) {
+  // Se deschide ACUM, in gestul utilizatorului: actul cere numarul de la server, iar dupa un
+  // `await` blocatorul de pop-up refuza `window.open`.
+  const docWin = docType === "act" ? window.open("", "_blank") : null;
+  const renunta = (mesaj) => {
+    if (docWin) docWin.close();
+    if (mesaj) alert(mesaj);
+    return "";
+  };
   const delivery = (deliveriesCache || []).find((d) => Number(d.id) === Number(deliveryId));
-  if (!delivery) return;
-  if (!assertPrintableDelivery(delivery)) return;
+  if (!delivery) return renunta();
+  if (!assertPrintableDelivery(delivery)) return renunta();
   // Compania de antet aleasă în pagina Livrări (gol → AgroProfit+ implicit). Se aplică documentelor
   // „interne" cu antet de firmă (Bon, Act de achiziție, Declarație).
   const headerCompany = printHeaderCompany(document.getElementById("delivery-doc-company")?.value);
@@ -7834,27 +7884,24 @@ function printDeliveryDocument(deliveryId, docType) {
     // Actul de achizitie documenteaza cumpararea de la un furnizor (receptie). Livrarile pe
     // produs nu au o receptie/furnizor unic, deci documentul nu se poate genera.
     if (!delivery.receiptId) {
-      alert("Actul de achiziție este disponibil doar pentru livrări legate de o recepție (cu furnizor).");
-      return;
+      return renunta("Actul de achiziție este disponibil doar pentru livrări legate de o recepție (cu furnizor).");
     }
     // Acelasi formular tipizat ca pe randul receptiei: un singur act oficial, o singura
     // macheta. Inainte existau doua machete pentru aceeasi cumparare.
     const actReceipt = (receiptsCache || []).find((r) => Number(r.id) === Number(delivery.receiptId));
     if (!actReceipt) {
-      alert("Recepția sursă nu a fost găsită — reîncarcă pagina și încearcă din nou.");
-      return;
+      return renunta("Recepția sursă nu a fost găsită — reîncarcă pagina și încearcă din nou.");
     }
     const actPartner = findPartnerById(actReceipt.supplierId) || findPartnerByName(actReceipt.supplier);
     if (!actPartner) {
-      alert("Furnizorul recepției nu a fost găsit în nomenclator.");
-      return;
+      return renunta("Furnizorul recepției nu a fost găsit în nomenclator.");
     }
     // Aceeasi regula ca pe randul receptiei: ce nu e in stoc nu are act de achizitie.
     if (!isReceiptInStock(actReceipt)) {
-      alert(`Recepția #${actReceipt.id} nu e în stoc (${actReceipt.status}). Actul de achiziție s-ar emite pe marfă care n-a intrat.`);
-      return;
+      return renunta(`Recepția #${actReceipt.id} nu e în stoc (${actReceipt.status}). Actul de achiziție s-ar emite pe marfă care n-a intrat.`);
     }
-    html = buildPurchaseActHtml([actReceipt], actPartner, headerCompany);
+    const act = await ensureActNumber([actReceipt], headerCompany);
+    html = buildPurchaseActHtml([actReceipt], actPartner, headerCompany, act);
     title = `Act achizitie ${actPartner.name}`;
   }
   else if (docType === "certificate") { html = buildCertificatePrintHtml(delivery); title = `Certificat calitate ${delivery.id}`; }
@@ -7868,8 +7915,10 @@ function printDeliveryDocument(deliveryId, docType) {
   // margini si cu subsol „Generat de AgroProfit+" pe un formular de stat.
   const officialDocs = ["invoice", "certificate", "cmr", "imputernicire", "act"];
   if (html) {
-    if (officialDocs.includes(docType)) openOfficialDocWindow(html, title);
+    if (officialDocs.includes(docType)) openOfficialDocWindow(html, title, docWin);
     else openPrintWindow(html, title);
+  } else if (docWin) {
+    docWin.close(); // nu lasam o fereastra goala daca documentul nu s-a construit
   }
   // Close the print dropdown after choosing
   document.querySelectorAll(".print-menu[open]").forEach((d) => d.removeAttribute("open"));
@@ -8105,7 +8154,7 @@ document.getElementById("statement-print-btn")?.addEventListener("click", printS
 // Act de achizitie direct de pe randul de receptie. Foloseste ACELASI `buildPurchaseActHtml`
 // ca pagina „Documente tipar" (o receptie = un rand in act), ca sa nu apara a doua varianta a
 // aceluiasi document oficial, cu alte cifre.
-bodyEl?.addEventListener("click", (event) => {
+bodyEl?.addEventListener("click", async (event) => {
   const btn = event.target.closest("[data-print-receipt]");
   if (!btn) return;
   const receipt = (receiptsCache || []).find((r) => Number(r.id) === Number(btn.dataset.id));
@@ -8137,7 +8186,9 @@ bodyEl?.addEventListener("click", (event) => {
       window.alert(`Recepția are statusul „${receipt.status}" și nu e în stoc. Actul de achiziție s-ar emite pe marfă care n-a intrat.`);
       return;
     }
-    openOfficialDocWindow(buildPurchaseActHtml([receipt], partner, company), `Act de achizitie ${partner.name}`);
+    const win = window.open("", "_blank");
+    const act = await ensureActNumber([receipt], company);
+    openOfficialDocWindow(buildPurchaseActHtml([receipt], partner, company, act), `Act de achizitie ${partner.name}`, win);
   }
   // Ordinul de plata NU se emite de aici: el iese dintr-o PLATA inregistrata, din ecranul
   // Financiar (`printAccountingDocument("paymentOrder")`). Sintetizat din restul de plata, ar

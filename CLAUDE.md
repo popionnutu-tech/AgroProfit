@@ -350,6 +350,31 @@ apa tot se evaporă.
     trei erori (polinom inversat, format transpus, aliniere sărită) au trecut neobservate la
     citire și au ieșit doar așa.
 
+### 10. Numărul actului de achiziție (`actNumber`)
+Actul de achiziție e document fiscal: numărul lui ajunge în dosarul de hârtie, semnat.
+- Se atribuie **o singură dată**, la prima tipărire, și se **persistă pe recepție**
+  (`actNumber`, `actSeries`, `actIssuedAt`). Orice reimprimare dă **același** număr.
+  Dacă îl calculezi la afișare, reimprimarea produce alt număr decât cel din dosar.
+- `nextActNumber()` = `max(atribuite) + 1`, cu plafon inferior `ACT_NUMBER_START = 914`
+  (actul lui Cojocari Ana din 02.10.2026, numerotat pe hârtie). **Derivat din date, nu
+  dintr-un contor separat** — un contor se desincronizează la restaurare din backup sau la
+  o scriere pierdută, iar un număr refolosit înseamnă două acte cu același număr în dosar.
+- Actele de **dinainte** de 02.10.2026 rămân nenumerotate în aplicație: au deja numere
+  scrise de mână și nu se rescrie nimic semnat (decizia utilizatorului, 03.10.2026).
+- **Doar achizițiile de la persoane fizice** consumă numere — acolo se întocmește actul,
+  fiindcă acolo se reține impozitul la sursă. „Persoană fizică" se decide pe SERVER, din
+  profilul fiscal al partenerului (`withholdingPercent > 0`), nu din body: altfel apelantul
+  ar consuma numere pe achiziții de la firme și ar lăsa găuri în șir.
+- Doar `CAN_ISSUE_ACTS_ROLES` (contabil, contabil-șef, admin) emit acte. Urmă în audit
+  (`receipt-act-number`). Refuzat pe o recepție care nu e în stoc — ar fi hârtie fără marfă.
+- Un act care acoperă **mai multe recepții** consumă UN număr, atribuit celei mai vechi:
+  actul e un singur document.
+- Seria e **per firmă** (`companies[].series`), nu globală — firma vine din cerere, seria se
+  rezolvă pe server.
+- La tipărire, fereastra se deschide **înainte** de `await` (cererea numărului). După un
+  `await`, `window.open` e blocat de blocatorul de pop-up și contabilul rămâne fără document.
+  Orice ieșire devreme trebuie să închidă fereastra deja deschisă.
+
 ## Deploy
 - **Push pe `main` → Vercel publică automat** pe agroprofit-plus.vercel.app (integrare Git activă).
 - Lucrează pe o **ramură separată** (implicit `dev`), testează pe preview, apoi fă merge în `main`.

@@ -246,6 +246,15 @@ const CAN_EDIT_BILLING_ROLES = ["accountant", "accountant-sef", "manager", "admi
 // Monedele permise. Lista se verifica pe SERVER: selectul din interfata are 4 optiuni, dar
 // un apel direct il ocoleste, iar moneda se randeaza in tabelul de livrari.
 const VALID_CURRENCIES = ["MDL", "EUR", "USD", "RON"];
+// Numerotarea actelor de achizitie. Primul act emis din aplicatie e cel al lui Cojocari Ana
+// din 02.10.2026, care pe hartie are numarul 914 — deci sirul porneste de acolo. Actele de
+// DINAINTE rămân nenumerotate in aplicatie: au deja numere scrise de mana si nu se rescrie
+// nimic din ce e deja semnat (decizia utilizatorului, 03.10.2026).
+const ACT_NUMBER_START = 914;
+// Doar achizitiile de la PERSOANE FIZICE consuma numere: actul de achizitie se intocmeste
+// acolo, fiindca acolo se retine impozitul la sursa. Astfel sirul rămâne compact si coincide
+// cu dosarul de hartie.
+const CAN_ISSUE_ACTS_ROLES = ["accountant", "accountant-sef", "admin"];
 // Campurile de facturare ale unei livrari. Sursa unica: verificate si la creare, si la editare.
 const DELIVERY_BILLING_FIELDS = [
   "invoiceNumber", "invoiceDate", "seller", "sellerId", "priceLei", "priceForeign",
@@ -1745,6 +1754,62 @@ function receiptPayableValue(r) {
 function getReceiptRaw(id) {
   const state = readReceiptsState();
   return (state.receipts || []).find((item) => item.id === Number(id)) || null;
+}
+
+// Urmatorul numar de act: max(atribuite) + 1, cu plafon inferior la ACT_NUMBER_START.
+// Derivat din date, nu dintr-un contor separat — un contor se poate desincroniza de la
+// documentele reale (restaurare din backup, scriere pierduta), iar un numar de act refolosit
+// inseamna doua acte cu acelasi numar in dosar.
+function nextActNumber(state) {
+  const maxim = (state.receipts || []).reduce(
+    (max, item) => Math.max(max, Number(item.actNumber || 0)),
+    0
+  );
+  return Math.max(maxim + 1, ACT_NUMBER_START);
+}
+
+// Atribuie numarul actului de achizitie. IDEMPOTENT: daca receptia are deja numar, il
+// intoarce neschimbat. Un numar atribuit NU se schimba niciodata — altfel reimprimarea ar
+// da alt numar decat cel din dosar, iar doua acte ar putea purta acelasi numar.
+async function assignActNumber(id, options = {}) {
+  const state = readReceiptsState();
+  const receipt = (state.receipts || []).find((item) => item.id === Number(id));
+  if (!receipt) {
+    throw new Error("Receptia nu a fost gasita.");
+  }
+
+  const role = normalizeRoleCode(options.actorRole);
+  if (!CAN_ISSUE_ACTS_ROLES.includes(role)) {
+    throw forbiddenError("Doar contabilul sau administratorul pot emite acte de achizitie.");
+  }
+  if (Number(receipt.actNumber || 0) > 0) {
+    return receipt; // deja emis — acelasi numar, oricate reimprimari
+  }
+  if (!isReceiptInStock(receipt)) {
+    throw new Error("Receptia nu e in stoc (proiect/anulata). Nu se emite act pentru ea.");
+  }
+  // Numar consumat degeaba = gaura in sirul din dosar, imposibil de explicat la control.
+  if (options.isNaturalPerson !== true) {
+    throw new Error("Actul de achizitie se intocmeste doar la cumpararea de la persoane fizice.");
+  }
+
+  receipt.actNumber = nextActNumber(state);
+  receipt.actSeries = String(options.series || "").trim();
+  receipt.actIssuedAt = new Date().toISOString();
+  receipt.updatedAt = receipt.actIssuedAt;
+
+  createAuditEntry(state, {
+    entityType: "receipt",
+    entityId: receipt.id,
+    action: "receipt-act-number",
+    reason: `Act de achizitie emis: ${receipt.actSeries} ${receipt.actNumber}`,
+    user: options.changedBy || "dashboard",
+    oldValue: { actNumber: null },
+    newValue: { actNumber: receipt.actNumber, actSeries: receipt.actSeries }
+  });
+
+  writeReceiptsState(state);
+  return receipt;
 }
 
 async function listReceipts() {
@@ -5996,6 +6061,7 @@ module.exports = {
   updateReceiptStatusWithAudit,
   completeReceiptWeighing,
   updateReceiptSupplier,
+  assignActNumber,
   correctReceiptTerms,
   // Expusa pentru testul care verifica ca `actReceiptFigures` din public/app.js nu a divergat.
   receiptPayableTonnes,
