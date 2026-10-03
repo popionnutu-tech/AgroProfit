@@ -14,7 +14,9 @@ async function receptie(storage, nume) {
     unit: "tone", price: 6.15, location: "Cilindru 1", locationId: 1
   });
 }
-const PF = { isNaturalPerson: true, series: "AP", actorRole: "admin", changedBy: "admin" };
+const PF = {
+  isNaturalPerson: true, series: "AP", companyId: 1, actorRole: "admin", changedBy: "admin"
+};
 
 test("primul act emis primeste 914, urmatorul 915", async () => {
   await withIsolatedWorkspace(async ({ load }) => {
@@ -114,5 +116,54 @@ test("nu se emite act pe o receptie care nu e in stoc", async () => {
       isDraft: true, actorRole: "accountant"
     });
     await assert.rejects(() => storage.assignActNumber(proiect.id, PF), /nu e in stoc/i);
+  });
+});
+
+test("fiecare firma are propriul sir — fara gauri in registrul niciuneia", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const PAT = { ...PF, companyId: 1, series: "PAT" };
+    const AGR = { ...PF, companyId: 2, series: "AGR" };
+
+    const a = await receptie(storage, "F1");
+    const b = await receptie(storage, "F2");
+    const c = await receptie(storage, "F3");
+
+    assert.equal((await storage.assignActNumber(a.id, PAT)).actNumber, START);
+    // Alta firma porneste propriul sir, nu continua pe al primei.
+    assert.equal((await storage.assignActNumber(b.id, AGR)).actNumber, START);
+    // Prima firma continua de unde a ramas: fara gaura.
+    assert.equal((await storage.assignActNumber(c.id, PAT)).actNumber, START + 1);
+  });
+});
+
+test("firma emitenta e obligatorie", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const r = await receptie(storage, "Cojocari Ana");
+    await assert.rejects(
+      () => storage.assignActNumber(r.id, { ...PF, companyId: null }),
+      /[Ff]irma emitenta/
+    );
+  });
+});
+
+test("receptia cu act emis nu se poate anula", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const r = await receptie(storage, "Cojocari Ana");
+    await storage.assignActNumber(r.id, PF);
+    await assert.rejects(
+      () => storage.cancelReceipt(r.id, {
+        reason: "greseala", currentUser: { roleCode: "admin" }, changedBy: "admin"
+      }),
+      /storneaza actul intai/i
+    );
+    // Fara act emis, anularea merge ca inainte.
+    const curat = await receptie(storage, "Alt furnizor");
+    const anulat = await storage.cancelReceipt(curat.id, {
+      reason: "greseala", currentUser: { roleCode: "admin" }, changedBy: "admin"
+    });
+    assert.equal(anulat.status, "Anulat");
   });
 });

@@ -355,7 +355,25 @@ Actul de achiziție e document fiscal: numărul lui ajunge în dosarul de hârti
 - Se atribuie **o singură dată**, la prima tipărire, și se **persistă pe recepție**
   (`actNumber`, `actSeries`, `actIssuedAt`). Orice reimprimare dă **același** număr.
   Dacă îl calculezi la afișare, reimprimarea produce alt număr decât cel din dosar.
-- `nextActNumber()` = `max(atribuite) + 1`, cu plafon inferior `ACT_NUMBER_START = 914`
+- **Șir SEPARAT pe firmă emitentă** (`actCompanyId`). Seria e per firmă, deci un șir global
+  lăsa găuri în registrul fiecăreia: „PAT 915", „AGR 916", „PAT 917" — în dosarul PAT lipsește
+  916. Firma e **obligatorie**, nu se ghicește: un fallback „prima firmă activă" îngheța tăcit
+  seria altei firme decât cea pe care omul credea că emite, fără cale de corecție.
+- ⚠️ **Unicitatea nu e garantată de cod, doar verificată.** Persistența e un blob JSON unic
+  scris cu upsert necondiționat (fără versiune, fără compare-and-set) și cu debounce: o
+  scriere concurentă poate reîncărca blobul de DINAINTE de atribuire și îl poate suprascrie —
+  hârtia iese cu 914, datele nu mai știu de el, actul următor ia din nou 914. De aceea
+  `assignActNumber` forțează scrierea, **recitește din KV și verifică** că numărul e persistat
+  exact o dată; altfel aruncă. Mitigare, nu soluție: **soluția reală e alocare atomică în
+  bază** (rând dedicat + RPC `n = n + 1`, sau index unic pe (firmă, număr)).
+- O recepție cu act emis **nu se mai poate anula** — hârtia semnată ar rămâne cu numărul
+  orfan și o gaură în șir, imposibil de explicat la control. Se stornează actul întâi.
+- `actNumber`/`actSeries`/`actIssuedAt`/`actCompanyId` sunt în `FINANCIAL_RECEIPT_FIELDS`:
+  nu sunt sume, dar sunt metadate ale unui document fiscal pe care doar contabilii îl emit.
+- `purchaseAct` a fost **scos** din `allocateDocumentNumber`: era un al doilea mecanism de
+  numerotare pe același document, printr-o rută deschisă și managerului, care ștampila un
+  număr invizibil pe aceeași recepție. `paymentOrder` rămâne acolo.
+- `nextActNumber()` = `max(atribuite pe firmă) + 1`, cu plafon inferior `ACT_NUMBER_START = 914`
   (actul lui Cojocari Ana din 02.10.2026, numerotat pe hârtie). **Derivat din date, nu
   dintr-un contor separat** — un contor se desincronizează la restaurare din backup sau la
   o scriere pierdută, iar un număr refolosit înseamnă două acte cu același număr în dosar.

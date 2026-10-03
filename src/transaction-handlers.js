@@ -169,7 +169,11 @@ async function createTransactionHandler(req, res) {
     return response;
   } catch (error) {
     console.error("Failed to create transaction:", error.message);
-    return sendJson(res, 500, { error: "Nu am putut salva tranzactia." });
+    // Refuzurile de business (livrare in proiect, anulata, document inexistent) sunt erori ale
+    // CERERII, nu ale serverului: trimise ca 500 generic, utilizatorul nu afla de ce.
+    return sendJson(res, error.statusCode || 400, {
+      error: error.message || "Nu am putut salva tranzactia."
+    });
   }
 }
 
