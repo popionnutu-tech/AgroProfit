@@ -233,3 +233,46 @@ test("actul acopera un singur furnizor", async () => {
     assert.equal(act.actNumber, START);
   });
 });
+
+test("si RANDURILE se ingheata: actul nu se contrazice pe aceeasi hartie", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const r = await receptie(storage, "Cojocari Ana");
+    const emis = await storage.assignActNumber([r.id], PF);
+    const randuri = emis.actFigures.rows;
+    assert.ok(Array.isArray(randuri) && randuri.length === 1, "lipsesc randurile inghetate");
+    const randLaEmitere = randuri[0];
+    assert.equal(randLaEmitere.netKg, 2907);
+    assert.equal(randLaEmitere.product, "Floarea soarelui");
+    // Suma de pe rand = totalul (o singura receptie).
+    assert.equal(randLaEmitere.value, emis.actFigures.value);
+
+    // Contabilul dubleaza suma DUPA emitere.
+    await storage.updateReceiptAmount(r.id, emis.actFigures.value * 2, "admin", "corectie");
+
+    const dupa = (await storage.listReceipts()).find((x) => x.id === r.id);
+    // Randul si totalul au rămas AMANDOUA pe cifrele de la emitere, deci coincid.
+    assert.equal(dupa.actFigures.rows[0].value, randLaEmitere.value, "randul s-a rescris");
+    assert.equal(dupa.actFigures.value, randLaEmitere.value, "totalul s-a rescris");
+    assert.equal(
+      dupa.actFigures.rows.reduce((s, x) => s + x.value, 0),
+      dupa.actFigures.value,
+      "randurile nu mai dau totalul"
+    );
+  });
+});
+
+test("randurile inghetate dau exact totalul, si pe act multi-receptie", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const a = await receptie(storage, "Cojocari Ana");
+    const b = await receptie(storage, "Cojocari Ana");
+    const emis = await storage.assignActNumber([a.id, b.id], PF);
+    const f = emis.actFigures;
+    assert.equal(f.rows.length, 2);
+    assert.equal(Number(f.rows.reduce((s, x) => s + x.value, 0).toFixed(2)), f.value);
+    assert.equal(Number(f.rows.reduce((s, x) => s + x.netKg, 0).toFixed(3)), f.netKg);
+    // Retinerea e diferenta brut - net, consecventa cu randurile.
+    assert.equal(f.tax, Number((f.value - f.netPay).toFixed(2)));
+  });
+});

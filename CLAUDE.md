@@ -391,9 +391,12 @@ Actul de achiziție e document fiscal: numărul lui ajunge în dosarul de hârti
   invizibilă. Reemiterea pe oricare dintre ele întoarce același număr. Un act acoperă
   recepțiile **unui singur furnizor** (verificat în handler pe `supplierId`).
 - **Cifrele actului se îngheață la emitere** (`actFigures`: kg, valoare, reținere, net, pe
-  purtător). Fără asta, o corecție ulterioară de preț sau de bifă făcea ca retipărirea
+  purtător) — **și rândurile, nu doar totalurile** (`actFigures.rows`: id, produs, kg,
+  valoare, net). Fără asta, o corecție ulterioară de preț sau de bifă făcea ca retipărirea
   ACELUIAȘI număr să arate alte cifre decât hârtia semnată — exact riscul de care actul se
-  apăra deja pe cota de impozit. Se păstrează primitivele; prețul se derivă din ele la
+  apăra deja pe cota de impozit. Îngheţând doar totalurile, actul se contrazicea **pe aceeași
+  hârtie**: rând 35.756,10 sub un total de 17.878,05, pe un formular care afirmă „5 = 3 × 4".
+  Denumirea produsului intră și ea în captură: nomenclatorul se poate redenumi după emitere. Se păstrează primitivele; prețul se derivă din ele la
   tipărire, ca să nu existe a doua regulă de rotunjire. **Codul QR poartă aceleași cifre**
   înghețate: altfel codul scanat ar contrazice hârtia de lângă el. Un act cu alte cifre
   cere număr nou.

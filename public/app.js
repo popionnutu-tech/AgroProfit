@@ -6883,7 +6883,24 @@ async function ensureActNumber(receipts, company) {
 function buildPurchaseActHtml(receipts, partner, company, act) {
   const p = partner || {};
   const co = company || DEFAULT_COMPANY;
-  const rows = (receipts || []).filter(Boolean).map((r) => ({ r, ...actReceiptFigures(r) }));
+  // Pe un act DEJA EMIS randurile vin din cifrele INGHEȚATE atunci, nu din recalculul de
+  // acum: altfel, dupa o corectie de suma, actul se contrazicea pe aceeasi hartie — rand
+  // 35.756,10 sub un total de 17.878,05, pe un formular care afirma „5 = 3 x 4".
+  const inghetatIn = act && act.actFigures ? act.actFigures : null;
+  const rows = inghetatIn && Array.isArray(inghetatIn.rows) && inghetatIn.rows.length
+    ? inghetatIn.rows.map((snap) => {
+        const r = (receipts || []).find((x) => x && Number(x.id) === Number(snap.id)) || { id: snap.id };
+        const netKg = Number(snap.netKg) || 0;
+        const value = Number(snap.value) || 0;
+        return {
+          // Denumirea se ia din captura: nomenclatorul se poate redenumi dupa emitere.
+          r: { ...r, product: snap.product || r.product },
+          netKg,
+          value,
+          price: netKg > 0 && value > 0 ? actDerivePrice(value, netKg) : 0
+        };
+      })
+    : (receipts || []).filter(Boolean).map((r) => ({ r, ...actReceiptFigures(r) }));
   const value = Number(rows.reduce((s, x) => s + x.value, 0).toFixed(2));
   const taxPercent = partnerWithholdingPercent(p);
   // „Total de plata" = datoria INREGISTRATA pe document, nu o recalculare din cota de azi.
@@ -6902,7 +6919,7 @@ function buildPurchaseActHtml(receipts, partner, company, act) {
   // Pe un act DEJA EMIS se tiparesc cifrele inghetate atunci, nu recalculul de acum: o
   // corectie ulterioara de pret sau de bifa ar face ca aceeasi serie si acelasi numar sa
   // arate alte cifre decat hartia semnata. Actul nou cere numar nou.
-  const inghetat = act && act.actFigures ? act.actFigures : null;
+  const inghetat = inghetatIn;
   const valueTiparit = inghetat ? Number(inghetat.value) : value;
   const netPayTiparit = inghetat ? Number(inghetat.netPay) : netPay;
   const taxTiparit = inghetat ? Number(inghetat.tax) : tax;

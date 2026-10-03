@@ -1837,13 +1837,24 @@ async function assignActNumber(ids, options = {}) {
   // de care actul se apara deja pe cota de impozit.
   // Se pastreaza primitivele (kg, valoare, retinere, net); pretul se derivă din ele la
   // tiparire, ca sa nu existe o a doua regula de rotunjire.
-  const total = receipts.reduce(
-    (acc, item) => {
-      const kg = receiptPayableTonnes(item) * 1000;
-      const brut = Number(item.preliminaryMerchandiseValue || 0) || kg * Number(item.price || 0);
-      const net = Number(item.amountToPay ?? item.preliminaryPayableAmount ?? 0) || brut;
-      return { kg: acc.kg + kg, brut: acc.brut + brut, net: acc.net + net };
-    },
+  // Se ingheata si RANDURILE, nu doar totalurile: randul se construia din receptie, deci
+  // dupa o corectie de suma actul se contrazicea pe aceeasi hartie (rand 35.756,10 fata de
+  // total 17.878,05). Capul de tabel afirma „5 = 3 x 4" — trebuie sa fie adevarat si la
+  // retiparire. Si denumirea produsului se pastreaza: nomenclatorul se poate redenumi.
+  const randuri = receipts.map((item) => {
+    const kg = receiptPayableTonnes(item) * 1000;
+    const brut = Number(item.preliminaryMerchandiseValue || 0) || kg * Number(item.price || 0);
+    const net = Number(item.amountToPay ?? item.preliminaryPayableAmount ?? 0) || brut;
+    return {
+      id: item.id,
+      product: String(item.product || ""),
+      netKg: Number(kg.toFixed(3)),
+      value: Number(brut.toFixed(2)),
+      netPay: Number(net.toFixed(2))
+    };
+  });
+  const total = randuri.reduce(
+    (acc, r) => ({ kg: acc.kg + r.netKg, brut: acc.brut + r.value, net: acc.net + r.netPay }),
     { kg: 0, brut: 0, net: 0 }
   );
   const snapshot = {
@@ -1851,6 +1862,7 @@ async function assignActNumber(ids, options = {}) {
     value: Number(total.brut.toFixed(2)),
     netPay: Number(total.net.toFixed(2)),
     tax: Math.max(Number((total.brut - total.net).toFixed(2)), 0),
+    rows: randuri,
     receiptIds: lista
   };
 
