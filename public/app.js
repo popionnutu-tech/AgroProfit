@@ -3042,7 +3042,7 @@ function renderDeliveries(deliveries) {
       const qty = deliveryDisplayQuantity(item);
       const money = deliveryInvoiceTotals(item);
       const priceLabel = money.isForeign
-        ? `${formatNumber(money.unitForeign)} ${money.cur}/t`
+        ? `${formatNumber(money.unitForeign)} ${escapeComboHtml(money.cur)}/t`
         : (money.unitLei ? `${formatNumber(money.unitLei)} MDL/kg` : "-");
       const totalFactura = money.totalLei;
       const canBill = canFinance;
@@ -3131,7 +3131,7 @@ function renderDeliveryTotals(rows) {
     const w = deliveryWaterKg(item, waterIdx);
     if (w !== null) totalWaterKg += w;
   });
-  const foreignStr = Object.entries(totalForeignByCur).map(([c, v]) => `${formatNumber(v)} ${c}`).join(" + ");
+  const foreignStr = Object.entries(totalForeignByCur).map(([c, v]) => `${formatNumber(v)} ${escapeComboHtml(c)}`).join(" + ");
   const facturaCell = `<b>${currency.format(totalLei)}</b>${foreignStr ? `<br><small>${foreignStr}</small>` : ""}`;
   // 13 coloane: ID,Data,Sursă,Cumpărător | Vânzător | Produs | Cantitate | Apă | Mașina |
   //             Preț | Sumă factură | Achitată | Status
@@ -9904,7 +9904,7 @@ function updateBillingPriceLei() {
   const el = document.getElementById("billing-price-lei");
   if (el) {
     if (isForeign && pf > 0 && rate <= 0) {
-      el.innerHTML = `<span style="color:var(--danger);">Introdu cursul valutar pentru ${cur}!</span>`;
+      el.innerHTML = `<span style="color:var(--danger);">Introdu cursul valutar pentru ${escapeComboHtml(cur)}!</span>`;
     } else {
       el.textContent = currency.format(leiPerUnit || 0);
     }
