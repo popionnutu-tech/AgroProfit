@@ -2129,6 +2129,11 @@ function renderReceipts(receipts) {
           <td title="Apă eliminată la recepție (din umiditatea în exces)">${isPendingWeighing || !(Number(item.estimatedWaterLoss) > 0) ? "—" : formatNumber(Math.round(Number(item.estimatedWaterLoss) * 1000)) + " kg"}${item.payOnGrossQuantity === true ? ` <span class="status-badge badge-warn" title="${bi("Plata s-a făcut pe masa cu apă, uscarea nu s-a taxat. În stoc a intrat masa fără apă.")}">${bi("plătit cu apă")}</span>` : ""}</td>
           <td>${qtyCell}</td>
           <td>${item.location || "-"}</td>
+          <td class="col-fin" title="${Number(item.actNumber) > 0 ? `Act emis la ${formatDateShort(item.actIssuedAt)}` : "Actul nu a fost emis"}">${
+            Number(item.actNumber) > 0
+              ? `<b>${escapeComboHtml(String(item.actSeries || ""))} ${item.actNumber}</b>`
+              : "—"
+          }</td>
           <td class="col-fin">${currency.format(valoare)}${canEditAmount && !isCanceled ? ` <button type="button" class="cell-btn change-amount-btn" data-action="adjust-amount" data-id="${item.id}" title="Ajustează valoarea recepției">✎</button>` : ""}${canCorrectTerms && !isCanceled && !isPendingWeighing && item.status !== "Inchis" && item.status !== "Proiect" ? ` <button type="button" class="cell-btn change-amount-btn" data-action="correct-terms" data-id="${item.id}" title="Corectează condițiile: plata pe masa cu umiditate și/sau prețul">⚖</button>` : ""}${Array.isArray(item.termCorrections) && item.termCorrections.length ? ` <span class="status-badge badge-warn" title="Condițiile au fost corectate de ${escapeComboHtml(item.termCorrections[item.termCorrections.length - 1].by || "")} — vezi Detalii">corectat</span>` : ""}</td>
           <td class="col-fin">${achitat > 0 ? currency.format(achitat) : "-"}</td>
           <td class="col-fin"><b>${rest > 0 ? currency.format(rest) : "0"}</b></td>
@@ -2444,6 +2449,7 @@ function renderReceiptTotals(rows) {
       <td>${waterKg > 0 ? "<b>" + formatNumber(waterKg) + " kg</b>" : "—"}</td>
       <td>${qtyCell}</td>
       <td></td>
+      <td class="col-fin"></td>
       <td class="col-fin"><b>${currency.format(totalPay)}</b></td>
       <td class="col-fin">${currency.format(totalPaid)}</td>
       <td class="col-fin"><b>${currency.format(totalRest)}</b></td>
@@ -6834,21 +6840,40 @@ async function ensureActNumber(receipts, company) {
   const purtator = [...receipts]
     .sort((a, b) => new Date(a.receivedAt || a.createdAt) - new Date(b.receivedAt || b.createdAt))[0];
   if (!purtator) return null;
-  if (Number(purtator.actNumber || 0) > 0) {
-    return { actNumber: purtator.actNumber, actSeries: purtator.actSeries || "" };
+  // Daca ORICARE receptie acoperita are deja numar, actul e emis: se foloseste acela, cu
+  // cifrele INGHEȚATE de atunci. Altfel retiparirea ar arata alte cifre decat hartia semnata.
+  const emisa = receipts.find((r) => Number(r.actNumber || 0) > 0) || null;
+  if (emisa) {
+    const cuCifre = receipts.find((r) => r.actFigures) || emisa;
+    return {
+      actNumber: emisa.actNumber,
+      actSeries: emisa.actSeries || "",
+      actFigures: cuCifre.actFigures || null
+    };
   }
   try {
     const res = await fetch(`/api/receipts/${purtator.id}/act-number`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ companyId: company?.id })
+      body: JSON.stringify({
+        companyId: company?.id,
+        // TOATE receptiile acoperite de aceasta hartie primesc numarul.
+        receiptIds: receipts.map((r) => r.id)
+      })
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      if (err.error) alert(err.error);
+      return null;
+    }
     const data = await res.json();
     // Se pune si pe cache, ca o reimprimare imediata sa nu mai ceara serverul.
-    purtator.actNumber = data.actNumber;
-    purtator.actSeries = data.actSeries;
-    return { actNumber: data.actNumber, actSeries: data.actSeries };
+    for (const r of receipts) {
+      r.actNumber = data.actNumber;
+      r.actSeries = data.actSeries;
+    }
+    purtator.actFigures = data.actFigures || null;
+    return { actNumber: data.actNumber, actSeries: data.actSeries, actFigures: data.actFigures };
   } catch (err) {
     console.error("Nu am putut obtine numarul actului:", err);
     return null;
@@ -6874,9 +6899,17 @@ function buildPurchaseActHtml(receipts, partner, company, act) {
     return sum + (stored > 0 ? stored : x.value - (x.value * taxPercent) / 100);
   }, 0).toFixed(2));
   const tax = Math.max(Number((value - netPay).toFixed(2)), 0);
+  // Pe un act DEJA EMIS se tiparesc cifrele inghetate atunci, nu recalculul de acum: o
+  // corectie ulterioara de pret sau de bifa ar face ca aceeasi serie si acelasi numar sa
+  // arate alte cifre decat hartia semnata. Actul nou cere numar nou.
+  const inghetat = act && act.actFigures ? act.actFigures : null;
+  const valueTiparit = inghetat ? Number(inghetat.value) : value;
+  const netPayTiparit = inghetat ? Number(inghetat.netPay) : netPay;
+  const taxTiparit = inghetat ? Number(inghetat.tax) : tax;
+  const kgTiparit = inghetat ? Number(inghetat.netKg) : rows.reduce((s, x) => s + x.netKg, 0);
   const nr = act && Number(act.actNumber) > 0 ? String(act.actNumber) : "____";
   const seria = (act && act.actSeries) || co.series || co.shortName || "";
-  const words = escapeComboHtml(numberToWordsRo(value));
+  const words = escapeComboHtml(numberToWordsRo(valueTiparit));
   const dates = rows.map((x) => x.r.receivedAt || x.r.createdAt).filter(Boolean).sort();
   const dateText = dates.length
     ? (dates[0] === dates[dates.length - 1]
@@ -6898,7 +6931,7 @@ function buildPurchaseActHtml(receipts, partner, company, act) {
     try {
       const matrix = qrMatrix(actQrPayload({
         company: co, partner: p, series: seria, nr,
-        dateText, rows, value, tax, netPay
+        dateText, rows, value: valueTiparit, tax: taxTiparit, netPay: netPayTiparit
       }));
       return matrix ? qrSvg(matrix, 96) : "";
     } catch (err) {
@@ -6998,7 +7031,7 @@ function buildPurchaseActHtml(receipts, partner, company, act) {
       <tbody>${bodyRows}${emptyRow}
       </tbody>
       <tfoot>
-        <tr><td class="of-b">Total / Итого</td><td class="of-c of-b">X</td><td class="of-c of-b">X</td><td class="of-c of-b">X</td><td class="of-r of-b">${actNum(value, 2)}</td></tr>
+        <tr><td class="of-b">Total / Итого</td><td class="of-c of-b">X</td><td class="of-c of-b">X</td><td class="of-c of-b">X</td><td class="of-r of-b">${actNum(valueTiparit, 2)}</td></tr>
       </tfoot>
     </table>
 
@@ -7015,11 +7048,11 @@ function buildPurchaseActHtml(receipts, partner, company, act) {
     <table style="width:100%;border-collapse:collapse;margin-top:6px;"><tr>
       <td style="width:22%;vertical-align:bottom;"><span class="of-b">la buget</span><div class="of-ru">в бюджет</div></td>
       <td style="vertical-align:bottom;">
-        <div style="border-bottom:1px solid #000;padding-bottom:1px;">${escapeComboHtml(numberToWordsRo(tax))}</div>
+        <div style="border-bottom:1px solid #000;padding-bottom:1px;">${escapeComboHtml(numberToWordsRo(taxTiparit))}</div>
         ${cap("în litere", "прописью")}
       </td>
       <td style="width:170px;vertical-align:bottom;padding-left:10px;">
-        <div style="border-bottom:1px solid #000;text-align:center;padding-bottom:1px;">${actNum(tax, 2)}</div>
+        <div style="border-bottom:1px solid #000;text-align:center;padding-bottom:1px;">${actNum(taxTiparit, 2)}</div>
         ${cap("în cifre", "цифрами")}
       </td>
     </tr></table>
@@ -7037,11 +7070,11 @@ function buildPurchaseActHtml(receipts, partner, company, act) {
     <table style="width:100%;border-collapse:collapse;margin-top:10px;"><tr>
       <td style="width:22%;vertical-align:bottom;"><span class="of-b">Total de plata</span><div class="of-ru">Общая сумма к оплате</div></td>
       <td style="vertical-align:bottom;">
-        <div style="border-bottom:1px solid #000;padding-bottom:1px;">${escapeComboHtml(numberToWordsRo(netPay))}</div>
+        <div style="border-bottom:1px solid #000;padding-bottom:1px;">${escapeComboHtml(numberToWordsRo(netPayTiparit))}</div>
         ${cap("în litere", "прописью")}
       </td>
       <td style="width:170px;vertical-align:bottom;padding-left:10px;">
-        <div style="border-bottom:1px solid #000;text-align:center;padding-bottom:1px;">${actNum(netPay, 2)}</div>
+        <div style="border-bottom:1px solid #000;text-align:center;padding-bottom:1px;">${actNum(netPayTiparit, 2)}</div>
         ${cap("în cifre", "цифрами")}
       </td>
     </tr></table>

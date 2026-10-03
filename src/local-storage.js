@@ -1787,22 +1787,36 @@ function nextActNumber(state, companyId) {
 // Atribuie numarul actului de achizitie. IDEMPOTENT: daca receptia are deja numar, il
 // intoarce neschimbat. Un numar atribuit NU se schimba niciodata — altfel reimprimarea ar
 // da alt numar decat cel din dosar, iar doua acte ar putea purta acelasi numar.
-async function assignActNumber(id, options = {}) {
+// `ids` = TOATE receptiile acoperite de act. Un act care acopera mai multe receptii consuma
+// UN numar, dar il primesc toate: altfel una dintre celelalte, tiparita ulterior individual,
+// apare nenumerotata si ARDE un numar nou pentru marfa deja acoperita de hartia 914 — dubla
+// invizibila, imposibil de prins din interfata.
+async function assignActNumber(ids, options = {}) {
   const state = readReceiptsState();
-  const receipt = (state.receipts || []).find((item) => item.id === Number(id));
-  if (!receipt) {
-    throw new Error("Receptia nu a fost gasita.");
+  const lista = (Array.isArray(ids) ? ids : [ids]).map(Number);
+  const receipts = lista.map((id) => {
+    const found = (state.receipts || []).find((item) => item.id === id);
+    if (!found) throw new Error(`Receptia #${id} nu a fost gasita.`);
+    return found;
+  });
+  if (!receipts.length) {
+    throw new Error("Nicio receptie pentru act.");
   }
+  const receipt = receipts[0];
 
   const role = normalizeRoleCode(options.actorRole);
   if (!CAN_ISSUE_ACTS_ROLES.includes(role)) {
     throw forbiddenError("Doar contabilul sau administratorul pot emite acte de achizitie.");
   }
-  if (Number(receipt.actNumber || 0) > 0) {
-    return receipt; // deja emis — acelasi numar, oricate reimprimari
+  // Daca ORICARE dintre receptii are deja numar, actul e deja emis: se intoarce acela.
+  const dejaEmis = receipts.find((item) => Number(item.actNumber || 0) > 0);
+  if (dejaEmis) {
+    return dejaEmis; // acelasi numar, oricate reimprimari
   }
-  if (!isReceiptInStock(receipt)) {
-    throw new Error("Receptia nu e in stoc (proiect/anulata). Nu se emite act pentru ea.");
+  for (const item of receipts) {
+    if (!isReceiptInStock(item)) {
+      throw new Error(`Receptia #${item.id} nu e in stoc (${item.status}). Nu se emite act pentru ea.`);
+    }
   }
   // Numar consumat degeaba = gaura in sirul din dosar, imposibil de explicat la control.
   if (options.isNaturalPerson !== true) {
@@ -1812,20 +1826,52 @@ async function assignActNumber(id, options = {}) {
   if (!options.companyId) {
     throw new Error("Firma emitenta e obligatorie: seria si numarul se inregistreaza pe act.");
   }
-  receipt.actNumber = nextActNumber(state, options.companyId);
-  receipt.actSeries = String(options.series || "").trim();
-  receipt.actCompanyId = options.companyId ? Number(options.companyId) : null;
-  receipt.actIssuedAt = new Date().toISOString();
-  receipt.updatedAt = receipt.actIssuedAt;
+
+  const numar = nextActNumber(state, options.companyId);
+  const serie = String(options.series || "").trim();
+  const companie = Number(options.companyId);
+  const acum = new Date().toISOString();
+
+  // CIFRELE SE INGHEATA. Fara asta, o corectie ulterioara de pret sau de bifa face ca
+  // retiparirea ACELUIASI numar sa arate alte cifre decat hartia semnata — exact riscul
+  // de care actul se apara deja pe cota de impozit.
+  // Se pastreaza primitivele (kg, valoare, retinere, net); pretul se derivă din ele la
+  // tiparire, ca sa nu existe o a doua regula de rotunjire.
+  const total = receipts.reduce(
+    (acc, item) => {
+      const kg = receiptPayableTonnes(item) * 1000;
+      const brut = Number(item.preliminaryMerchandiseValue || 0) || kg * Number(item.price || 0);
+      const net = Number(item.amountToPay ?? item.preliminaryPayableAmount ?? 0) || brut;
+      return { kg: acc.kg + kg, brut: acc.brut + brut, net: acc.net + net };
+    },
+    { kg: 0, brut: 0, net: 0 }
+  );
+  const snapshot = {
+    netKg: Number(total.kg.toFixed(3)),
+    value: Number(total.brut.toFixed(2)),
+    netPay: Number(total.net.toFixed(2)),
+    tax: Math.max(Number((total.brut - total.net).toFixed(2)), 0),
+    receiptIds: lista
+  };
+
+  for (const item of receipts) {
+    item.actNumber = numar;
+    item.actSeries = serie;
+    item.actCompanyId = companie;
+    item.actIssuedAt = acum;
+    // Cifrele actului stau pe PURTATOR (prima receptie): actul e un singur document.
+    if (item.id === receipt.id) item.actFigures = snapshot;
+    item.updatedAt = acum;
+  }
 
   createAuditEntry(state, {
     entityType: "receipt",
     entityId: receipt.id,
     action: "receipt-act-number",
-    reason: `Act de achizitie emis: ${receipt.actSeries} ${receipt.actNumber}`,
+    reason: `Act de achizitie emis: ${serie} ${numar}`,
     user: options.changedBy || "dashboard",
     oldValue: { actNumber: null },
-    newValue: { actNumber: receipt.actNumber, actSeries: receipt.actSeries }
+    newValue: { actNumber: numar, actSeries: serie, receiptIds: lista, figures: snapshot }
   });
 
   writeReceiptsState(state);
@@ -1841,7 +1887,7 @@ async function assignActNumber(id, options = {}) {
   // Mitigarea nu elimina cursa (pentru asta e nevoie de alocare atomica in baza), dar o
   // face VIZIBILA: fortam scrierea, recitim din KV si verificam. Daca numarul nu s-a
   // persistat sau apare de doua ori, aruncam — mai bine fara act decat cu numar dublat.
-  const atribuit = receipt.actNumber;
+  const atribuit = numar;
   await flushPendingWrites();
   if (USE_SUPABASE && kvBackend) {
     let persistat = null;
@@ -1857,7 +1903,7 @@ async function assignActNumber(id, options = {}) {
         Number(item.actNumber || 0) === atribuit &&
         Number(item.actCompanyId || 0) === Number(receipt.actCompanyId || 0)
     );
-    if (cuNumar.length !== 1 || Number(cuNumar[0].id) !== Number(receipt.id)) {
+    if (cuNumar.length !== lista.length || !cuNumar.some((item) => Number(item.id) === Number(receipt.id))) {
       throw new Error(
         `Numarul ${atribuit} nu s-a inregistrat corect (o alta operatie a scris in acelasi timp). Nu tipari actul: reincearca.`
       );

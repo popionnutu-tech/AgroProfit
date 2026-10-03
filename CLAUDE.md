@@ -385,8 +385,20 @@ Actul de achiziție e document fiscal: numărul lui ajunge în dosarul de hârti
   ar consuma numere pe achiziții de la firme și ar lăsa găuri în șir.
 - Doar `CAN_ISSUE_ACTS_ROLES` (contabil, contabil-șef, admin) emit acte. Urmă în audit
   (`receipt-act-number`). Refuzat pe o recepție care nu e în stoc — ar fi hârtie fără marfă.
-- Un act care acoperă **mai multe recepții** consumă UN număr, atribuit celei mai vechi:
-  actul e un singur document.
+- Un act care acoperă **mai multe recepții** consumă UN număr, dar **îl primesc toate**.
+  Marcat doar pe cea mai veche, una dintre celelalte tipărită ulterior individual apărea
+  nenumerotată și **ardea un număr nou** pentru marfă deja acoperită de hârtia 914 — dublă
+  invizibilă. Reemiterea pe oricare dintre ele întoarce același număr. Un act acoperă
+  recepțiile **unui singur furnizor** (verificat în handler pe `supplierId`).
+- **Cifrele actului se îngheață la emitere** (`actFigures`: kg, valoare, reținere, net, pe
+  purtător). Fără asta, o corecție ulterioară de preț sau de bifă făcea ca retipărirea
+  ACELUIAȘI număr să arate alte cifre decât hârtia semnată — exact riscul de care actul se
+  apăra deja pe cota de impozit. Se păstrează primitivele; prețul se derivă din ele la
+  tipărire, ca să nu existe a doua regulă de rotunjire. **Codul QR poartă aceleași cifre**
+  înghețate: altfel codul scanat ar contrazice hârtia de lângă el. Un act cu alte cifre
+  cere număr nou.
+- Rândul recepției arată coloana **„Act nr."** (serie + număr, cu data emiterii în tooltip),
+  ca registrul din aplicație să poată fi confruntat cu dosarul de hârtie.
 - Seria e **per firmă** (`companies[].series`), nu globală — firma vine din cerere, seria se
   rezolvă pe server.
 - La tipărire, fereastra se deschide **înainte** de `await` (cererea numărului). După un

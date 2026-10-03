@@ -575,6 +575,24 @@ async function assignActNumberHandler(req, res, id) {
     if (!receipt) {
       return sendJson(res, 404, { error: "Receptia nu a fost gasita." });
     }
+    // Un act poate acoperi mai multe receptii ale aceluiasi furnizor. TOATE primesc numarul,
+    // altfel una tiparita ulterior individual ar arde un numar nou pentru marfa deja
+    // acoperita. Se accepta doar receptii ale ACELUIASI furnizor — un act e al unui furnizor.
+    const cerute = Array.isArray((req.body || {}).receiptIds)
+      ? (req.body || {}).receiptIds.map(Number).filter(Boolean)
+      : [];
+    const ids = cerute.length ? [...new Set([Number(id), ...cerute])] : [Number(id)];
+    for (const altId of ids) {
+      const alta = getReceiptRaw(altId);
+      if (!alta) {
+        return sendJson(res, 404, { error: `Receptia #${altId} nu a fost gasita.` });
+      }
+      if (Number(alta.supplierId) !== Number(receipt.supplierId)) {
+        return sendJson(res, 400, {
+          error: "Actul de achizitie acopera receptiile unui singur furnizor."
+        });
+      }
+    }
 
     const config = await getConfig();
     const partner = config.partners.find((item) => item.id === Number(receipt.supplierId));
@@ -602,7 +620,7 @@ async function assignActNumberHandler(req, res, id) {
     }
     const series = String(company.series || company.shortName || "").trim();
 
-    const updated = await assignActNumber(id, {
+    const updated = await assignActNumber(ids, {
       isNaturalPerson,
       series,
       companyId: company.id,
@@ -612,7 +630,8 @@ async function assignActNumberHandler(req, res, id) {
     return sendJson(res, 200, {
       ok: true,
       actNumber: updated.actNumber,
-      actSeries: updated.actSeries
+      actSeries: updated.actSeries,
+      actFigures: updated.actFigures || null
     });
   } catch (error) {
     console.error("Failed to assign act number:", error.message);
