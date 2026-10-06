@@ -374,7 +374,15 @@ Actul de achiziție e document fiscal: numărul lui ajunge în dosarul de hârti
   lăsa găuri în registrul fiecăreia: „PAT 915", „AGR 916", „PAT 917" — în dosarul PAT lipsește
   916. Firma e **obligatorie**, nu se ghicește: un fallback „prima firmă activă" îngheța tăcit
   seria altei firme decât cea pe care omul credea că emite, fără cale de corecție.
-- ⚠️ **Unicitatea nu e garantată de cod, doar verificată.** Persistența e un blob JSON unic
+- **Alocare ATOMICĂ în PostgreSQL**, când migrarea `migrations/001-numerotare-atomica-acte.sql`
+  e aplicată: advisory lock pe firmă + cheie primară `(company_id, number)` în tabelul
+  `purchase_act_numbers`. Duplicatul devine **imposibil**, nu doar detectat. `allocateActNumber`
+  din `src/supabase-state-kv.js` întoarce `null` dacă funcția nu există (migrarea nu e rulată),
+  iar codul **cade pe derivarea din blob** — deci aplicația merge și înainte de migrare.
+  Mecanismul folosit se consemnează pe document (`actNumberSource`) și în audit (`numberSource`):
+  „postgres" sau „blob". Orice ALTĂ eroare de alocare se propagă — o alocare eșuată nu are voie
+  să cadă tăcut pe metoda mai slabă.
+- ⚠️ **Fără migrare, unicitatea nu e garantată de cod, doar verificată.** Persistența e un blob JSON unic
   scris cu upsert necondiționat (fără versiune, fără compare-and-set) și cu debounce: o
   scriere concurentă poate reîncărca blobul de DINAINTE de atribuire și îl poate suprascrie —
   hârtia iese cu 914, datele nu mai știu de el, actul următor ia din nou 914. De aceea

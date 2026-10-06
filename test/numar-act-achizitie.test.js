@@ -431,3 +431,28 @@ test("fuziunea de parteneri e blocata pe receptii cu act emis", async () => {
     );
   });
 });
+
+// Alocarea ATOMICA e in PostgreSQL; aplicatia trebuie sa functioneze si INAINTE de migrare,
+// cazand pe derivarea din blob. Aici verificam contractul de fallback, nu Postgres.
+test("fara migrare se cade pe derivarea din blob, fara sa se rupa nimic", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const r = await receptie(storage, "Cojocari Ana");
+    const emis = await storage.assignActNumber([r.id], PF);
+    assert.equal(emis.actNumber, START);
+    // Driverul local nu are alocare atomica -> sursa e „blob", consemnata pe document.
+    assert.equal(emis.actNumberSource, "blob");
+  });
+});
+
+test("sursa numarului intra in audit, ca sa se vada pe ce mecanism s-a emis", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const r = await receptie(storage, "Cojocari Ana");
+    await storage.assignActNumber([r.id], PF);
+    const logs = await storage.listAuditLogs();
+    const intrare = logs.find((l) => l.action === "receipt-act-number");
+    assert.ok(intrare, "lipseste intrarea de audit");
+    assert.equal(intrare.newValue.numberSource, "blob");
+  });
+});
