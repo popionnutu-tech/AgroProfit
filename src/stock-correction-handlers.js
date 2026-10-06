@@ -1,4 +1,4 @@
-const { createStockCorrection, listStockCorrections } = require("./storage");
+const { clearStockDust, createStockCorrection, listStockCorrections } = require("./storage");
 const { getActorLabel } = require("./auth");
 
 function sendJson(res, statusCode, payload) {
@@ -16,6 +16,27 @@ async function listStockCorrectionsHandler(_req, res) {
   } catch (error) {
     console.error("Failed to load stock corrections:", error.message);
     return sendJson(res, 500, { error: "Nu am putut incarca corectiile de stoc." });
+  }
+}
+
+// Praful din cilindri: toate randurile cu rest sub prag se asaza la ZERO, fiecare prin
+// aceeasi corectie de inventar ca manual — deci cu urma in audit si in coloana „Corectii
+// inventar". Rolul vine din SESIUNE.
+async function clearStockDustHandler(req, res) {
+  const body = req.body || {};
+  try {
+    const rezultat = await clearStockDust({
+      thresholdKg: body.thresholdKg,
+      changeReason: body.changeReason || body.reason,
+      currentUser: req.currentUser || {},
+      changedBy: getActorLabel(req)
+    });
+    return sendJson(res, 200, { ok: true, ...rezultat });
+  } catch (error) {
+    console.error("Failed to clear stock dust:", error.message);
+    return sendJson(res, error.statusCode || 400, {
+      error: error.message || "Nu am putut curata resturile de stoc."
+    });
   }
 }
 
@@ -41,6 +62,7 @@ async function createStockCorrectionHandler(req, res) {
 }
 
 module.exports = {
+  clearStockDustHandler,
   createStockCorrectionHandler,
   listStockCorrectionsHandler
 };

@@ -73,6 +73,7 @@ const {
 } = require("./complaint-handlers");
 const { listAuditLogsHandler } = require("./audit-handlers");
 const {
+  clearStockDustHandler,
   createStockCorrectionHandler,
   listStockCorrectionsHandler
 } = require("./stock-correction-handlers");
@@ -458,6 +459,10 @@ app.get(
   listStockCorrectionsHandler
 );
 app.post("/api/stock-corrections", requireRoles(["admin"]), createStockCorrectionHandler);
+
+// Curatarea resturilor sub prag: fiecare rand trece prin aceeasi corectie de inventar,
+// deci rămâne urma. Doar admin, ca orice rescriere de stoc.
+app.post("/api/stock-corrections/clear-dust", requireRoles(["admin"]), clearStockDustHandler);
 
 // Transfer de produs intre cilindri (mutare stoc).
 app.get(

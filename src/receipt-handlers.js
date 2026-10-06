@@ -163,7 +163,9 @@ const FINANCIAL_RECEIPT_FIELDS = [
   // Cifrele INGHEȚATE ale actului: valoare, retinere, net, si pe fiecare rand. Exact datele
   // pentru care se sterg `price` si `preliminaryMerchandiseValue` — fara asta ajungeau la
   // operator si la `control` prin GET /api/receipts si prin raspunsul de schimbare de status.
-  "actFigures"
+  "actFigures",
+  // Divergentele act-registru contin sumele de pe hartie.
+  "actDivergences"
 ];
 
 function stripReceiptFinancials(receipt) {

@@ -4541,6 +4541,11 @@ async function correctReceiptTerms(id, payload = {}) {
   if (receipt.termCorrections.length > 20) {
     receipt.termCorrections = receipt.termCorrections.slice(-20);
   }
+  marcheazaDivergentaAct(
+    receipt,
+    `Conditii corectate (${newFlag ? "plata pe masa cu apa" : "plata pe masa fara apa"}, ` +
+    `pret ${newPrice} lei/kg): ${reason}`
+  );
   receipt.updatedAt = now;
 
   createAuditEntry(state, {
@@ -4622,6 +4627,7 @@ async function updateReceiptAmount(id, amount, changedBy, note) {
     note: comment
   });
   receipt.amountNote = comment; // ultima justificare, pentru afisare rapida
+  marcheazaDivergentaAct(receipt, `Suma corectata manual la ${value.toFixed(2)} lei: ${comment}`);
   receipt.updatedAt = now;
 
   createAuditEntry(state, {
@@ -5179,6 +5185,28 @@ async function cancelTransfer(id, options = {}) {
 // care ar face documentul sa nu mai corespunda hartiei lasa numarul orfan: „Anulat" in
 // aplicatie (ascuns pe unele roluri) si o gaura in sir, imposibil de explicat la control.
 // Sursa UNICA: garda era scrisa doar in `cancelReceipt`, iar ruta de status o ocolea.
+// Cifrele actului sunt INGHEȚATE pe hartie, deci o corectie ulterioara nu le schimba — dar
+// atunci REGISTRUL pleaca de sub hartie: retinerea la sursa declarata pe act nu mai e cea din
+// evidenta. Nu se blocheaza (decizia utilizatorului, 06.10.2026): se MARCHEAZA, ca divergenta
+// sa fie vizibila si explicabila, nu descoperita la control.
+function marcheazaDivergentaAct(receipt, motiv) {
+  if (!(Number((receipt && receipt.actNumber) || 0) > 0)) return;
+  if (!Array.isArray(receipt.actDivergences)) receipt.actDivergences = [];
+  receipt.actDivergences.push({
+    at: new Date().toISOString(),
+    reason: String(motiv || "").trim().slice(0, 200),
+    actNumber: receipt.actNumber,
+    actSeries: receipt.actSeries || "",
+    // Cifrele de pe hartie, ca sa se vada fata de ce a divergat registrul.
+    actValue: Number((receipt.actFigures && receipt.actFigures.value) || 0),
+    actNetPay: Number((receipt.actFigures && receipt.actFigures.netPay) || 0)
+  });
+  // Pe document se pastreaza ultimele 20; istoricul complet rămâne in audit.
+  if (receipt.actDivergences.length > 20) {
+    receipt.actDivergences = receipt.actDivergences.slice(-20);
+  }
+}
+
 function assertNoIssuedAct(receipt, operatie) {
   if (Number((receipt && receipt.actNumber) || 0) > 0) {
     throw new Error(
@@ -5526,6 +5554,60 @@ async function listStockCorrections() {
   return (state.stockCorrections || []).sort(
     (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
   );
+}
+
+// Praful din cilindri: resturi de cateva kg, pozitive sau negative, rămase din rotunjiri si
+// din documente retroactive. Nu sunt marfa, dar colorează ecranul in roșu si nu se pot inchide
+// decat una cu una.
+//
+// Se asaza la ZERO prin ACEEASI corectie de inventar ca manual (`createStockCorrection`):
+// fiecare rand primeste urma in audit si intra in coloana „Corectii inventar" in AMBELE
+// ecrane. Nu se scrie direct in stoc — regula 8 cere ca orice pierdere sa fie recunoscuta.
+const STOCK_DUST_THRESHOLD_KG = 5;
+
+async function clearStockDust(payload = {}) {
+  const currentUser = payload.currentUser || {};
+  if (normalizeRoleCode(currentUser.roleCode) !== "admin") {
+    throw forbiddenError("Doar administratorul poate corecta stocul.");
+  }
+  // ABSENT => valoarea implicita. Dar un 0 TRIMIS explicit nu are voie sa cada pe 5: ar
+  // insemna „n-am cerut nimic" si ar curata totusi. Aceeasi capcana ca la `countedQuantity`.
+  const pragBrut = payload.thresholdKg;
+  const prag =
+    pragBrut === undefined || pragBrut === null || String(pragBrut).trim() === ""
+      ? STOCK_DUST_THRESHOLD_KG
+      : Number(String(pragBrut).replace(",", ".").trim());
+  if (!Number.isFinite(prag) || prag <= 0 || prag > 50) {
+    throw new Error("Pragul trebuie sa fie un numar intre 0 si 50 kg.");
+  }
+  const reason = requiredText(payload.changeReason || payload.reason, "Motivul corectiei");
+
+  const summary = stockSummaryFromState(readReceiptsState());
+  const praf = (summary.byLocation || []).filter((line) => {
+    const kg = Math.abs(Number(line.quantity || 0) * 1000);
+    return kg > 0 && kg < prag;
+  });
+
+  const corectate = [];
+  for (const line of praf) {
+    // Secvential, nu in paralel: fiecare corectie citeste stocul, il asaza si scrie starea.
+    // In paralel, ultima scriere ar sterge corectiile celorlalte.
+    const corectie = await createStockCorrection({
+      location: line.location,
+      product: line.product,
+      countedQuantity: 0,
+      changeReason: `${reason} (rest sub ${prag} kg)`,
+      currentUser,
+      changedBy: payload.changedBy
+    });
+    corectate.push({
+      location: line.location,
+      product: line.product,
+      kg: Math.round(Number(line.quantity || 0) * 1000 * 1000) / 1000,
+      correctionId: corectie && corectie.id
+    });
+  }
+  return { thresholdKg: prag, cleared: corectate };
 }
 
 async function createStockCorrection(payload = {}) {
@@ -6379,6 +6461,7 @@ module.exports = {
   listUsers,
   reopenReceipt,
   runMigrationIfNeeded,
+  clearStockDust,
   createStockCorrection,
   isDeliveryPendingStockExit,
   listStockCorrections,

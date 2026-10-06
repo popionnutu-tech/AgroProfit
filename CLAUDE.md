@@ -196,6 +196,13 @@ introducă. Îl creează în status **`Proiect`**.
   Nr. 47 din Cilindru 2 a făcut ca recepțiile de soia din gropile de primire (sept. 2026) să
   apară în Cilindru 2. Marfa se mută între locații **doar** prin transfer sau procesare.
   **Nu reintroduce cascada.**
+- **Praful** (resturi sub 5 kg, pozitive sau negative, din rotunjiri și din documente
+  retroactive) se poate așeza la zero în bloc, din butonul „Curăță resturile" din Stoc.
+  Fiecare rând trece prin **aceeași** `createStockCorrection` ca manual — deci motiv
+  obligatoriu, urmă în audit și intrare în coloana „Corecții inventar" în ambele ecrane.
+  **Nu scrie direct în stoc:** orice pierdere e recunoscută. Corecțiile se fac **secvențial**
+  — în paralel, ultima scriere ar șterge celelalte. Butonul apare doar când există ce curățat,
+  doar pentru admin. Un prag `0` trimis explicit e RESPINS (nu cade pe valoarea implicită).
 - **Nu ascunde un rând negativ.** Se afișează tot ce nu e zero. Un minus ascuns rămâne fără
   butonul „Corectează" — vizibil în „Mișcarea stocului", imposibil de închis din „Stoc".
 
@@ -436,6 +443,15 @@ Actul de achiziție e document fiscal: numărul lui ajunge în dosarul de hârti
 - La tipărire, fereastra se deschide **înainte** de `await` (cererea numărului). După un
   `await`, `window.open` e blocat de blocatorul de pop-up și contabilul rămâne fără document.
   Orice ieșire devreme trebuie să închidă fereastra deja deschisă.
+
+### 10b. Corecțiile de după emiterea actului se MARCHEAZĂ, nu se blochează
+Cifrele actului sunt îngheţate, deci hârtia rămâne valabilă — dar atunci **registrul pleacă de
+sub ea**: reținerea la sursă declarată pe act nu mai e cea din evidență. Decizia utilizatorului
+(06.10.2026): **avertisment, nu blocare** — contabilul trebuie să poată corecta.
+- `marcheazaDivergentaAct()` scrie în `receipt.actDivergences` ce s-a schimbat, când, de ce și
+  cifrele care sunt pe hârtie. Apelată din `updateReceiptAmount` și din `correctReceiptTerms`.
+- Ultimele 20 pe document; istoricul complet rămâne în audit. `actDivergences` e în
+  `FINANCIAL_RECEIPT_FIELDS` — conține sume.
 
 ### 11. Serviciile se taxează DOAR pe procentul peste normă
 `cleaningServiceTotal = brut × excesImpurități × tarif`, `dryingServiceTotal = brut ×

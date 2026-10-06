@@ -124,6 +124,55 @@ const transferMessageEl = document.getElementById("transfer-message");
 const transfersBodyEl = document.getElementById("transfers-body");
 let transfersCache = [];
 const stocksBodyEl = document.getElementById("stocks-body");
+const stockDustWrap = document.getElementById("stock-dust-wrap");
+const stockDustBtn = document.getElementById("stock-dust-btn");
+const stockDustHintEl = document.getElementById("stock-dust-hint");
+
+// Curatarea resturilor: fiecare rand se asaza la ZERO prin aceeasi corectie de inventar ca
+// manual, deci cu motiv, urma in audit si intrare in coloana „Corectii inventar" in ambele
+// ecrane. Nu scrie direct in stoc (regula 8: orice pierdere e RECUNOSCUTA).
+if (stockDustBtn) {
+  stockDustBtn.addEventListener("click", async () => {
+    const cate = Number(stockDustBtn.dataset.count || 0);
+    const prag = Number(stockDustBtn.dataset.threshold || 5);
+    if (!cate) return;
+    const motiv = window.prompt(
+      `Se vor așeza la zero ${cate} ${cate === 1 ? "rând" : "rânduri"} cu rest sub ${prag} kg.\n` +
+      "Fiecare intră ca pierdere recunoscută, cu urmă în audit.\n\n" +
+      "Motivul corectării (obligatoriu):",
+      "Curățare resturi din rotunjiri"
+    );
+    if (motiv === null) return;
+    if (!String(motiv).trim()) {
+      window.alert("Motivul este obligatoriu.");
+      return;
+    }
+    stockDustBtn.disabled = true;
+    try {
+      const res = await fetch("/api/stock-corrections/clear-dust", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ thresholdKg: prag, changeReason: motiv })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Nu am putut curăța resturile.");
+      const n = (data.cleared || []).length;
+      window.alert(
+        n
+          ? `Gata: ${n} ${n === 1 ? "rând așezat" : "rânduri așezate"} la zero.\n` +
+            (data.cleared || [])
+              .map((c) => `${c.product} / ${c.location}: ${formatNumber(c.kg)} kg → 0`)
+              .join("\n")
+          : "Nu a fost nimic de curățat."
+      );
+      await loadStocks();
+    } catch (err) {
+      window.alert(err.message);
+    } finally {
+      stockDustBtn.disabled = false;
+    }
+  });
+}
 const stockSummaryEl = document.getElementById("stock-summary");
 const silosGridEl = document.getElementById("silos-grid");
 const receiptStatusFilterEl = document.getElementById("receipt-status-filter");
@@ -1313,6 +1362,30 @@ function renderStockSummary(summary) {
   const negativeRows = stockRows.filter((item) => Number(item.quantity || 0) < 0);
   // Corecția de inventar e a adminului: el așază stocul la ce a numărat fizic în cilindru.
   const canCorrectStock = currentSessionUser?.roleCode === "admin";
+  // Praful: resturi de cateva kg, din rotunjiri si din documente retroactive. Butonul apare
+  // DOAR cand exista ce curatat — altfel e un buton care nu face nimic.
+  const PRAG_PRAF_KG = 5;
+  const praf = stockRows.filter((item) => {
+    const kg = Math.abs(Number(item.quantity || 0) * 1000);
+    return kg > 0 && kg < PRAG_PRAF_KG;
+  });
+  if (stockDustWrap) {
+    stockDustWrap.hidden = !(canCorrectStock && praf.length > 0);
+    if (stockDustHintEl && praf.length) {
+      stockDustHintEl.textContent =
+        `${praf.length} ${praf.length === 1 ? "rând" : "rânduri"} cu rest sub ${PRAG_PRAF_KG} kg: ` +
+        praf
+          .slice(0, 6)
+          .map((i) => `${i.product} / ${i.location} (${formatNumber(i.quantity * 1000)} kg)`)
+          .join("; ") +
+        (praf.length > 6 ? ` și încă ${praf.length - 6}` : "");
+    }
+  }
+  if (stockDustBtn) {
+    stockDustBtn.dataset.count = String(praf.length);
+    stockDustBtn.dataset.threshold = String(PRAG_PRAF_KG);
+  }
+
   stocksBodyEl.innerHTML = stockRows
     .map(
       (item) => `
