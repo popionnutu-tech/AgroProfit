@@ -79,7 +79,12 @@ function computeReceiptEstimate({
     ? provisionalNetQuantity + estimatedWaterLoss
     : provisionalNetQuantity;
 
-  const cleaningServiceTotal = grossQuantity * Number(cleaningTariff || 0);
+  // Serviciile se taxeaza DOAR pe procentul peste norma — ca uscarea, chiar deasupra.
+  // Backend-ul ignora complet `excessImpurity` si taxa toata cantitatea: la 100 t, tarif 10
+  // si 3% exces, ecranul arata 3.000 lei iar documentul salva 1.000. Mai rau, taxa curatirea
+  // si cand impuritatile erau SUB norma. Oglinda lui `getReceiptEstimate` din public/app.js.
+  const cleaningServiceTotal =
+    grossQuantity * excessImpurity * Number(cleaningTariff || 0);
   const dryingServiceTotal = payOnGross
     ? 0
     : grossQuantity * excessHumidity * Number(dryingTariff || 0);

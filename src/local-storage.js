@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const { createPasswordRecord } = require("./auth");
@@ -210,7 +211,22 @@ const configEntities = [
   "fields"
 ];
 
-const defaultUserPassword = process.env.DEFAULT_USER_PASSWORD || "Agro2026!";
+// Parola cu care se seamana conturile fara parola si adminul de pornire.
+//
+// NU are voie sa fie o constanta in cod: repo-ul e PUBLIC, deci o valoare scrisa aici e
+// cunoscuta de oricine si functioneaza pe orice cont care nu si-a schimbat parola inca.
+// Daca `DEFAULT_USER_PASSWORD` nu e setata, se genereaza una ALEATOARE si se scrie in logul
+// serverului — bootstrap-ul rămâne posibil, dar nimic nu e cunoscut din afara.
+const defaultUserPassword = (() => {
+  const dinMediu = String(process.env.DEFAULT_USER_PASSWORD || "").trim();
+  if (dinMediu) return dinMediu;
+  const generata = `Ap-${crypto.randomBytes(9).toString("base64url")}!`;
+  console.warn(
+    "[securitate] DEFAULT_USER_PASSWORD nu e setata. Parola initiala generata pentru " +
+    `aceasta pornire: ${generata}  (se cere schimbarea la prima autentificare)`
+  );
+  return generata;
+})();
 
 const DELIVERY_STATUSES = ["Proiect", "Confirmat", "Livrat", "Inchis", "Anulat", "Redeschis", "Returnat"];
 const RECEIPT_STATUSES = ["Proiect", "In descarcare", "Draft", "Procesata", "Confirmat", "Inchis", "Anulat", "Redeschis"];
@@ -5694,7 +5710,12 @@ async function updateUserPasswordById(userId, password) {
   user.passwordSalt = passwordRecord.salt;
   user.passwordHash = passwordRecord.hash;
   user.requirePasswordChange = false;
-  user.updatedAt = new Date().toISOString();
+  // Parola schimbata => sesiunile emise INAINTE nu mai sunt valabile. Tokenul e stateless,
+  // deci singura cale de a-l invalida e sa stim de cand incolo nu mai e bun (verificat in
+  // `attachCurrentUser`). Fara asta, cineva cu tokenul furat il folosea pana la expirare,
+  // desi parola fusese deja schimbata.
+  user.sessionsRevokedAt = new Date().toISOString();
+  user.updatedAt = user.sessionsRevokedAt;
   writeConfigState(state);
   return sanitizeUserForClient(user);
 }
@@ -5986,9 +6007,19 @@ async function updateConfigEntry(entity, id, payload) {
   }
 
   const adminResetPassword = entity === "users" && normalized.password;
+  // Dezactivarea, schimbarea rolului sau resetarea parolei de catre admin taie sesiunile
+  // existente. Altfel un cont dezactivat sau retrogradat pastra drepturile vechi pana la
+  // expirarea tokenului — pana la 12 ore.
+  const taieSesiuni =
+    entity === "users" &&
+    (adminResetPassword ||
+      normalized.active === false ||
+      (normalized.roleCode !== undefined &&
+        normalizeRoleCode(normalized.roleCode) !== normalizeRoleCode(existing.roleCode)));
 
   Object.assign(existing, normalized, {
-    updatedAt: new Date().toISOString()
+    updatedAt: new Date().toISOString(),
+    ...(taieSesiuni ? { sessionsRevokedAt: new Date().toISOString() } : {})
   });
 
   if (adminResetPassword) {

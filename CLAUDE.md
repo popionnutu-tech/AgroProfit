@@ -437,6 +437,30 @@ Actul de achiziție e document fiscal: numărul lui ajunge în dosarul de hârti
   `await`, `window.open` e blocat de blocatorul de pop-up și contabilul rămâne fără document.
   Orice ieșire devreme trebuie să închidă fereastra deja deschisă.
 
+### 11. Serviciile se taxează DOAR pe procentul peste normă
+`cleaningServiceTotal = brut × excesImpurități × tarif`, `dryingServiceTotal = brut ×
+excesUmiditate × tarif`. Dacă marfa e în normă, serviciul e **0**.
+- Backend-ul ignora complet `excessImpurity` și taxa toată cantitatea: la 100 t, tarif 10 și
+  3% exces, ecranul arăta **3.000** lei, iar documentul salva **1.000**. Mai rău, taxa
+  curățarea și când impuritățile erau SUB normă. Reparat 06.10.2026.
+- Formula e oglindită în `getReceiptEstimate` din `public/app.js`. AMBELE locuri.
+
+### 12. Sesiunea se verifică pe CONT, nu doar pe token
+Tokenul dovedește că omul s-a autentificat **cândva**. Rolul, drepturile și starea „activ" se
+citesc de pe cont la **fiecare cerere** (`attachCurrentUser`).
+- Înainte, un cont dezactivat sau retrogradat păstra drepturile vechi până la expirarea
+  tokenului — până la 12 ore — iar o parolă schimbată nu tăia sesiunile existente.
+- `auth.js` NU poate cere `local-storage` (acela îl cere pe el). Căutarea contului se
+  **injectează** din `server.js` prin `setUserLookup`. Fără ea se cade pe token, ca înainte;
+  o eroare la citirea contului **nu** acordă acces (fail-closed).
+- `sessionsRevokedAt` pe cont invalidează tokenurile emise înainte. Se setează la schimbarea
+  parolei, la dezactivare și la schimbarea rolului. Ieșirea de pe un dispozitiv rămâne
+  per-dispozitiv (ștergerea cookie-ului) — nu te scoate și din birou.
+- **Parola inițială nu e o constantă în cod.** Repo-ul e public: o valoare scrisă acolo e
+  cunoscută de oricine și funcționează pe orice cont care nu și-a schimbat parola. Dacă
+  `DEFAULT_USER_PASSWORD` nu e setată, se generează una aleatoare și se scrie în logul
+  serverului.
+
 ## Deploy
 - **Push pe `main` → Vercel publică automat** pe agroprofit-plus.vercel.app (integrare Git activă).
 - Lucrează pe o **ramură separată** (implicit `dev`), testează pe preview, apoi fă merge în `main`.

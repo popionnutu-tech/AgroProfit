@@ -13,7 +13,7 @@ const {
 } = require("./automation-handlers");
 const { startCloseOfDayScheduler } = require("./close-of-day");
 const { startCriticalAlertMonitor } = require("./critical-alerts");
-const { attachCurrentUser, getActorLabel, requireAuth, requireRoles } = require("./auth");
+const { attachCurrentUser, getActorLabel, requireAuth, requireRoles, setUserLookup } = require("./auth");
 const {
   changePasswordHandler,
   loginHandler,
@@ -120,6 +120,10 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json({ limit: "1mb" }));
+// `auth.js` nu poate cere `local-storage` (acela il cere pe el). Injectam cautarea contului
+// ca sesiunea sa fie verificata pe CONT la fiecare cerere, nu doar pe token.
+setUserLookup((username) => storage.findUserByUsername(username));
+
 app.use("/api", attachCurrentUser);
 app.use(express.static(path.join(process.cwd(), "public")));
 

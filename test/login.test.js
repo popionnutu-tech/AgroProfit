@@ -6,14 +6,19 @@ const {
   withIsolatedWorkspace
 } = require("../test-support/isolated-runtime");
 
+// Parola initiala NU mai e o constanta in cod (repo public): daca `DEFAULT_USER_PASSWORD`
+// nu e setata, se genereaza una aleatoare. Testul o fixeaza explicit.
+const PAROLA_INITIALA = "Test-Initial-2026!";
+
 test("login handler authenticates valid default user and sets session cookie", async () => {
   await withIsolatedWorkspace(async ({ load }) => {
+    process.env.DEFAULT_USER_PASSWORD = PAROLA_INITIALA;
     const { loginHandler } = load("src/auth-handlers.js");
 
     const req = {
       body: {
         username: "admin",
-        password: "Agro2026!"
+        password: PAROLA_INITIALA
       },
       headers: {},
       socket: {

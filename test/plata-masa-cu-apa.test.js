@@ -169,3 +169,28 @@ test("si cantitatea PLATITA e intreaga pe masa cu umiditate", () => {
     );
   }
 });
+
+// Serviciile se taxeaza DOAR pe procentul peste norma — ca uscarea. Backend-ul ignora complet
+// excesul de impuritati si taxa toata cantitatea: la 100 t, tarif 10 si 3% exces, ecranul
+// arata 3.000 lei iar documentul salva 1.000.
+test("curatirea se taxeaza doar pe excesul de impuritati", () => {
+  const cu = computeReceiptEstimate({
+    quantity: 100, price: 5, humidity: 14, impurity: 5,
+    product: { humidityNorm: 14, impurityNorm: 2 },
+    tariffs: [{ service: "Curatire", value: 10, active: true }],
+    fiscalProfile: { withholdingPercent: 0 }
+  });
+  // 100 t x 3% exces x 10 = 3.000 lei (nu 100 x 10 = 1.000).
+  assert.equal(Number(cu.cleaningServiceTotal.toFixed(2)), 3000);
+});
+
+test("impuritatile SUB norma nu se taxeaza deloc", () => {
+  const sub = computeReceiptEstimate({
+    quantity: 100, price: 5, humidity: 14, impurity: 1,
+    product: { humidityNorm: 14, impurityNorm: 2 },
+    tariffs: [{ service: "Curatire", value: 10, active: true }],
+    fiscalProfile: { withholdingPercent: 0 }
+  });
+  assert.equal(sub.cleaningServiceTotal, 0);
+  assert.equal(sub.estimatedImpurityLoss, 0);
+});
