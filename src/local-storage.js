@@ -4915,9 +4915,12 @@ async function reopenReceipt(id, payload = {}) {
   return receipt;
 }
 
-async function getStats() {
+// `receiptsGata` = receptiile DEJA calculate de apelant. `listReceipts` face alocarea FIFO a
+// platilor per partener (cu sortare per grup) si cloneaza fiecare receptie; rulata de doua ori
+// in aceeasi cerere, dubla degeaba cea mai scumpa agregare din aplicatie.
+async function getStats(receiptsGata) {
   const openingDocuments = await listOpeningDocuments();
-  const receipts = await listReceipts();
+  const receipts = Array.isArray(receiptsGata) ? receiptsGata : await listReceipts();
   const processings = await listProcessings();
   const transactions = await listTransactions();
   const deliveries = await listDeliveries();

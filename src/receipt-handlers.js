@@ -198,7 +198,11 @@ function receiptForRequest(req, receipt) {
 
 async function listReceiptsHandler(req, res) {
   try {
-    const [receipts, stats] = await Promise.all([listReceipts(), getStats()]);
+    // `getStats` primeste receptiile DEJA calculate: altfel `listReceipts` ruleaza de doua ori
+    // in aceeasi cerere (alocare FIFO a platilor per partener + clonarea tuturor receptiilor),
+    // adica se dubla cea mai scumpa agregare din aplicatie pentru cardurile de KPI.
+    const receipts = await listReceipts();
+    const stats = await getStats(receipts);
     const canSeeFinance = requestCanSeeFinance(req);
     // Documentele anulate sunt filtrate dupa rol (server-side, nu doar in UI).
     const visible = filterCanceledForRole(receipts, req.currentUser && req.currentUser.roleCode);

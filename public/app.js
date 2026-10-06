@@ -252,15 +252,19 @@ const currency = new Intl.NumberFormat("ro-RO", {
   maximumFractionDigits: 2
 });
 
+// Formatterul se construieste O SINGURA data, la nivel de modul — ca `currency` de mai sus.
+// `new Intl.NumberFormat` la fiecare apel costa de ~45x mai mult decat formatarea, iar
+// `formatNumber` se cheama de cateva ori pe FIECARE rand al tabelelor (recepții, livrări,
+// rapoarte) si la fiecare tasta in formularele cu calcul live.
+const numberFormatter = new Intl.NumberFormat("ro-RO", { maximumFractionDigits: 2 });
+
 function formatNumber(value) {
   let n = Number(value || 0);
   // Evita afisarea "-0": normalizeaza zero negativ si negativele mici care se rotunjesc la zero.
   if (Object.is(n, -0) || (n < 0 && n > -0.005)) {
     n = 0;
   }
-  return new Intl.NumberFormat("ro-RO", {
-    maximumFractionDigits: 2
-  }).format(n);
+  return numberFormatter.format(n);
 }
 
 // Valoarea e stocata intern in tone. O afisam in kg DOAR daca inregistrarea a fost
@@ -6486,8 +6490,14 @@ function fillHeaderCompanySelects() {
   });
 }
 
+// Formatter la nivel de modul: `moneyRo` se cheama pe fiecare rand al documentelor tiparite.
+const moneyFormatter = new Intl.NumberFormat("ro-RO", {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2
+});
+
 function moneyRo(n) {
-  return new Intl.NumberFormat("ro-RO", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(n) || 0);
+  return moneyFormatter.format(Number(n) || 0);
 }
 
 function buildStatementPrintHtml(data, company) {
@@ -6768,8 +6778,23 @@ function actPriceDecimals(price, netKg, value) {
   return 6;
 }
 
+// `dec` variaza (2..6 zecimale pe pretul derivat), deci formatterele se tin intr-un cache
+// mic — se construiesc cel mult de cateva ori, nu la fiecare celula a actului.
+const actFormatters = new Map();
+
+function actFormatter(dec) {
+  const cheie = Number(dec) || 0;
+  if (!actFormatters.has(cheie)) {
+    actFormatters.set(
+      cheie,
+      new Intl.NumberFormat("ro-RO", { minimumFractionDigits: cheie, maximumFractionDigits: cheie })
+    );
+  }
+  return actFormatters.get(cheie);
+}
+
 function actNum(n, dec) {
-  return new Intl.NumberFormat("ro-RO", { minimumFractionDigits: dec, maximumFractionDigits: dec })
+  return actFormatter(dec)
     .format(Number(n) || 0)
     .replace(/\./g, " ");
 }
