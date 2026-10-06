@@ -636,6 +636,10 @@ async function assignActNumberHandler(req, res, id) {
       isNaturalPerson,
       series,
       companyId: company.id,
+      // Antetul firmei si identitatea furnizorului se ingheata pe act: nomenclatorul se
+      // poate edita, iar firma emitenta se poate dezactiva.
+      company,
+      supplier: partner,
       actorRole: req.currentUser && req.currentUser.roleCode,
       changedBy: getActorLabel(req)
     });

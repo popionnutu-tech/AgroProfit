@@ -1784,13 +1784,46 @@ function nextActNumber(state, companyId) {
   return Math.max(maxim + 1, ACT_NUMBER_START);
 }
 
+// Numarul NU se intoarce pana nu e DURABIL si purtat de EXACT receptiile actului.
+//
+// Persistenta e un blob JSON unic, scris cu upsert necondiționat (fara versiune, fara
+// compare-and-set) si cu debounce. O scriere concurenta — operatorul salveaza o receptie in
+// timp ce contabilul tipareste — poate reincarca blobul DE DINAINTE de atribuire si il poate
+// suprascrie: hartia iese cu 914, datele nu mai stiu de el, iar actul urmator ia din nou 914.
+//
+// Mitigarea nu elimina cursa (pentru asta e nevoie de alocare atomica in baza), dar o face
+// VIZIBILA. Rulează si dupa scrierea de REPARARE: altfel reparatia insasi putea fi o scriere
+// pierduta, iar receptiile nemarcate ardeau un numar nou mai tarziu.
+async function assertActNumberPersisted(numar, companyId, idsAsteptate) {
+  await flushPendingWrites();
+  if (!USE_SUPABASE || !kvBackend) return;
+  let persistat = null;
+  try {
+    persistat = await kvBackend.loadKv("receipts", null);
+  } catch (err) {
+    throw new Error(
+      "Nu am putut confirma salvarea numarului de act. Nu tipari actul: reincearca."
+    );
+  }
+  const cuNumar = ((persistat && persistat.receipts) || []).filter(
+    (item) =>
+      Number(item.actNumber || 0) === Number(numar) &&
+      Number(item.actCompanyId || 0) === Number(companyId || 0)
+  );
+  const gasite = cuNumar.map((item) => Number(item.id)).sort((a, b) => a - b).join(",");
+  const asteptate = [...new Set(idsAsteptate.map(Number))].sort((a, b) => a - b).join(",");
+  if (gasite !== asteptate) {
+    throw new Error(
+      `Numarul ${numar} nu s-a inregistrat corect (o alta operatie a scris in acelasi timp). ` +
+      "Nu tipari actul: reincearca."
+    );
+  }
+  receiptsCache = persistat;
+}
+
 // Atribuie numarul actului de achizitie. IDEMPOTENT: daca receptia are deja numar, il
 // intoarce neschimbat. Un numar atribuit NU se schimba niciodata — altfel reimprimarea ar
 // da alt numar decat cel din dosar, iar doua acte ar putea purta acelasi numar.
-// `ids` = TOATE receptiile acoperite de act. Un act care acopera mai multe receptii consuma
-// UN numar, dar il primesc toate: altfel una dintre celelalte, tiparita ulterior individual,
-// apare nenumerotata si ARDE un numar nou pentru marfa deja acoperita de hartia 914 — dubla
-// invizibila, imposibil de prins din interfata.
 // `ids` = TOATE receptiile acoperite de act. Un act care acopera mai multe receptii consuma
 // UN numar, dar il primesc toate: marcat doar pe cea mai veche, una dintre celelalte tiparita
 // ulterior individual apare nenumerotata si ARDE un numar nou pentru marfa deja acoperita —
@@ -1855,6 +1888,26 @@ async function assignActNumber(ids, options = {}) {
     // acelasi numar fiscal.
     // EMITERE AMESTECATA: unele acoperite, altele nu. Refuzata: altfel actul vechi se reactiva
     // cu alt conținut sub acelasi numar, iar marfa noua rămânea pe niciun act.
+    // DUPLICAT. Verificarea post-scriere arunca si cere reincercare; dar reincercarea intra
+    // aici, gaseste un numar si il intoarce — deci un numar dublat de o scriere pierduta
+    // trecea drept succes. Doua acte semnate, doi furnizori, acelasi numar in dosar.
+    // Se numara cine poarta numarul: trebuie sa fie exact receptiile actului.
+    const purtatoriiNumarului = (state.receipts || []).filter(
+      (item) =>
+        Number(item.actNumber || 0) === Number(dejaEmis.actNumber) &&
+        Number(item.actCompanyId || 0) === Number(dejaEmis.actCompanyId || 0)
+    );
+    const strainiPeNumar = purtatoriiNumarului.filter(
+      (item) => !acoperite.includes(Number(item.id))
+    );
+    if (strainiPeNumar.length) {
+      throw new Error(
+        `Numarul ${dejaEmis.actSeries || ""} ${dejaEmis.actNumber} e purtat si de receptiile ` +
+        `${strainiPeNumar.map((x) => x.id).join(",")}, care nu fac parte din acest act. ` +
+        "Numar dublat — nu tipari: e nevoie de intervenție pe date."
+      );
+    }
+
     const neacoperite = lista.filter((id) => !acoperite.includes(id));
     if (neacoperite.length) {
       throw new Error(
@@ -1880,7 +1933,7 @@ async function assignActNumber(ids, options = {}) {
     }
     if (reparat) {
       writeReceiptsState(state);
-      await flushPendingWrites();
+      await assertActNumberPersisted(dejaEmis.actNumber, dejaEmis.actCompanyId, acoperite);
     }
     return purtator;
   }
@@ -1929,9 +1982,13 @@ async function assignActNumber(ids, options = {}) {
     (acc, r) => ({ kg: acc.kg + r.netKg, brut: acc.brut + r.value, net: acc.net + r.netPay }),
     { kg: 0, brut: 0, net: 0 }
   );
-  const partener = (state.partners || []).find(
-    (item) => Number(item.id) === Number(receipt.supplierId)
-  );
+  // Identitatea PARTILOR si antetul FIRMEI se ingheata la fel ca banii. Altfel:
+  //  - IDNP-ul si adresa furnizorului (rubrica legala a formularului) se citeau LIVE, iar
+  //    operatorul creeaza adesea furnizorul doar cu numele, contabilul completeaza IDNP-ul
+  //    dupa ce actul e semnat — retiparirea nu mai era hartia semnata;
+  //  - antetul firmei se lua din selectia de acum, iar la dezactivarea firmei emitente se
+  //    cadea pe prima firma activa: ALT emitent sub acelasi numar.
+  // Datele vin din handler (acolo e nomenclatorul); magazia nu citeste configul.
   const snapshot = {
     netKg: Number(total.kg.toFixed(3)),
     value: Number(total.brut.toFixed(2)),
@@ -1942,7 +1999,17 @@ async function assignActNumber(ids, options = {}) {
     companyId: companie,
     series: serie,
     supplierId: Number(receipt.supplierId),
-    supplierName: String(receipt.supplier || (partener && partener.name) || "")
+    supplierName: String((options.supplier && options.supplier.name) || receipt.supplier || ""),
+    supplierIdno: String((options.supplier && options.supplier.idno) || ""),
+    supplierAddress: String((options.supplier && options.supplier.address) || ""),
+    company: {
+      name: String((options.company && options.company.name) || ""),
+      shortName: String((options.company && options.company.shortName) || ""),
+      idno: String((options.company && options.company.idno) || ""),
+      address: String((options.company && options.company.address) || ""),
+      admin: String((options.company && options.company.admin) || ""),
+      logoUrl: String((options.company && options.company.logoUrl) || "")
+    }
   };
 
   for (const item of receipts) {
@@ -1979,29 +2046,7 @@ async function assignActNumber(ids, options = {}) {
   // Mitigarea nu elimina cursa (pentru asta e nevoie de alocare atomica in baza), dar o
   // face VIZIBILA: fortam scrierea, recitim din KV si verificam. Daca numarul nu s-a
   // persistat sau apare de doua ori, aruncam — mai bine fara act decat cu numar dublat.
-  const atribuit = numar;
-  await flushPendingWrites();
-  if (USE_SUPABASE && kvBackend) {
-    let persistat = null;
-    try {
-      persistat = await kvBackend.loadKv("receipts", null);
-    } catch (err) {
-      throw new Error(
-        "Nu am putut confirma salvarea numarului de act. Nu tipari actul: reincearca."
-      );
-    }
-    const cuNumar = ((persistat && persistat.receipts) || []).filter(
-      (item) =>
-        Number(item.actNumber || 0) === atribuit &&
-        Number(item.actCompanyId || 0) === Number(receipt.actCompanyId || 0)
-    );
-    if (cuNumar.length !== lista.length || !cuNumar.some((item) => Number(item.id) === Number(receipt.id))) {
-      throw new Error(
-        `Numarul ${atribuit} nu s-a inregistrat corect (o alta operatie a scris in acelasi timp). Nu tipari actul: reincearca.`
-      );
-    }
-    receiptsCache = persistat;
-  }
+  await assertActNumberPersisted(numar, companie, lista);
   return receipt;
 }
 
@@ -4637,6 +4682,19 @@ function reassignPartnerReferences(oldId, newId, changedBy) {
   const newName = String(target.name || "");
 
   const state = readReceiptsState();
+  // O receptie cu act EMIS nu-si schimba furnizorul nici prin fuziune de parteneri. Garda
+  // exista pe `updateReceiptSupplier`, dar acest drum o ocolea: dupa fuziune, `actFigures`
+  // pastra numele si IDNP-ul partenerului A, iar receptia arata partenerul B — document si
+  // registru pe doi furnizori diferiti, sub acelasi numar de act.
+  const cuActEmis = (state.receipts || []).filter(
+    (r) => Number(r.supplierId) === from && Number(r.actNumber || 0) > 0
+  );
+  if (cuActEmis.length) {
+    throw new Error(
+      `Receptiile ${cuActEmis.map((r) => `#${r.id} (act ${r.actSeries || ""} ${r.actNumber})`).join(", ")} ` +
+      "au acte de achizitie emise. Fuziunea le-ar schimba furnizorul sub acelasi numar de act."
+    );
+  }
   const counts = {
     receipts: 0,
     transactions: 0,

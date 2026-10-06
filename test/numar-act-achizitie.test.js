@@ -372,3 +372,62 @@ test("lista de receptii e tipizata si plafonata", async () => {
     );
   });
 });
+
+test("numar dublat de o scriere pierduta NU mai trece la reincercare", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const a = await receptie(storage, "Cojocari Ana");
+    const b = await receptie(storage, "Alt furnizor");
+    await storage.assignActNumber([a.id], PF);
+    await storage.assignActNumber([b.id], PF);
+
+    // Simulam cursa: b pierde incrementul si ajunge pe numarul lui a.
+    const stare = JSON.parse(JSON.stringify(await storage.exportState?.() || {}));
+    // Fara export, modificam prin corectia de suma? Folosim calea directa de fisier:
+    const fs = require("fs");
+    const path = require("path");
+    const file = path.join(process.cwd(), ".runtime-data", "receipts.json");
+    const blob = JSON.parse(fs.readFileSync(file, "utf8"));
+    const bRec = blob.receipts.find((r) => r.id === b.id);
+    bRec.actNumber = START; // duplicat
+    bRec.actFigures = { ...bRec.actFigures, receiptIds: [b.id] };
+    fs.writeFileSync(file, JSON.stringify(blob));
+
+    const proaspat = load("src/local-storage.js");
+    await assert.rejects(
+      () => proaspat.assignActNumber([a.id], PF),
+      /[Nn]umar dublat/,
+      "duplicatul a trecut drept succes"
+    );
+  });
+});
+
+test("identitatea partilor si antetul firmei se ingheata", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const r = await receptie(storage, "Cojocari Ana");
+    const emis = await storage.assignActNumber([r.id], {
+      ...PF,
+      supplier: { name: "Cojocari Ana", idno: "2001234567890", address: "s. Briceni" },
+      company: { name: "Firma SRL", idno: "1003600000000", address: "or. Briceni", admin: "Pop Nutu" }
+    });
+    const f = emis.actFigures;
+    assert.equal(f.supplierIdno, "2001234567890");
+    assert.equal(f.supplierAddress, "s. Briceni");
+    assert.equal(f.company.name, "Firma SRL");
+    assert.equal(f.company.idno, "1003600000000");
+    assert.equal(f.company.admin, "Pop Nutu");
+  });
+});
+
+test("fuziunea de parteneri e blocata pe receptii cu act emis", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const r = await receptie(storage, "Cojocari Ana");
+    await storage.assignActNumber([r.id], PF);
+    assert.throws(
+      () => storage.reassignPartnerReferences(1, 2, "admin"),
+      /acte de achizitie emise/i
+    );
+  });
+});

@@ -6831,35 +6831,73 @@ function actQrPayload({ company, partner, series, nr, dateText, rows, value, tax
   return text.slice(0, 213);
 }
 
-// Numarul actului de achizitie, cerut de la server. La un act care acopera mai multe
-// receptii, numarul se atribuie celei mai VECHI: actul e un singur document, deci consuma
-// un singur numar, iar sirul rămâne compact fata de dosarul de hartie.
-// Daca serverul refuza (achizitie de la firma, receptie nelivrabila, rol fara drept), actul
-// se tipareste cu linia goala, ca inainte — numarul nu e o conditie ca hartia sa fie valida.
-async function ensureActNumber(receipts, company) {
-  const purtator = [...receipts]
+// Numarul actului de achizitie. Decide pe UN SINGUR act si spune clar ce urmeaza:
+//   { status: "ok", act }      -> se tipareste cu numarul si cifrele INGHEȚATE
+//   { status: "fara-numar" }   -> legitim fara numar (achizitie de la firma): linia goala
+//   { status: "abort" }        -> NU se tipareste; motivul a fost deja afisat
+//
+// Garzile de pe server nu se vad din interfata daca aici se iese din scurt: inainte se lua
+// `actNumber` de la o receptie si `actFigures` de la ALTA, deci se putea tipari numarul
+// actului A peste conținutul actului B.
+async function ensureActNumber(receipts, company, partner) {
+  const lista = (receipts || []).filter(Boolean);
+  if (!lista.length) return { status: "abort" };
+  const purtator = [...lista]
     .sort((a, b) => new Date(a.receivedAt || a.createdAt) - new Date(b.receivedAt || b.createdAt))[0];
-  if (!purtator) return null;
-  // Daca ORICARE receptie acoperita are deja numar, actul e emis: se foloseste acela, cu
-  // cifrele INGHEȚATE de atunci. Altfel retiparirea ar arata alte cifre decat hartia semnata.
-  const emisa = receipts.find((r) => Number(r.actNumber || 0) > 0) || null;
-  if (emisa) {
-    const cuCifre = receipts.find((r) => r.actFigures) || emisa;
-    if (!cuCifre.actFigures) {
-      // Numar fara cifre inghetate = act vechi (dinainte de captura). Tiparit, ar scoate
-      // aceeasi serie si acelasi numar cu cifre recalculate azi.
+
+  const acoperite = lista.filter((r) => Number(r.actNumber || 0) > 0);
+  if (acoperite.length) {
+    // TOATE receptiile cu numar trebuie sa fie pe ACELASI act.
+    const chei = new Set(
+      acoperite.map((r) => `${Number(r.actCompanyId || 0)}:${Number(r.actNumber)}`)
+    );
+    if (chei.size > 1) {
       alert(
-        `Actul ${emisa.actSeries || ""} ${emisa.actNumber} a fost emis fara captura cifrelor. ` +
-        "Nu se poate retipari identic — foloseste hartia din dosar."
+        "Selecția conține recepții de pe acte diferite: " +
+        acoperite.map((r) => `#${r.id} → ${r.actSeries || ""} ${r.actNumber}`).join(", ") +
+        ". Tipărește fiecare act separat."
       );
-      return null;
+      return { status: "abort" };
+    }
+    const emisa = acoperite[0];
+    const cuCifre = acoperite.find((r) => r.actFigures) || null;
+    if (!cuCifre) {
+      // Numar fara captura = act emis inainte ca cifrele sa fie inghetate. Tiparit, ar scoate
+      // aceeasi serie si acelasi numar cu cifrele de azi.
+      alert(
+        `Actul ${emisa.actSeries || ""} ${emisa.actNumber} a fost emis fără captura cifrelor. ` +
+        "Nu se poate retipări identic — folosește hârtia din dosar."
+      );
+      return { status: "abort" };
+    }
+    // Selectia trebuie sa fie o PARTE din actul emis, nu un amestec cu marfa noua: altfel
+    // actul vechi s-ar tipari cu alt conținut, iar marfa noua ar rămâne pe niciun act.
+    // Garda exista si pe server, dar aici nu se mai ajunge la el.
+    const aleActului = (cuCifre.actFigures.receiptIds || []).map(Number);
+    const strain = lista.find((r) => !aleActului.includes(Number(r.id)));
+    if (strain) {
+      alert(
+        `Recepțiile ${aleActului.join(", ")} sunt deja pe actul ${emisa.actSeries || ""} ${emisa.actNumber}, ` +
+        `iar #${strain.id} nu. Emite un act separat pentru ea sau restrânge perioada.`
+      );
+      return { status: "abort" };
     }
     return {
-      actNumber: emisa.actNumber,
-      actSeries: emisa.actSeries || "",
-      actFigures: cuCifre.actFigures
+      status: "ok",
+      act: {
+        actNumber: emisa.actNumber,
+        actSeries: emisa.actSeries || "",
+        actFigures: cuCifre.actFigures
+      }
     };
   }
+
+  // Actul de achizitie se intocmeste doar la cumpararea de la PERSOANE FIZICE. Pentru firme
+  // nu se consuma numar — nu e eroare, e documentul fara rubrica de numar completata.
+  if (!(partnerWithholdingPercent(partner || {}) > 0)) {
+    return { status: "fara-numar" };
+  }
+
   try {
     const res = await fetch(`/api/receipts/${purtator.id}/act-number`, {
       method: "POST",
@@ -6867,25 +6905,34 @@ async function ensureActNumber(receipts, company) {
       body: JSON.stringify({
         companyId: company?.id,
         // TOATE receptiile acoperite de aceasta hartie primesc numarul.
-        receiptIds: receipts.map((r) => r.id)
+        receiptIds: lista.map((r) => r.id)
       })
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      if (err.error) alert(err.error);
-      return null;
+      alert(err.error || "Nu am putut obține numărul actului. Încearcă din nou.");
+      return { status: "abort" };
     }
     const data = await res.json();
-    // Se pune si pe cache, ca o reimprimare imediata sa nu mai ceara serverul.
-    for (const r of receipts) {
+    if (!data.actFigures) {
+      alert("Numărul s-a atribuit, dar cifrele actului nu s-au înregistrat. Nu tipări: reîncearcă.");
+      return { status: "abort" };
+    }
+    // Cache: cifrele pe TOATE, ca serverul. Puse doar pe purtator, tiparirea imediata de pe
+    // alt rand dadea alerta falsa „emis fara captura" si apoi un act fara numar.
+    for (const r of lista) {
       r.actNumber = data.actNumber;
       r.actSeries = data.actSeries;
+      r.actFigures = data.actFigures;
     }
-    purtator.actFigures = data.actFigures || null;
-    return { actNumber: data.actNumber, actSeries: data.actSeries, actFigures: data.actFigures };
+    return {
+      status: "ok",
+      act: { actNumber: data.actNumber, actSeries: data.actSeries, actFigures: data.actFigures }
+    };
   } catch (err) {
     console.error("Nu am putut obtine numarul actului:", err);
-    return null;
+    alert("Nu am putut obține numărul actului (eroare de rețea). Nu s-a tipărit nimic.");
+    return { status: "abort" };
   }
 }
 
@@ -6894,13 +6941,23 @@ function buildPurchaseActHtml(receipts, partner, company, act) {
   // Pe un act emis, firma si furnizorul sunt cei de la EMITERE: altfel reselectarea unei alte
   // firme in „Documente tipar" scotea antetul firmei B cu seria si numarul firmei A, iar
   // redenumirea furnizorului schimba numele vanzatorului de pe hartia deja semnata.
-  const firmaEmitenta = inghetatFirma && inghetatFirma.companyId
-    ? resolveCompany(inghetatFirma.companyId)
-    : null;
+  // Antetul si identitatea partilor vin din CAPTURA, nu din nomenclatorul de acum.
+  // `resolveCompany` nu se foloseste aici: la dezactivarea firmei emitente ar cadea pe prima
+  // firma activa — alt emitent sub acelasi numar. Captura e completa, deci nu e nevoie.
+  const firmaInghetata = inghetatFirma && inghetatFirma.company ? inghetatFirma.company : null;
   const p = inghetatFirma && inghetatFirma.supplierName
-    ? { ...(partner || {}), name: inghetatFirma.supplierName }
+    ? {
+        ...(partner || {}),
+        name: inghetatFirma.supplierName,
+        // Rubrica legala a formularului: IDNP + adresa. Se citeau LIVE, deci completarea
+        // IDNP-ului dupa semnare schimba hartia retiparita.
+        idno: inghetatFirma.supplierIdno || (partner || {}).idno || "",
+        address: inghetatFirma.supplierAddress || (partner || {}).address || ""
+      }
     : partner || {};
-  const co = firmaEmitenta || company || DEFAULT_COMPANY;
+  const co = firmaInghetata
+    ? { ...DEFAULT_COMPANY, ...firmaInghetata, series: inghetatFirma.series || "" }
+    : company || DEFAULT_COMPANY;
   // Pe un act DEJA EMIS randurile vin din cifrele INGHEȚATE atunci, nu din recalculul de
   // acum: altfel, dupa o corectie de suma, actul se contrazicea pe aceeasi hartie — rand
   // 35.756,10 sub un total de 17.878,05, pe un formular care afirma „5 = 3 x 4".
@@ -7006,7 +7063,7 @@ function buildPurchaseActHtml(receipts, partner, company, act) {
       <td style="width:45%;vertical-align:top;font-size:11px;">
         <div class="of-b">Primit în baza contractului</div>
         <div class="of-ru">Принято в счет договора</div>
-        <div style="margin-top:10px;"><span class="of-b">nr.</span> ${ln("", 70)} <span class="of-b">din</span> ${ln("", 90)}</div>
+        <div style="margin-top:10px;"><span class="of-b">nr.</span> ${ln(nr, 70)} <span class="of-b">din</span> ${ln(dateText, 90)}</div>
         <div class="of-ru">№ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; от</div>
       </td>
     </tr></table>
@@ -7321,8 +7378,18 @@ async function printAccountingDocument(docType, refId, companyId) {
         .sort((a, b) => new Date(a.receivedAt || a.createdAt) - new Date(b.receivedAt || b.createdAt));
       if (!receipts.length) { alert("Nu există recepții pentru acest furnizor în perioada aleasă."); return; }
       const win = window.open("", "_blank");
-      const act = await ensureActNumber(receipts, company);
-      openOfficialDocWindow(buildPurchaseActHtml(receipts, partner, company, act), `Act de achizitie ${partner.name}`, win);
+      const rezultat = await ensureActNumber(receipts, company, partner);
+      if (rezultat.status === "abort") {
+        // Motivul a fost deja afisat. NU se tipareste: altfel ar ieși o a doua hartie
+        // semnabila pe aceiasi bani, cu „Nr. ____" si cifrele de azi.
+        if (win) win.close();
+        return;
+      }
+      openOfficialDocWindow(
+        buildPurchaseActHtml(receipts, partner, company, rezultat.act),
+        `Act de achizitie ${partner.name}`,
+        win
+      );
     } else if (docType === "paymentOrder") {
       const tx = (transactionsCache || []).find((t) => Number(t.id) === Number(refId));
       if (!tx) { alert("Plata nu a fost găsită."); return; }
@@ -7966,8 +8033,9 @@ async function printDeliveryDocument(deliveryId, docType) {
     if (!isReceiptInStock(actReceipt)) {
       return renunta(`Recepția #${actReceipt.id} nu e în stoc (${actReceipt.status}). Actul de achiziție s-ar emite pe marfă care n-a intrat.`);
     }
-    const act = await ensureActNumber([actReceipt], actCompany);
-    html = buildPurchaseActHtml([actReceipt], actPartner, actCompany, act);
+    const rezultat = await ensureActNumber([actReceipt], actCompany, actPartner);
+    if (rezultat.status === "abort") return renunta();
+    html = buildPurchaseActHtml([actReceipt], actPartner, actCompany, rezultat.act);
     title = `Act achizitie ${actPartner.name}`;
   }
   else if (docType === "certificate") { html = buildCertificatePrintHtml(delivery); title = `Certificat calitate ${delivery.id}`; }
@@ -8253,8 +8321,16 @@ bodyEl?.addEventListener("click", async (event) => {
       return;
     }
     const win = window.open("", "_blank");
-    const act = await ensureActNumber([receipt], company);
-    openOfficialDocWindow(buildPurchaseActHtml([receipt], partner, company, act), `Act de achizitie ${partner.name}`, win);
+    const rezultat = await ensureActNumber([receipt], company, partner);
+    if (rezultat.status === "abort") {
+      if (win) win.close();
+      return;
+    }
+    openOfficialDocWindow(
+      buildPurchaseActHtml([receipt], partner, company, rezultat.act),
+      `Act de achizitie ${partner.name}`,
+      win
+    );
   }
   // Ordinul de plata NU se emite de aici: el iese dintr-o PLATA inregistrata, din ecranul
   // Financiar (`printAccountingDocument("paymentOrder")`). Sintetizat din restul de plata, ar

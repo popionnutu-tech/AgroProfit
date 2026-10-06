@@ -1959,8 +1959,11 @@
 
             <details class="report-accordion">
               <summary>Plati si incasari pe zi</summary>
+              <div class="report-actions" style="margin:6px 0">
+                <button type="button" class="table-print-btn" data-table="daily-report-transactions-table" data-title="Plăți și încasări pe zi">🖨 Tipărește tabelul</button>
+              </div>
               <div class="table-wrap">
-                <table>
+                <table id="daily-report-transactions-table">
                   <thead>
                     <tr>
                       <th>ID</th>
@@ -1979,8 +1982,11 @@
 
             <details class="report-accordion">
               <summary>Reclamatii pe zi</summary>
+              <div class="report-actions" style="margin:6px 0">
+                <button type="button" class="table-print-btn" data-table="daily-report-complaints-table" data-title="Reclamații pe zi">🖨 Tipărește tabelul</button>
+              </div>
               <div class="table-wrap">
-                <table>
+                <table id="daily-report-complaints-table">
                   <thead>
                     <tr>
                       <th>ID</th>
@@ -1998,8 +2004,11 @@
 
             <details class="report-accordion" id="daily-report-canceled-accordion">
               <summary>Operatiuni anulate si retururi <span id="daily-report-canceled-count" class="muted-count"></span></summary>
+              <div class="report-actions" style="margin:6px 0">
+                <button type="button" class="table-print-btn" data-table="daily-report-canceled-table" data-title="Operațiuni anulate și retururi">🖨 Tipărește tabelul</button>
+              </div>
               <div class="table-wrap">
-                <table>
+                <table id="daily-report-canceled-table">
                   <thead>
                     <tr>
                       <th>Tip</th>
