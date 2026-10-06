@@ -29,7 +29,9 @@ npm run dev          # aplicația WEB pe http://localhost:3000
   `transaction`, `opening`, `report`, `stock`, `user`, `config`, `audit`, `security`, `automation`.
 - `src/local-storage.js` — magazia de date în memorie + starea implicită (`defaultReceiptsState`) + `nextId()`.
 - `src/supabase-state-kv.js`, `src/supabase-storage.js`, `src/storage.js` — persistența.
-- `src/auth.js`, `src/security.js`, `src/permissions.js` — autentificare (parole scrypt), roluri, drepturi.
+- `src/auth.js`, `src/permissions.js` — autentificare (parole scrypt), roluri, drepturi.
+  (`src/security.js` a fost ȘTERS: cod mort, cu o parolă implicită în clar și o a doua
+  implementare de sesiuni care putea fi recablată din greșeală.)
 - `public/app.js` — tot frontend-ul (randare tabele, formulare, calcule afișate).
 - `public/qr.js` — generator de coduri QR, fără dependențe (vezi regula 10).
 
@@ -423,10 +425,14 @@ Actul de achiziție e document fiscal: numărul lui ajunge în dosarul de hârti
   tipărire, ca să nu existe a doua regulă de rotunjire. **Codul QR poartă aceleași cifre**
   înghețate: altfel codul scanat ar contrazice hârtia de lângă el. Un act cu alte cifre
   cere număr nou.
-- Captura stă pe **TOATE** recepțiile acoperite, nu doar pe purtător. Ținută doar pe purtător,
-  tipărirea individuală a oricăreia dintre celelalte cădea pe recalcul și scotea **aceeași
-  serie și același număr** cu alte cifre. Tipărirea de pe o recepție acoperită dă actul
-  **întreg** (toate rândurile), nu un act de un rând sub același număr.
+- Captura stă **o singură dată, pe purtător**; celelalte recepții ale actului primesc doar
+  `actCarrierId`. Scrisă pe toate, un act de 50 de recepții îngroșa blobul cu **364 KB** —
+  iar blobul se descarcă la fiecare cerere. Ținută doar pe purtător **fără referință**,
+  tipărirea individuală a oricăreia dintre celelalte cădea pe recalcul și scotea aceeași
+  serie și același număr cu alte cifre. Referința închide ambele: tipărirea rezolvă captura
+  prin purtător (din selecție sau din `receiptsCache`) și dă actul **întreg**.
+- În audit se păstrează doar **totalurile** + `receiptIds`, nu captura întreagă: altfel mai
+  era o copie completă în `auditLogs`, în același blob.
 - Captura îngheață și **datele** (rubrica „din / от" intră și în QR), **firma emitentă** și
   **numele furnizorului**: firma se reselectează în „Documente tipar" (antetul firmei B cu
   seria firmei A), iar furnizorul se putea schimba după emitere. De aceea
@@ -458,6 +464,9 @@ sub ea**: reținerea la sursă declarată pe act nu mai e cea din evidență. De
 (06.10.2026): **avertisment, nu blocare** — contabilul trebuie să poată corecta.
 - `marcheazaDivergentaAct()` scrie în `receipt.actDivergences` ce s-a schimbat, când, de ce și
   cifrele care sunt pe hârtie. Apelată din `updateReceiptAmount` și din `correctReceiptTerms`.
+- **Se și VEDE**, altfel decizia „avertisment, nu blocare" rămâne fără compensație: badge
+  `≠ registru` lângă numărul actului în tabelul Recepții, plus un rând în „Detalii recepție"
+  cu cifrele de pe hârtie și motivul. Scrisă dar nerandată, marcarea nu ajuta pe nimeni.
 - Ultimele 20 pe document; istoricul complet rămâne în audit. `actDivergences` e în
   `FINANCIAL_RECEIPT_FIELDS` — conține sume.
 
@@ -481,9 +490,19 @@ citesc de pe cont la **fiecare cerere** (`attachCurrentUser`).
   parolei, la dezactivare și la schimbarea rolului. Ieșirea de pe un dispozitiv rămâne
   per-dispozitiv (ștergerea cookie-ului) — nu te scoate și din birou.
 - **Parola inițială nu e o constantă în cod.** Repo-ul e public: o valoare scrisă acolo e
-  cunoscută de oricine și funcționează pe orice cont care nu și-a schimbat parola. Dacă
-  `DEFAULT_USER_PASSWORD` nu e setată, se generează una aleatoare și se scrie în logul
-  serverului.
+  cunoscută de oricine și funcționează pe orice cont care nu și-a schimbat parola.
+  - În mediu **publicat** (`STORAGE_DRIVER=supabase`), `DEFAULT_USER_PASSWORD` e
+    **obligatorie** — se cade zgomotos, ca la `SESSION_SECRET`. Nu se generează și nu se
+    loghează nimic: parola ar ajunge în logurile platformei, cu retenție.
+  - **Local**, se generează una aleatoare și se scrie în consolă, cu o **cifră garantată**:
+    politica strictă cere una, iar din 12 caractere base64url una din opt parole nu avea
+    niciuna — și pornirea cădea exact pe calea de recuperare.
+  - Adminul de pornire se creează cu `requirePasswordChange: true`. Fără asta,
+    `ensureUserSecurityState` îl lăsa pe `false` la următoarea citire (hash-ul exista deja),
+    deci credențialul rămânea valabil nelimitat.
+- **Schimbarea parolei re-emite tokenul.** Revocarea taie sesiunile emise înainte, inclusiv
+  cea curentă: fără token nou, omul primea 401 imediat după ce își schimba parola — iar pe un
+  cont cu `requirePasswordChange` asta se întâmpla la FIECARE primă intrare.
 
 ## Deploy
 - **Push pe `main` → Vercel publică automat** pe agroprofit-plus.vercel.app (integrare Git activă).

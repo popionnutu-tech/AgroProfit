@@ -165,6 +165,18 @@ if (stockDustBtn) {
               .join("\n")
           : "Nu a fost nimic de curățat."
       );
+      if ((data.skipped || []).length) {
+        window.alert(
+          "Rânduri care nu s-au putut corecta:\n" +
+          data.skipped.map((x) => `${x.product} / ${x.location}: ${x.error}`).join("\n")
+        );
+      }
+      if (Number(data.remaining) > 0) {
+        window.alert(
+          `Au rămas ${data.remaining} rânduri (plafon de ${(data.cleared || []).length} pe o ` +
+          "apăsare, ca operația să nu rămână pe jumătate). Apasă din nou."
+        );
+      }
       await loadStocks();
     } catch (err) {
       window.alert(err.message);
@@ -2208,7 +2220,15 @@ function renderReceipts(receipts) {
           <td>${item.location || "-"}</td>
           <td class="col-fin" title="${escapeComboHtml(Number(item.actNumber) > 0 ? `Act emis la ${formatDateShort(item.actIssuedAt)}` : "Actul nu a fost emis")}">${
             Number(item.actNumber) > 0
-              ? `<b>${escapeComboHtml(String(item.actSeries || ""))} ${escapeComboHtml(String(item.actNumber))}</b>`
+              ? `<b>${escapeComboHtml(String(item.actSeries || ""))} ${escapeComboHtml(String(item.actNumber))}</b>${
+                  (item.actDivergences || []).length
+                    ? ` <span class="status-badge badge-warn" title="${escapeComboHtml(
+                        `Registrul a fost corectat după emiterea actului (${item.actDivergences.length} ` +
+                        `${item.actDivergences.length === 1 ? "corectare" : "corectări"}). ` +
+                        "Hârtia semnată păstrează cifrele de la emitere — vezi Detalii."
+                      )}">≠ registru</span>`
+                    : ""
+                }`
               : "—"
           }</td>
           <td class="col-fin">${currency.format(valoare)}${canEditAmount && !isCanceled ? ` <button type="button" class="cell-btn change-amount-btn" data-action="adjust-amount" data-id="${item.id}" title="Ajustează valoarea recepției">✎</button>` : ""}${canCorrectTerms && !isCanceled && !isPendingWeighing && item.status !== "Inchis" && item.status !== "Proiect" ? ` <button type="button" class="cell-btn change-amount-btn" data-action="correct-terms" data-id="${item.id}" title="Corectează condițiile: plata pe masa cu umiditate și/sau prețul">⚖</button>` : ""}${Array.isArray(item.termCorrections) && item.termCorrections.length ? ` <span class="status-badge badge-warn" title="Condițiile au fost corectate de ${escapeComboHtml(item.termCorrections[item.termCorrections.length - 1].by || "")} — vezi Detalii">corectat</span>` : ""}</td>
@@ -6961,7 +6981,18 @@ async function ensureActNumber(receipts, company, partner) {
       return { status: "abort" };
     }
     const emisa = acoperite[0];
-    const cuCifre = acoperite.find((r) => r.actFigures) || null;
+    // Captura sta pe PURTATOR. Celelalte receptii ale actului au doar o referinta
+    // (`actCarrierId`), ca blobul sa nu purte N copii ale aceleiasi capturi. Daca selectia
+    // nu include purtatorul, il luam din cache.
+    const cuCifre =
+      acoperite.find((r) => r.actFigures) ||
+      (receiptsCache || []).find(
+        (r) =>
+          r &&
+          r.actFigures &&
+          acoperite.some((a) => Number(a.actCarrierId || 0) === Number(r.id))
+      ) ||
+      null;
     if (!cuCifre) {
       // Numar fara captura = act emis inainte ca cifrele sa fie inghetate. Tiparit, ar scoate
       // aceeasi serie si acelasi numar cu cifrele de azi.
@@ -8724,6 +8755,13 @@ function openReceiptDetails(id) {
         ${rdRow("Ultima plată", formatDateShort(item.lastPaymentDate))}
         ${item.amountNote ? rdRow("Corectare valoare", escapeComboHtml(item.amountNote)) : ""}
         ${item.payOnGrossQuantity === true ? rdRow("Bază de plată", "Masa CU apă (uscarea nu s-a taxat)") : ""}
+        ${(Array.isArray(item.actDivergences) ? item.actDivergences : []).map((d) => rdRow(
+          "⚠ Registru ≠ act " + escapeComboHtml(String(d.actSeries || "")) + " " + escapeComboHtml(String(d.actNumber || "")),
+          escapeComboHtml(
+            `${formatDateShort(d.at)} · pe hârtie: ${formatNumber(d.actValue)} lei ` +
+            `(net ${formatNumber(d.actNetPay)} lei) · ${d.reason || ""}`
+          )
+        )).join("")}
         ${(Array.isArray(item.termCorrections) ? item.termCorrections : []).map((c) => rdRow(
           "Corectare condiții · " + formatDateShort(c.at),
           escapeComboHtml(

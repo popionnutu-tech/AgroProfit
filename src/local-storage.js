@@ -217,16 +217,44 @@ const configEntities = [
 // cunoscuta de oricine si functioneaza pe orice cont care nu si-a schimbat parola inca.
 // Daca `DEFAULT_USER_PASSWORD` nu e setata, se genereaza una ALEATOARE si se scrie in logul
 // serverului — bootstrap-ul rămâne posibil, dar nimic nu e cunoscut din afara.
-const defaultUserPassword = (() => {
+// Parola cu care se seamana conturile fara parola si adminul de pornire.
+//
+// LENESA, nu constanta la incarcarea modulului: o aruncare aici lasa `api/index.js` cu
+// `app = null`, deci FIECARE cerere raspunde 500 — inclusiv login-ul. O cerinta de mediu nu
+// are voie sa doboare serverul; se cade doar pe drumul care are efectiv nevoie de parola.
+let parolaInitialaCache = null;
+
+function defaultUserPasswordValue() {
+  if (parolaInitialaCache) return parolaInitialaCache;
+
   const dinMediu = String(process.env.DEFAULT_USER_PASSWORD || "").trim();
-  if (dinMediu) return dinMediu;
-  const generata = `Ap-${crypto.randomBytes(9).toString("base64url")}!`;
+  if (dinMediu) {
+    parolaInitialaCache = dinMediu;
+    return parolaInitialaCache;
+  }
+
+  const publicat = String(process.env.STORAGE_DRIVER || "").trim().toLowerCase() === "supabase";
+  if (publicat) {
+    // In productie nu se logheaza nimic: parola ar ajunge in logurile platformei, vizibile
+    // oricui are acces la proiect si pastrate cu retentie. Nici nu se genereaza tacit o
+    // parola „valabila": un cont semanat cu ea ar fi inaccesibil oricum. Se cade cu mesaj
+    // clar, DOAR daca se ajunge aici (in practica: niciun admin activ).
+    throw new Error(
+      "DEFAULT_USER_PASSWORD nu e setata. Seteaz-o in variabilele de mediu inainte de a " +
+      "crea conturi initiale — altfel parola ar ajunge in loguri."
+    );
+  }
+
+  // Local: se genereaza si se scrie in consola, ca sa fie posibila prima intrare.
+  // Se garanteaza o CIFRA: politica stricta cere una, iar din 12 caractere base64url una
+  // din opt parole nu avea niciuna — si pornirea cadea exact pe calea de recuperare.
+  parolaInitialaCache = `Ap${crypto.randomInt(10)}-${crypto.randomBytes(9).toString("base64url")}!`;
   console.warn(
-    "[securitate] DEFAULT_USER_PASSWORD nu e setata. Parola initiala generata pentru " +
-    `aceasta pornire: ${generata}  (se cere schimbarea la prima autentificare)`
+    "[securitate] DEFAULT_USER_PASSWORD nu e setata (mediu local). Parola initiala pentru " +
+    `aceasta pornire: ${parolaInitialaCache}`
   );
-  return generata;
-})();
+  return parolaInitialaCache;
+}
 
 const DELIVERY_STATUSES = ["Proiect", "Confirmat", "Livrat", "Inchis", "Anulat", "Redeschis", "Returnat"];
 const RECEIPT_STATUSES = ["Proiect", "In descarcare", "Draft", "Procesata", "Confirmat", "Inchis", "Anulat", "Redeschis"];
@@ -502,7 +530,7 @@ function ensureUserSecurityState(users = []) {
     }
 
     if (!nextUser.passwordSalt || !nextUser.passwordHash) {
-      const passwordRecord = createPasswordRecord(defaultUserPassword, { mode: "lenient" });
+      const passwordRecord = createPasswordRecord(defaultUserPasswordValue(), { mode: "lenient" });
       nextUser.passwordSalt = passwordRecord.salt;
       nextUser.passwordHash = passwordRecord.hash;
       if (nextUser.requirePasswordChange === undefined) {
@@ -528,7 +556,9 @@ function ensureBootstrapAdmin(users = []) {
   }
 
   const nextUsers = [...users];
-  const passwordRecord = createPasswordRecord(defaultUserPassword);
+  // Politica LENIENT, ca la celelalte doua apeluri: o parola venita din variabila de mediu
+  // nu are voie sa impiedice crearea adminului de recuperare.
+  const passwordRecord = createPasswordRecord(defaultUserPasswordValue(), { mode: "lenient" });
   nextUsers.push({
     id: nextUsers.reduce((max, item) => Math.max(max, Number(item.id || 0)), 0) + 1,
     name: "Administrator",
@@ -538,6 +568,10 @@ function ensureBootstrapAdmin(users = []) {
     active: true,
     passwordSalt: passwordRecord.salt,
     passwordHash: passwordRecord.hash,
+    // OBLIGATORIU: parola de pornire e cunoscuta (din variabila de mediu sau din log).
+    // Fara asta, `ensureUserSecurityState` o lasa pe `false` la urmatoarea citire (hash-ul
+    // exista deja), deci credentialul rămânea valabil nelimitat.
+    requirePasswordChange: true,
     createdAt: new Date().toISOString()
   });
 
@@ -1813,6 +1847,12 @@ function nextActNumber(state, companyId) {
 async function assertActNumberPersisted(numar, companyId, idsAsteptate, sursa) {
   await flushPendingWrites();
   if (!USE_SUPABASE || !kvBackend) return;
+  // Cu alocare ATOMICA, numarul e deja rezervat in Postgres si nu se poate refolosi, iar
+  // `flushPendingWrites` arunca daca scrierea a eșuat. Recitirea blobului INTREG (pana la
+  // zeci de MB, de trei ori per act tiparit) nu mai aduce nimic.
+  // Pe calea veche (derivare din blob) verificarea rămâne singura aparare: acolo numarul
+  // s-ar putea refolosi, deci se plateste citirea.
+  if (sursa === "postgres") return;
   let persistat = null;
   try {
     persistat = await kvBackend.loadKv("receipts", null);
@@ -1946,14 +1986,21 @@ async function assignActNumber(ids, options = {}) {
         item.actIssuedAt = dejaEmis.actIssuedAt;
         reparat = true;
       }
-      if (!item.actFigures && purtator.actFigures) {
-        item.actFigures = purtator.actFigures;
+      // Referinta, nu copie (vezi mai sus). Purtatorul isi pastreaza captura.
+      if (item.id !== purtator.id && Number(item.actCarrierId || 0) !== Number(purtator.id)) {
+        item.actCarrierId = purtator.id;
+        delete item.actFigures;
         reparat = true;
       }
     }
     if (reparat) {
       writeReceiptsState(state);
-      await assertActNumberPersisted(dejaEmis.actNumber, dejaEmis.actCompanyId, acoperite);
+      await assertActNumberPersisted(
+        dejaEmis.actNumber,
+        dejaEmis.actCompanyId,
+        acoperite,
+        dejaEmis.actNumberSource
+      );
     }
     return purtator;
   }
@@ -2051,9 +2098,17 @@ async function assignActNumber(ids, options = {}) {
     item.actSeries = serie;
     item.actCompanyId = companie;
     item.actIssuedAt = acum;
-    // Pe TOATE, nu doar pe purtator: altfel tiparirea individuala a unei receptii acoperite
-    // cadea pe recalcul si scotea aceeasi serie+numar cu alte cifre.
-    item.actFigures = snapshot;
+    // Captura o SINGURA data, pe purtator. Scrisa pe toate, un act de 50 de receptii
+    // ingrosa blobul cu 364 KB — iar blobul se descarca la FIECARE cerere.
+    // Celelalte primesc o referinta: tiparirea rezolva captura prin purtator, deci nu mai
+    // cade pe recalcul (asta era gaura inchisa anterior prin duplicare).
+    if (item.id === receipt.id) {
+      item.actFigures = snapshot;
+      delete item.actCarrierId;
+    } else {
+      delete item.actFigures;
+      item.actCarrierId = receipt.id;
+    }
     item.updatedAt = acum;
   }
 
@@ -2069,7 +2124,15 @@ async function assignActNumber(ids, options = {}) {
       actSeries: serie,
       receiptIds: lista,
       numberSource: sursaNumar,
-      figures: snapshot
+      // Doar totalurile: captura intreaga (cu toate randurile si antetul firmei) mai era o
+      // copie completa in `auditLogs`, in ACELASI blob care se descarca la fiecare cerere.
+      // Cifrele de pe hartie se citesc de pe document, prin `actFigures` al purtatorului.
+      totals: {
+        netKg: snapshot.netKg,
+        value: snapshot.value,
+        netPay: snapshot.netPay,
+        tax: snapshot.tax
+      }
     }
   });
 
@@ -4971,7 +5034,10 @@ async function getStats(receiptsGata) {
   const transactions = await listTransactions();
   const deliveries = await listDeliveries();
   const complaints = await listComplaints();
-  const auditLogs = await listAuditLogs();
+  // NU `listAuditLogs()`: acela SORTEAZA tot jurnalul (zeci de mii de intrari, cu
+  // `new Date()` in comparator) pentru doua numere care se obtin cu o singura trecere —
+  // o treime din costul lui `getStats`. Sortarea e necesara doar la AFISAREA jurnalului.
+  const auditLogs = readReceiptsState().auditLogs || [];
   const partnerAdvances = await listPartnerAdvances();
   const transfers = await listTransfers();
   const stockCorrections = await listStockCorrections();
@@ -5606,24 +5672,59 @@ async function clearStockDust(payload = {}) {
   }
   const reason = requiredText(payload.changeReason || payload.reason, "Motivul corectiei");
 
-  const summary = stockSummaryFromState(readReceiptsState());
+  // Sumarul se calculeaza O SINGURA data si se injecteaza in fiecare corectie. Inainte,
+  // fiecare rand il recalcula complet (~77 ms la 3 ani de date): 160 de rânduri insemnau
+  // ~25-40 s pe platforma, adica timeout si LOT PIERDUT dupa ce calculul se facuse.
+  const state = readReceiptsState();
+  const summary = stockSummaryFromState(state);
   const praf = (summary.byLocation || []).filter((line) => {
     const kg = Math.abs(Number(line.quantity || 0) * 1000);
     return kg > 0 && kg < prag;
   });
 
+  // Plafon per apel. Motivul e CPU, nu scrierile: salvarile se coaleseaza pe cheie, deci N
+  // corectii dau O scriere. Dar fiecare corectie era o agregare completa peste tot blobul —
+  // de aceea sumarul se calculeaza o data si se injecteaza. Plafonul rămâne ca plasa de
+  // siguranta: pe serverless un timeout la jumatate ar lasa operatia partial aplicata, cu
+  // raspunsul pierdut (datele rămân curate, fiecare rand e o corectie auditata separat).
+  const MAX_PER_APEL = 100;
+  const deFacut = praf.slice(0, MAX_PER_APEL);
+  const rest = Math.max(praf.length - deFacut.length, 0);
+
   const corectate = [];
-  for (const line of praf) {
-    // Secvential, nu in paralel: fiecare corectie citeste stocul, il asaza si scrie starea.
-    // In paralel, ultima scriere ar sterge corectiile celorlalte.
-    const corectie = await createStockCorrection({
-      location: line.location,
-      product: line.product,
-      countedQuantity: 0,
-      changeReason: `${reason} (rest sub ${prag} kg)`,
-      currentUser,
-      changedBy: payload.changedBy
-    });
+  const sarite = [];
+  const perechiFacute = new Set();
+  for (const line of deFacut) {
+    // Produsul se potriveste case-insensitive la corectie, dar randurile de stoc se grupeaza
+    // pe denumirea exacta. „Grau" si „grau" in aceeasi locatie rezolva la ACELASI rand
+    // canonic: primul se corecteaza, al doilea ar gasi delta 0 si ar aborta tot lotul.
+    const cheie = `${String(line.location || "").trim().toLowerCase()}::${String(line.product || "").trim().toLowerCase()}`;
+    if (perechiFacute.has(cheie)) continue;
+    perechiFacute.add(cheie);
+    // Secvential, cu sumarul injectat si scrierea amanata: o singura trecere peste stoc si o
+    // singura scriere de blob la final, in loc de N recalculari si N rescrieri.
+    // Un rand care cade NU are voie sa abandoneze lotul: cele dinainte sunt deja corectate,
+    // iar o aruncare le-ar lasa aplicate fara ca omul sa afle ce s-a facut.
+    let corectie = null;
+    try {
+      corectie = await createStockCorrection({
+        location: line.location,
+        product: line.product,
+        countedQuantity: 0,
+        changeReason: `${reason} (rest sub ${prag} kg)`,
+        currentUser,
+        changedBy: payload.changedBy,
+        summary,
+        deferWrite: true
+      });
+    } catch (error) {
+      sarite.push({
+        location: line.location,
+        product: line.product,
+        error: error.message || "corectie eșuata"
+      });
+      continue;
+    }
     corectate.push({
       location: line.location,
       product: line.product,
@@ -5631,7 +5732,13 @@ async function clearStockDust(payload = {}) {
       correctionId: corectie && corectie.id
     });
   }
-  return { thresholdKg: prag, cleared: corectate };
+  // O singura scriere, la final. ATENTIE: daca vreodata `createStockCorrection` ajunge sa
+  // faca I/O real (un log, o verificare in baza), debounce-ul s-ar declansa la mijlocul
+  // buclei si s-ar trece la N rescrieri ale blobului intreg.
+  if (corectate.length) {
+    writeReceiptsState(state);
+  }
+  return { thresholdKg: prag, cleared: corectate, skipped: sarite, remaining: rest };
 }
 
 async function createStockCorrection(payload = {}) {
@@ -5668,7 +5775,12 @@ async function createStockCorrection(payload = {}) {
   // locatie+produs nu exista, o greseala de scriere ar crea stoc fantoma in loc sa corecteze
   // randul real. Potrivirea pe produs e case-insensitive (ca la locatie), iar valorile
   // canonice se preiau din stoc, ca sa se potriveasca sigur la recalcul.
-  const summary = stockSummaryFromState(state);
+  // Sumarul se poate INJECTA: la curatarea in masa, recalculul complet al stocului per rand
+  // costa ~77 ms, deci 160 de rânduri ar depasi limita de 30 s a platformei si tot lotul s-ar
+  // pierde DUPA ce calculul s-a facut. Corectia e un offset constant per pereche
+  // locatie+produs, iar randurile curatate sunt perechi distincte — acelasi sumar e valabil
+  // pentru toate.
+  const summary = payload.summary || stockSummaryFromState(state);
   const line = summary.byLocation.find(
     (i) =>
       sameLocation(i.location, location) &&
@@ -5735,7 +5847,11 @@ async function createStockCorrection(payload = {}) {
     newValue: { location: canonicalLocation, product: canonicalProduct, quantity: counted, delta }
   });
 
-  writeReceiptsState(state);
+  // `deferWrite`: apelantul scrie o singura data, la final. O scriere per rand ar rescrie
+  // blobul intreg de N ori.
+  if (payload.deferWrite !== true) {
+    writeReceiptsState(state);
+  }
   return correction;
 }
 
@@ -5975,7 +6091,7 @@ async function createConfigEntry(entity, payload) {
   const passwordRecord =
     entity === "users"
       ? createPasswordRecord(
-          normalized.password || defaultUserPassword,
+          normalized.password || defaultUserPasswordValue(),
           { mode: passwordExplicit ? "strict" : "lenient" }
         )
       : null;

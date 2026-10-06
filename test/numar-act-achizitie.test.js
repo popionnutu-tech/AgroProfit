@@ -286,13 +286,19 @@ test("reimprimarea de pe o receptie acoperita da actul INTREG", async () => {
     const c = await receptie(storage, "Cojocari Ana");
     const emis = await storage.assignActNumber([a.id, b.id, c.id], PF);
 
-    // Cifrele stau pe TOATE, nu doar pe purtator: altfel tiparirea individuala a lui b
-    // cadea pe recalcul si scotea aceeasi serie+numar cu alte cifre.
+    // Captura sta o SINGURA data, pe purtator (altfel un act de 50 de receptii ingrosa
+    // blobul cu 364 KB). Celelalte primesc o REFERINTA: tiparirea individuala rezolva
+    // captura prin purtator, deci nu cade pe recalcul.
     const toate = (await storage.listReceipts()).filter((r) => [a.id, b.id, c.id].includes(r.id));
-    for (const r of toate) {
-      assert.ok(r.actFigures, `receptia #${r.id} nu are cifrele actului`);
-      assert.equal(r.actFigures.rows.length, 3, `actul de pe #${r.id} nu are 3 randuri`);
-      assert.equal(r.actFigures.value, emis.actFigures.value);
+    const purtatori = toate.filter((r) => r.actFigures);
+    assert.equal(purtatori.length, 1, "captura trebuie sa fie pe o singura receptie");
+    assert.equal(purtatori[0].actFigures.rows.length, 3);
+    for (const r of toate.filter((x) => !x.actFigures)) {
+      assert.equal(
+        Number(r.actCarrierId),
+        Number(purtatori[0].id),
+        `receptia #${r.id} nu are referinta la purtator`
+      );
     }
     // Reimprimarea de pe oricare: acelasi act, intreg.
     const reimprimat = await storage.assignActNumber([b.id], PF);
@@ -454,5 +460,81 @@ test("sursa numarului intra in audit, ca sa se vada pe ce mecanism s-a emis", as
     const intrare = logs.find((l) => l.action === "receipt-act-number");
     assert.ok(intrare, "lipseste intrarea de audit");
     assert.equal(intrare.newValue.numberSource, "blob");
+  });
+});
+
+test("captura nu se multiplica: o singura copie, restul doar referinta", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const multe = [];
+    for (let i = 0; i < 10; i += 1) multe.push(await receptie(storage, "Cojocari Ana"));
+    const emis = await storage.assignActNumber(multe.map((r) => r.id), PF);
+
+    const toate = (await storage.listReceipts()).filter((r) =>
+      multe.some((m) => m.id === r.id)
+    );
+    // O capturã, nouă referințe — nu zece capturi cu zece rânduri fiecare.
+    assert.equal(toate.filter((r) => r.actFigures).length, 1);
+    assert.equal(toate.filter((r) => Number(r.actCarrierId || 0) === Number(emis.id)).length, 9);
+
+    // Captura pastreaza toate cele 10 randuri, deci actul e intreg.
+    assert.equal(emis.actFigures.rows.length, 10);
+
+    // Dimensiunea serializata: o captura, nu zece.
+    const octeti = toate.reduce(
+      (s, r) => s + (r.actFigures ? JSON.stringify(r.actFigures).length : 0),
+      0
+    );
+    assert.equal(octeti, JSON.stringify(emis.actFigures).length);
+  });
+});
+
+test("auditul emiterii pastreaza totalurile, nu captura intreaga", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const a = await receptie(storage, "Cojocari Ana");
+    const b = await receptie(storage, "Cojocari Ana");
+    const emis = await storage.assignActNumber([a.id, b.id], PF);
+
+    const logs = await storage.listAuditLogs();
+    const intrare = logs.find((l) => l.action === "receipt-act-number");
+    assert.ok(!intrare.newValue.figures, "captura intreaga mai e in audit");
+    assert.deepEqual(intrare.newValue.totals, {
+      netKg: emis.actFigures.netKg,
+      value: emis.actFigures.value,
+      netPay: emis.actFigures.netPay,
+      tax: emis.actFigures.tax
+    });
+    assert.deepEqual(intrare.newValue.receiptIds, [a.id, b.id]);
+  });
+});
+
+test("divergenta act-registru se inregistreaza la corectia de suma", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const r = await receptie(storage, "Cojocari Ana");
+    const emis = await storage.assignActNumber([r.id], PF);
+    const peHartie = emis.actFigures.value;
+
+    await storage.updateReceiptAmount(r.id, peHartie * 2, "admin", "corectie dupa emitere");
+
+    const dupa = (await storage.listReceipts()).find((x) => x.id === r.id);
+    assert.equal(dupa.actDivergences.length, 1);
+    const d = dupa.actDivergences[0];
+    assert.equal(d.actNumber, START);
+    assert.equal(d.actValue, peHartie, "nu s-au pastrat cifrele de pe hartie");
+    assert.match(d.reason, /corectie dupa emitere/);
+    // Cifrele actului NU s-au schimbat.
+    assert.equal(dupa.actFigures.value, peHartie);
+  });
+});
+
+test("fara act emis nu se marcheaza nicio divergenta", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const r = await receptie(storage, "Cojocari Ana");
+    await storage.updateReceiptAmount(r.id, 1000, "admin", "corectie");
+    const dupa = (await storage.listReceipts()).find((x) => x.id === r.id);
+    assert.ok(!dupa.actDivergences, "s-a marcat o divergenta fara act emis");
   });
 });
