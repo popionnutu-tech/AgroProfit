@@ -1810,7 +1810,7 @@ function nextActNumber(state, companyId) {
 // Mitigarea nu elimina cursa (pentru asta e nevoie de alocare atomica in baza), dar o face
 // VIZIBILA. Rulează si dupa scrierea de REPARARE: altfel reparatia insasi putea fi o scriere
 // pierduta, iar receptiile nemarcate ardeau un numar nou mai tarziu.
-async function assertActNumberPersisted(numar, companyId, idsAsteptate) {
+async function assertActNumberPersisted(numar, companyId, idsAsteptate, sursa) {
   await flushPendingWrites();
   if (!USE_SUPABASE || !kvBackend) return;
   let persistat = null;
@@ -1829,9 +1829,13 @@ async function assertActNumberPersisted(numar, companyId, idsAsteptate) {
   const gasite = cuNumar.map((item) => Number(item.id)).sort((a, b) => a - b).join(",");
   const asteptate = [...new Set(idsAsteptate.map(Number))].sort((a, b) => a - b).join(",");
   if (gasite !== asteptate) {
+    // Cu alocare atomica numarul rămâne REZERVAT in Postgres chiar daca blobul s-a pierdut:
+    // nu se refoloseste, deci reincercarea e sigura. Fara ea, reincercarea putea produce un
+    // duplicat — de aceea mesajul e diferit.
     throw new Error(
-      `Numarul ${numar} nu s-a inregistrat corect (o alta operatie a scris in acelasi timp). ` +
-      "Nu tipari actul: reincearca."
+      sursa === "postgres"
+        ? `Numarul ${numar} e rezervat, dar documentul nu s-a salvat. Nu tipari actul: reincearca (numarul nu se refoloseste).`
+        : `Numarul ${numar} nu s-a inregistrat corect (o alta operatie a scris in acelasi timp). Nu tipari actul: reincearca.`
     );
   }
   receiptsCache = persistat;
@@ -1971,10 +1975,23 @@ async function assignActNumber(ids, options = {}) {
     }
   }
 
-  const numar = nextActNumber(state, options.companyId);
   const serie = String(options.series || "").trim();
   const companie = Number(options.companyId);
   const acum = new Date().toISOString();
+
+  // Alocare ATOMICA in PostgreSQL, cand migrarea e aplicata: advisory lock pe firma +
+  // cheie primara (firma, numar), deci duplicatul e IMPOSIBIL, nu doar detectat.
+  // Daca functia nu exista (migrarea nu e rulata), se cade pe derivarea din blob — mai
+  // slaba, dar aplicatia merge. Diferenta se vede in `numberSource`, consemnata in audit.
+  let numar = null;
+  let sursaNumar = "blob";
+  if (USE_SUPABASE && kvBackend && typeof kvBackend.allocateActNumber === "function") {
+    numar = await kvBackend.allocateActNumber(companie, serie, lista);
+    if (numar) sursaNumar = "postgres";
+  }
+  if (!numar) {
+    numar = nextActNumber(state, companie);
+  }
 
   // Se ingheata RANDURILE, nu doar totalurile: randul se construia din receptie, deci dupa o
   // corectie de suma actul se contrazicea pe aceeasi hartie (rand 35.756,10 sub total
@@ -2030,6 +2047,7 @@ async function assignActNumber(ids, options = {}) {
 
   for (const item of receipts) {
     item.actNumber = numar;
+    item.actNumberSource = sursaNumar;
     item.actSeries = serie;
     item.actCompanyId = companie;
     item.actIssuedAt = acum;
@@ -2046,7 +2064,13 @@ async function assignActNumber(ids, options = {}) {
     reason: `Act de achizitie emis: ${serie} ${numar}`,
     user: options.changedBy || "dashboard",
     oldValue: { actNumber: null },
-    newValue: { actNumber: numar, actSeries: serie, receiptIds: lista, figures: snapshot }
+    newValue: {
+      actNumber: numar,
+      actSeries: serie,
+      receiptIds: lista,
+      numberSource: sursaNumar,
+      figures: snapshot
+    }
   });
 
   writeReceiptsState(state);
@@ -2062,7 +2086,7 @@ async function assignActNumber(ids, options = {}) {
   // Mitigarea nu elimina cursa (pentru asta e nevoie de alocare atomica in baza), dar o
   // face VIZIBILA: fortam scrierea, recitim din KV si verificam. Daca numarul nu s-a
   // persistat sau apare de doua ori, aruncam — mai bine fara act decat cu numar dublat.
-  await assertActNumberPersisted(numar, companie, lista);
+  await assertActNumberPersisted(numar, companie, lista, sursaNumar);
   return receipt;
 }
 
