@@ -48,8 +48,15 @@ function computeReceiptEstimate({
   const actualImpurity = Number(impurity || 0);
   const excessHumidity = Math.max(actualHumidity - humidityNorm, 0);
   const excessImpurity = Math.max(actualImpurity - impurityNorm, 0);
-  const estimatedWaterLoss = grossQuantity * (excessHumidity / 100);
-  const estimatedImpurityLoss = grossQuantity * (excessImpurity / 100);
+  // CEREALELE SE SOCOTESC IN KILOGRAME INTREGI. Cantarul lucreaza in kg, deci bruta e mereu
+  // un numar intreg de kg; daca pierderile rămân fractionare, in stoc rămân cozi de genul
+  // 0,6 kg care apar ca „−1 kg" intr-un ecran si „0" in altul, pe aceeasi realitate.
+  // Se rotunjesc AICI, la sursa, inainte de scaderea din bruta — astfel cantitatea neta,
+  // cea care intra in cilindru si cea pe care se calculeaza banii, iese intreaga.
+  // `+ 0` normalizeaza `-0`.
+  const laKg = (tone) => Math.round(Number(tone) * 1000) / 1000 + 0;
+  const estimatedWaterLoss = laKg(grossQuantity * (excessHumidity / 100));
+  const estimatedImpurityLoss = laKg(grossQuantity * (excessImpurity / 100));
   const provisionalNetQuantity = Math.max(
     grossQuantity - estimatedWaterLoss - estimatedImpurityLoss,
     0

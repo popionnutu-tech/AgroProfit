@@ -40,9 +40,17 @@ npm run dev          # aplicația WEB pe http://localhost:3000
 
 ## ⚠️ Reguli de business care se sparg ușor (OBLIGATORIU de citit)
 
-### 1. Unități: TONE intern, KG la formular
+### 1. Unități: TONE intern, KG la formular — și KILOGRAME ÎNTREGI
 - Stocul / cilindrii / procesarea se țin intern în **TONE**.
 - Formularele (recepție/livrare/procesare) primesc **KG**; frontend-ul împarte la 1000.
+- **Cerealele se socotesc în kilograme ÎNTREGI.** Cântarul lucrează în kg, deci masa brută e
+  mereu un număr întreg de kg. Pierderile (apă, impurități) se **rotunjesc la kg în
+  `computeReceiptEstimate`, înainte de scăderea din brut** — astfel cantitatea netă, cea care
+  intră în cilindru și cea pe care se calculează banii, iese întreagă. Fără asta rămâneau cozi
+  de 0,6 kg care apăreau ca „−1 kg" într-un ecran și „0" în altul, pe aceeași realitate.
+  Formula e oglindită în `getReceiptEstimate` din `public/app.js` — se schimbă în AMBELE locuri.
+- Regula **nu repară retroactiv** datele existente: fracțiunile deja intrate în stoc se închid
+  cu o corecție de inventar (regula 8).
 
 ### 2. Prețul la facturare e DUAL, după monedă
 - **MDL** → `priceLei` = **lei / KG**. Total = `kg × priceLei`.

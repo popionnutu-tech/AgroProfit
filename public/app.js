@@ -4781,8 +4781,11 @@ function getReceiptEstimate() {
   const impurityNorm = Number(selectedProduct?.impurityNorm || 0);
   const excessHumidity = Math.max(humidity - humidityNorm, 0);
   const excessImpurity = Math.max(impurity - impurityNorm, 0);
-  const estimatedWaterLoss = quantity * (excessHumidity / 100);
-  const estimatedImpurityLoss = quantity * (excessImpurity / 100);
+  // Cerealele se socotesc in KILOGRAME INTREGI — oglinda regulii din backend
+  // (`computeReceiptEstimate`). Se schimba in AMBELE locuri.
+  const laKg = (tone) => Math.round(Number(tone) * 1000) / 1000 + 0;
+  const estimatedWaterLoss = laKg(quantity * (excessHumidity / 100));
+  const estimatedImpurityLoss = laKg(quantity * (excessImpurity / 100));
   const provisionalNetQuantity = Math.max(
     quantity - estimatedWaterLoss - estimatedImpurityLoss,
     0

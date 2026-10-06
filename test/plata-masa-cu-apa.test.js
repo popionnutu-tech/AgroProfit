@@ -120,3 +120,52 @@ test("fara apa in exces flagul nu se inregistreaza (nu exista ce pune inapoi)", 
   assert.strictEqual(e.payOnGrossQuantity, false);
   assert.ok(Math.abs(e.payableQuantity - e.provisionalNetQuantity) < 1e-9);
 });
+
+// Cerealele se socotesc in KILOGRAME INTREGI: cantarul lucreaza in kg, deci pierderile se
+// rotunjesc la kg inainte de scadere. Fara asta, in stoc rămân cozi de 0,6 kg care apar ca
+// „−1 kg" intr-un ecran si „0" in altul, pe aceeasi realitate.
+test("pierderile se rotunjesc la kilogram intreg", () => {
+  const e = computeReceiptEstimate({
+    quantity: 2.907, price: 6.15, humidity: 17, impurity: 3.5,
+    product: { humidityNorm: 14, impurityNorm: 2 }, tariffs: BASE.tariffs,
+    fiscalProfile: { withholdingPercent: 6 }
+  });
+  // 2907 kg x 3% = 87,21 kg -> 87 kg;  2907 kg x 1,5% = 43,605 kg -> 44 kg.
+  assert.equal(Math.round(e.estimatedWaterLoss * 1000), 87);
+  assert.equal(Math.round(e.estimatedImpurityLoss * 1000), 44);
+  assert.equal(Math.round(e.provisionalNetQuantity * 1000), 2907 - 87 - 44);
+});
+
+test("cantitatea neta e INTREAGA in kg pe orice combinatie", () => {
+  for (let kgBrut = 1; kgBrut <= 3000; kgBrut += 13) {
+    for (const h of [14, 14.3, 16.7, 20.9]) {
+      for (const i of [2, 2.4, 5, 7.1]) {
+        const e = computeReceiptEstimate({
+          quantity: kgBrut / 1000, price: 6, humidity: h, impurity: i,
+          product: { humidityNorm: 14, impurityNorm: 2 }, tariffs: BASE.tariffs,
+          fiscalProfile: { withholdingPercent: 6 }
+        });
+        const netKg = e.provisionalNetQuantity * 1000;
+        assert.ok(
+          Math.abs(netKg - Math.round(netKg)) < 1e-6,
+          `fractiune de kg la brut ${kgBrut}, umiditate ${h}, impuritati ${i}: ${netKg}`
+        );
+      }
+    }
+  }
+});
+
+test("si cantitatea PLATITA e intreaga pe masa cu umiditate", () => {
+  for (let kgBrut = 1; kgBrut <= 3000; kgBrut += 29) {
+    const e = computeReceiptEstimate({
+      quantity: kgBrut / 1000, price: 6, humidity: 17, impurity: 3.5,
+      product: { humidityNorm: 14, impurityNorm: 2 }, tariffs: BASE.tariffs,
+      fiscalProfile: { withholdingPercent: 6 }, payOnGrossQuantity: true
+    });
+    const platitKg = e.payableQuantity * 1000;
+    assert.ok(
+      Math.abs(platitKg - Math.round(platitKg)) < 1e-6,
+      `fractiune la plata, brut ${kgBrut}: ${platitKg}`
+    );
+  }
+});
