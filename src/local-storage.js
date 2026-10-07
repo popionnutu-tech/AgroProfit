@@ -6518,6 +6518,13 @@ async function exportPurchaseActsFor1c(options = {}) {
   const config = readConfigState();
   const from = String(options.from || "").trim();
   const to = String(options.to || "").trim();
+  // Implicit: DOAR actele neincarcate in 1C, indiferent de data — altfel un act facut de
+  // depozitar dupa ora 17 s-ar pierde intre intervale, sau ar fi incarcat de doua ori.
+  const doarNoi = options.onlyNew !== false;
+  // Selectie explicita: exact documentele cerute, chiar daca sunt deja marcate (reincarcare).
+  const selectie = Array.isArray(options.receiptIds) && options.receiptIds.length
+    ? new Set(options.receiptIds.map(Number))
+    : null;
   const inInterval = (value) => {
     const zi = String(value || "").slice(0, 10);
     if (!zi) return false;
@@ -6531,7 +6538,12 @@ async function exportPurchaseActsFor1c(options = {}) {
     // Doar acte EMISE: un act neemis nu are numar, deci nu are ce cauta in contabilitate.
     if (!(Number(receipt.actNumber || 0) > 0)) continue;
     if (!isReceiptInStock(receipt)) continue;
-    if (!inInterval(receipt.actIssuedAt || receipt.receivedAt || receipt.createdAt)) continue;
+    if (selectie) {
+      if (!selectie.has(Number(receipt.id))) continue;
+    } else {
+      if (doarNoi && String(receipt.exported1cAt || "").trim()) continue;
+      if (!inInterval(receipt.actIssuedAt || receipt.receivedAt || receipt.createdAt)) continue;
+    }
 
     // Captura sta pe PURTATOR; celelalte receptii ale actului au doar referinta. Se exporta
     // o data per act, de pe purtator — altfel acelasi act ar aparea de N ori.
@@ -6580,7 +6592,8 @@ async function exportPurchaseActsFor1c(options = {}) {
         Depozit: sursa.location || "",
         Temei: sursa.note || "",
         "Nr. recepție": rand.id,
-        "Observatii export": avertisment
+        "Observatii export": avertisment,
+        _id: receipt.id
       });
     }
   }
@@ -6618,6 +6631,9 @@ async function exportSuppliersFor1c(options = {}) {
   // poate STI ce e in 1C, deci marcajul il pune omul, dupa un import reusit — altfel un
   // import eșuat ar face furnizorii sa dispara din export si actele n-ar mai gasi pe nimeni.
   const doarNoi = options.onlyNew !== false;
+  const selectie = Array.isArray(options.partnerIds) && options.partnerIds.length
+    ? new Set(options.partnerIds.map(Number))
+    : null;
 
   // Furnizorii care apar pe ACTELE din perioada: exact cei de care 1C are nevoie ca sa
   // poata primi actele. Fara perioada, toti furnizorii cu cod fiscal.
@@ -6638,9 +6654,13 @@ async function exportSuppliersFor1c(options = {}) {
   const profile = config.fiscalProfiles || [];
   const randuri = [];
   for (const p of config.partners || []) {
-    if (idUri && !idUri.has(Number(p.id))) continue;
     if (!String(p.role || "").match(/furnizor|ambele/i)) continue;
-    if (doarNoi && String(p.exported1cAt || "").trim()) continue;
+    if (selectie) {
+      if (!selectie.has(Number(p.id))) continue;
+    } else {
+      if (idUri && !idUri.has(Number(p.id))) continue;
+      if (doarNoi && String(p.exported1cAt || "").trim()) continue;
+    }
     const cod = String(p.idno || "").trim();
     // Fara cod fiscal nu are cu ce sa fie potrivit in 1C: ar intra ca furnizor nou si ar
     // produce exact dublura pe care exportul o evita.
@@ -6710,6 +6730,10 @@ async function exportPaymentsFor1c(options = {}) {
   const conturi = conturi1c();
   const from = String(options.from || "").trim();
   const to = String(options.to || "").trim();
+  const doarNoi = options.onlyNew !== false;
+  const selectie = Array.isArray(options.transactionIds) && options.transactionIds.length
+    ? new Set(options.transactionIds.map(Number))
+    : null;
 
   const randuri = [];
   for (const t of state.transactions || []) {
@@ -6720,8 +6744,13 @@ async function exportPaymentsFor1c(options = {}) {
     if (t.source === "advance-applied") continue;
     const zi = String(t.createdAt || "").slice(0, 10);
     if (!zi) continue;
-    if (from && zi < from) continue;
-    if (to && zi > to) continue;
+    if (selectie) {
+      if (!selectie.has(Number(t.id))) continue;
+    } else {
+      if (doarNoi && String(t.exported1cAt || "").trim()) continue;
+      if (from && zi < from) continue;
+      if (to && zi > to) continue;
+    }
 
     const partener = (config.partners || []).find(
       (p) => Number(p.id) === Number(t.supplierId || t.partnerId)
@@ -6782,7 +6811,8 @@ async function exportPaymentsFor1c(options = {}) {
       "Cont impozit": conturi.impozit,
       Temei: String(t.note || "plata cereale").trim(),
       "Acte acoperite": acte,
-      "Observatii export": avertismente.join("; ")
+      "Observatii export": avertismente.join("; "),
+      _id: t.id
     });
   }
 
@@ -6790,9 +6820,212 @@ async function exportPaymentsFor1c(options = {}) {
   return { columns: EXPORT_1C_PAYMENT_COLUMNS, rows: randuri };
 }
 
-// Marcheaza furnizorii ca INCARCATI in 1C. Se apeleaza DUPA un import reusit, de catre om:
-// aplicatia nu are cum sa afle singura daca 1C i-a primit.
-// De atunci nu mai apar in exportul de furnizori noi, deci nu se mai creeaza dubluri.
+// ============================================================================
+// MARCAJUL „incarcat in 1C" — pe furnizori, pe acte si pe plati
+//
+// Criteriul de „nou" NU e data creării, e MARCAJUL. Un furnizor poate fi in aplicatie de
+// trei luni si tot sa nu fie in 1C; un act facut de depozitar dupa ora 17 trebuie sa apara
+// in exportul de MAINE, nu sa se piarda intre intervale de date. De aceea exportul scoate
+// implicit „ce nu e incarcat", indiferent de data.
+//
+// Marcajul il pune OMUL, dupa un import reusit: aplicatia nu are cum sa afle daca 1C a
+// primit documentele, iar un marcaj automat pe descarcare le-ar scoate din export chiar
+// daca importul a cazut.
+const TIPURI_1C = {
+  suppliers: { colectie: "partners", sursa: "config", eticheta: "furnizori" },
+  receipts: { colectie: "receipts", sursa: "receipts", eticheta: "acte de achizitie" },
+  payments: { colectie: "transactions", sursa: "receipts", eticheta: "ordine de plata" }
+};
+
+function colectie1c(tip) {
+  const def = TIPURI_1C[tip];
+  if (!def) throw new Error(`Tip necunoscut pentru export 1C: ${tip}.`);
+  const state = def.sursa === "config" ? readConfigState() : readReceiptsState();
+  return { def, state, lista: state[def.colectie] || [] };
+}
+
+function idUri1c(brute, maxim = 500) {
+  const arr = Array.isArray(brute) ? brute : [];
+  if (!arr.length || arr.some((v) => typeof v !== "number" && typeof v !== "string")) {
+    throw new Error("Lista de documente e invalida.");
+  }
+  if (arr.length > maxim) {
+    throw new Error(`Prea multe documente intr-o singura operatie (max ${maxim}).`);
+  }
+  const idUri = [...new Set(arr.map(Number))].filter((n) => Number.isInteger(n) && n > 0);
+  if (!idUri.length) throw new Error("Lista de documente e invalida.");
+  return idUri;
+}
+
+// `reset: true` STERGE marcajul — pentru reincarcare, cand un document corectat trebuie
+// trimis din nou in 1C. Separat de marcare, ca sa fie o actiune deliberata.
+async function setExported1c(payload = {}) {
+  const currentUser = payload.currentUser || {};
+  if (!CAN_EDIT_BILLING_ROLES.includes(normalizeRoleCode(currentUser.roleCode))) {
+    throw forbiddenError("Doar contabilul, managerul sau administratorul pot marca documentele.");
+  }
+  const { def, state, lista } = colectie1c(payload.kind);
+  const idUri = idUri1c(payload.ids);
+  const reset = payload.reset === true;
+  const acum = new Date().toISOString();
+
+  const atinse = [];
+  for (const item of lista) {
+    if (!idUri.includes(Number(item.id))) continue;
+    const marcat = String(item.exported1cAt || "").trim();
+    if (reset) {
+      if (!marcat) continue;
+      delete item.exported1cAt;
+    } else {
+      if (marcat) continue; // deja marcat — nu se rescrie data primului import
+      item.exported1cAt = acum;
+    }
+    atinse.push({ id: item.id, name: item.name || item.supplier || item.partner || "" });
+  }
+  if (!atinse.length) return { changed: [] };
+
+  if (def.sursa === "config") writeConfigState(state);
+
+  const receiptsState = def.sursa === "config" ? readReceiptsState() : state;
+  createAuditEntry(receiptsState, {
+    entityType: def.colectie === "partners" ? "partner" : def.colectie.replace(/s$/, ""),
+    entityId: atinse[0].id,
+    action: reset ? "unmarked-1c" : "marked-1c",
+    reason: `${reset ? "Marcaj 1C ANULAT" : "Marcat ca incarcat in 1C"} (${def.eticheta}): ` +
+      atinse.map((a) => `#${a.id} ${a.name}`).join(", ").slice(0, 400),
+    user: payload.changedBy || "dashboard",
+    oldValue: { exported1cAt: reset ? "era marcat" : null },
+    newValue: { exported1cAt: reset ? null : acum, count: atinse.length }
+  });
+  writeReceiptsState(receiptsState);
+  return { changed: atinse };
+}
+
+// Ce e de incarcat in 1C: lista pentru bifare in interfata. Arata si cele deja incarcate
+// (`includeExported`), ca sa se poata reincarca un document corectat.
+async function listPending1c(options = {}) {
+  const tip = options.kind;
+  const from = String(options.from || "").trim();
+  const to = String(options.to || "").trim();
+  const includeMarcate = options.includeExported === true;
+  const inInterval = (zi) => {
+    const d = String(zi || "").slice(0, 10);
+    if (!d) return false;
+    if (from && d < from) return false;
+    if (to && d > to) return false;
+    return true;
+  };
+
+  if (tip === "suppliers") {
+    const config = readConfigState();
+    return (config.partners || [])
+      .filter((p) => String(p.role || "").match(/furnizor|ambele/i))
+      .filter((p) => String(p.idno || "").trim())
+      .filter((p) => includeMarcate || !String(p.exported1cAt || "").trim())
+      .map((p) => ({
+        id: p.id, label: p.name, extra: p.idno, date: "",
+        exported1cAt: p.exported1cAt || null
+      }))
+      .sort((a, b) => String(a.label).localeCompare(String(b.label), "ro", { sensitivity: "base" }));
+  }
+
+  const state = readReceiptsState();
+
+  if (tip === "receipts") {
+    return (state.receipts || [])
+      // Doar actele EMISE: fara numar nu are ce caută in contabilitate.
+      .filter((r) => Number(r.actNumber || 0) > 0 && isReceiptInStock(r))
+      // O data per act: captura sta pe purtator.
+      .filter((r) => !(Number(r.actCarrierId || 0) > 0))
+      .filter((r) => includeMarcate || !String(r.exported1cAt || "").trim())
+      .filter((r) => (from || to ? inInterval(r.actIssuedAt || r.createdAt) : true))
+      .map((r) => ({
+        id: r.id,
+        label: `${r.actSeries || ""} ${r.actNumber} · ${r.supplier || ""}`.trim(),
+        extra: currencyLike(Number(r.amountToPay ?? r.preliminaryPayableAmount ?? 0)),
+        date: String(r.actIssuedAt || r.createdAt || "").slice(0, 10),
+        exported1cAt: r.exported1cAt || null
+      }))
+      .sort((a, b) => String(a.date).localeCompare(String(b.date)) || a.id - b.id);
+  }
+
+  if (tip === "payments") {
+    return (state.transactions || [])
+      .filter((t) => t.direction === "payment" && isActiveTransaction(t))
+      .filter((t) => t.source !== "advance-applied")
+      .filter((t) => includeMarcate || !String(t.exported1cAt || "").trim())
+      .filter((t) => (from || to ? inInterval(t.createdAt) : true))
+      .map((t) => ({
+        id: t.id,
+        label: `Plata #${t.id} · ${t.partner || ""}`.trim(),
+        extra: currencyLike(Number(t.appliedAmount ?? t.amount ?? 0)),
+        date: String(t.createdAt || "").slice(0, 10),
+        exported1cAt: t.exported1cAt || null
+      }))
+      .sort((a, b) => String(a.date).localeCompare(String(b.date)) || a.id - b.id);
+  }
+
+  throw new Error(`Tip necunoscut pentru export 1C: ${tip}.`);
+}
+
+function currencyLike(n) {
+  return `${Number(n || 0).toFixed(2)} lei`;
+}
+
+// Potrivirea DE PORNIRE cu lista de furnizori descarcata din 1C: tot ce exista deja acolo se
+// marcheaza, ca primul export sa nu scoata si furnizorii vechi.
+// Potrivirea e 1C -> aplicatie, pe COD FISCAL: lista din 1C are istoric, deci mai mulți
+// furnizori decat aplicatia; cei din 1C care nu-s la noi nu ne interesează.
+async function markSuppliersByFiscalCodes(payload = {}) {
+  const currentUser = payload.currentUser || {};
+  if (!CAN_EDIT_BILLING_ROLES.includes(normalizeRoleCode(currentUser.roleCode))) {
+    throw forbiddenError("Doar contabilul, managerul sau administratorul pot marca furnizorii.");
+  }
+  const brute = Array.isArray(payload.fiscalCodes) ? payload.fiscalCodes : [];
+  if (!brute.length) throw new Error("Lista de coduri fiscale e goala.");
+  if (brute.length > 20000) throw new Error("Lista e prea mare (max 20.000 de coduri).");
+
+  const coduri = new Set(
+    brute.map((c) => String(c || "").replace(/[^0-9]/g, "").trim()).filter(Boolean)
+  );
+  if (!coduri.size) throw new Error("Niciun cod fiscal valid in lista.");
+
+  const config = readConfigState();
+  const acum = new Date().toISOString();
+  const marcati = [];
+  const negasiti = [];
+  for (const p of config.partners || []) {
+    if (!String(p.role || "").match(/furnizor|ambele/i)) continue;
+    const cod = String(p.idno || "").replace(/[^0-9]/g, "").trim();
+    if (!cod) continue;
+    if (!coduri.has(cod)) {
+      if (!String(p.exported1cAt || "").trim()) negasiti.push({ id: p.id, name: p.name, idno: cod });
+      continue;
+    }
+    if (String(p.exported1cAt || "").trim()) continue;
+    p.exported1cAt = acum;
+    marcati.push({ id: p.id, name: p.name, idno: cod });
+  }
+
+  if (marcati.length) {
+    writeConfigState(config);
+    const state = readReceiptsState();
+    createAuditEntry(state, {
+      entityType: "partner",
+      entityId: marcati[0].id,
+      action: "suppliers-matched-1c",
+      reason: `Potrivire de pornire cu lista din 1C: ${marcati.length} furnizori marcati`,
+      user: payload.changedBy || "dashboard",
+      oldValue: { exported1cAt: null },
+      newValue: { exported1cAt: acum, count: marcati.length }
+    });
+    writeReceiptsState(state);
+  }
+  // `negasiti` = furnizorii NOȘTRI care nu sunt in 1C: exact cei de incarcat la primul export.
+  return { matched: marcati, missing: negasiti };
+}
+
+// Compatibilitate: numele vechi, folosit de ruta existenta.
 async function markSuppliersExported1c(payload = {}) {
   const currentUser = payload.currentUser || {};
   if (!CAN_EDIT_BILLING_ROLES.includes(normalizeRoleCode(currentUser.roleCode))) {
@@ -6976,7 +7209,10 @@ module.exports = {
   exportPaymentsFor1c,
   exportPurchaseActsFor1c,
   exportSuppliersFor1c,
+  listPending1c,
+  markSuppliersByFiscalCodes,
   markSuppliersExported1c,
+  setExported1c,
   exportResourceAsCsv,
   findUserByUsername,
   getConfig,

@@ -2049,11 +2049,48 @@
                 <label>Până la<input type="date" id="export-1c-to" /></label>
               </div>
               <div class="report-actions" style="margin:6px 0">
-                <button type="button" id="export-1c-suppliers-btn" class="cell-btn">1 · Furnizori noi</button>
-                <button type="button" id="export-1c-mark-btn" class="cell-btn" hidden>✓ Am încărcat în 1C</button>
-                <button type="button" id="export-1c-btn" class="cell-btn cell-btn-primary">2 · Acte de achiziție</button>
-                <button type="button" id="export-1c-payments-btn" class="cell-btn cell-btn-primary">3 · Ordine de plată</button>
+                <button type="button" id="export-1c-tab-suppliers" class="cell-btn">1 · Furnizori noi</button>
+                <button type="button" id="export-1c-tab-receipts" class="cell-btn">2 · Acte de achiziție</button>
+                <button type="button" id="export-1c-tab-payments" class="cell-btn">3 · Ordine de plată</button>
+                <label class="inline-check" style="padding:4px 8px">
+                  <input type="checkbox" id="export-1c-include" />
+                  <span>arată și cele deja încărcate</span>
+                </label>
+              </div>
+
+              <div class="table-wrap" style="max-height:320px;overflow:auto">
+                <table id="export-1c-table">
+                  <thead>
+                    <tr>
+                      <th style="width:28px"><input type="checkbox" id="export-1c-all" title="Bifează tot" /></th>
+                      <th>Document</th>
+                      <th>Data</th>
+                      <th>Sumă / Cod fiscal</th>
+                      <th>Încărcat în 1C</th>
+                    </tr>
+                  </thead>
+                  <tbody id="export-1c-body"></tbody>
+                </table>
+              </div>
+
+              <div class="report-actions" style="margin:6px 0">
+                <button type="button" id="export-1c-download-btn" class="cell-btn cell-btn-primary">⬇ Descarcă selecția</button>
+                <button type="button" id="export-1c-mark-btn" class="cell-btn">✓ Am încărcat în 1C</button>
+                <button type="button" id="export-1c-unmark-btn" class="cell-btn">↺ Anulează marcajul</button>
                 <span class="field-hint" id="export-1c-hint"></span>
+              </div>
+              <p class="field-hint" style="margin:2px 0 6px">
+                <b>Potrivire de pornire:</b> lipește aici codurile fiscale ale furnizorilor
+                care există deja în 1C (din exportul nomenclatorului) și apasă „Potrivește".
+                Se face <b>o singură dată</b> — de atunci marcajul zilnic funcționează singur.
+              </p>
+              <div class="split">
+                <label>Coduri fiscale din 1C (unul per rând sau separate prin virgulă)
+                  <textarea id="export-1c-codes" rows="3" placeholder="0960612543420&#10;2001234567890"></textarea>
+                </label>
+                <div style="align-self:end">
+                  <button type="button" id="export-1c-match-btn" class="cell-btn">Potrivește cu 1C</button>
+                </div>
               </div>
               <p class="field-hint" style="margin:2px 0 6px">
                 <b>Ordinea contează.</b> „Furnizori noi" scoate doar furnizorii care nu au

@@ -1,5 +1,8 @@
 const {
   exportPaymentsFor1c,
+  listPending1c,
+  markSuppliersByFiscalCodes,
+  setExported1c,
   exportPurchaseActsFor1c,
   exportSuppliersFor1c,
   markSuppliersExported1c,
@@ -57,6 +60,15 @@ async function getDashboardHandler(req, res) {
 // „toate coloanele intr-una". Zecimala e PUNCT, ca 1C sa nu confunde separatorul de coloana
 // cu cel zecimal.
 function trimiteCsv1c(res, columns, rows, numeFisier) {
+  if (typeof res.setHeader === "function") {
+    const idUri = rows.map((r) => r._id).filter(Boolean);
+    if (idUri.length) res.setHeader("X-Document-Ids", idUri.join(","));
+  }
+  rows = rows.map((r) => {
+    const copie = { ...r };
+    delete copie._id;
+    return copie;
+  });
   const linie = (valori) =>
     valori
       .map((v) => {
@@ -76,9 +88,12 @@ function trimiteCsv1c(res, columns, rows, numeFisier) {
 
 async function exportPurchaseActs1cHandler(req, res) {
   try {
+    const q = req.query || {};
     const { columns, rows } = await exportPurchaseActsFor1c({
-      from: req.query && req.query.from,
-      to: req.query && req.query.to
+      from: q.from,
+      to: q.to,
+      onlyNew: !["1", "true"].includes(String(q.includeExported || "").toLowerCase()),
+      receiptIds: String(q.ids || "").split(",").map(Number).filter(Boolean)
     });
     trimiteCsv1c(res, columns, rows, `acte-achizitie-1c-${new Date().toISOString().slice(0, 10)}.csv`);
   } catch (error) {
@@ -91,9 +106,12 @@ async function exportPurchaseActs1cHandler(req, res) {
 // contul contabil, iar actul justifica datoria.
 async function exportPayments1cHandler(req, res) {
   try {
+    const q = req.query || {};
     const { columns, rows } = await exportPaymentsFor1c({
-      from: req.query && req.query.from,
-      to: req.query && req.query.to
+      from: q.from,
+      to: q.to,
+      onlyNew: !["1", "true"].includes(String(q.includeExported || "").toLowerCase()),
+      transactionIds: String(q.ids || "").split(",").map(Number).filter(Boolean)
     });
     trimiteCsv1c(res, columns, rows, `ordine-plata-1c-${new Date().toISOString().slice(0, 10)}.csv`);
   } catch (error) {
@@ -111,19 +129,10 @@ async function exportSuppliers1cHandler(req, res) {
       // `?all=1` -> toti furnizorii cu cod fiscal, nu doar cei din perioada.
       onlyFromActs: !["1", "true"].includes(String((req.query || {}).all || "").toLowerCase()),
       // `?includeExported=1` -> si cei deja marcati (pentru reincarcare, daca importul a cazut).
-      onlyNew: !["1", "true"].includes(String((req.query || {}).includeExported || "").toLowerCase())
+      onlyNew: !["1", "true"].includes(String((req.query || {}).includeExported || "").toLowerCase()),
+      partnerIds: String((req.query || {}).ids || "").split(",").map(Number).filter(Boolean)
     });
-    // Id-urile ajung in antet, nu in CSV: 1C n-are ce face cu ele, dar interfata are nevoie
-    // de ele ca sa poata marca exact furnizorii descarcati.
-    if (typeof res.setHeader === "function") {
-      res.setHeader("X-Supplier-Ids", rows.map((r) => r._id).join(","));
-    }
-    const curate = rows.map((r) => {
-      const copie = { ...r };
-      delete copie._id;
-      return copie;
-    });
-    trimiteCsv1c(res, columns, curate, `furnizori-1c-${new Date().toISOString().slice(0, 10)}.csv`);
+    trimiteCsv1c(res, columns, rows, `furnizori-1c-${new Date().toISOString().slice(0, 10)}.csv`);
   } catch (error) {
     console.error("Failed to export suppliers for 1C:", error.message);
     return sendJson(res, 400, { error: error.message || "Nu am putut exporta furnizorii." });
@@ -167,7 +176,65 @@ async function markSuppliers1cHandler(req, res) {
   }
 }
 
+// Ce e de incarcat in 1C, pentru bifare in interfata.
+async function listPending1cHandler(req, res) {
+  try {
+    const q = req.query || {};
+    const items = await listPending1c({
+      kind: q.kind,
+      from: q.from,
+      to: q.to,
+      includeExported: ["1", "true"].includes(String(q.includeExported || "").toLowerCase())
+    });
+    return sendJson(res, 200, { ok: true, items });
+  } catch (error) {
+    console.error("Failed to list pending 1C documents:", error.message);
+    return sendJson(res, 400, { error: error.message || "Nu am putut citi lista." });
+  }
+}
+
+// Marcheaza / ANULEAZA marcajul „incarcat in 1C". Anularea e pentru reincarcarea unui
+// document corectat — actiune deliberata, nu efect secundar.
+async function setExported1cHandler(req, res) {
+  try {
+    const body = req.body || {};
+    const rezultat = await setExported1c({
+      kind: body.kind,
+      ids: body.ids,
+      reset: body.reset === true,
+      currentUser: req.currentUser || {},
+      changedBy: getActorLabel(req)
+    });
+    return sendJson(res, 200, { ok: true, ...rezultat });
+  } catch (error) {
+    console.error("Failed to set 1C export mark:", error.message);
+    return sendJson(res, error.statusCode || 400, {
+      error: error.message || "Nu am putut marca documentele."
+    });
+  }
+}
+
+// Potrivirea de PORNIRE cu lista de furnizori descarcata din 1C.
+async function matchSuppliers1cHandler(req, res) {
+  try {
+    const rezultat = await markSuppliersByFiscalCodes({
+      fiscalCodes: (req.body || {}).fiscalCodes,
+      currentUser: req.currentUser || {},
+      changedBy: getActorLabel(req)
+    });
+    return sendJson(res, 200, { ok: true, ...rezultat });
+  } catch (error) {
+    console.error("Failed to match suppliers with 1C list:", error.message);
+    return sendJson(res, error.statusCode || 400, {
+      error: error.message || "Nu am putut potrivi furnizorii."
+    });
+  }
+}
+
 module.exports = {
+  listPending1cHandler,
+  matchSuppliers1cHandler,
+  setExported1cHandler,
   exportPayments1cHandler,
   markSuppliers1cHandler,
   exportPurchaseActs1cHandler,

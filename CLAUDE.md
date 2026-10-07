@@ -525,12 +525,27 @@ Varianta **intermediară**: CSV pe care contabilul îl încarcă în 1C. NU gene
 `ФайлОбмена` — acolo 1C potrivește obiectele după **GUID**
 (`СинхронизироватьПоИдентификатору`), iar GUID-uri inventate de noi ar **crea furnizori și
 produse duplicate** la fiecare import.
-- **Ordinea contează:** întâi **furnizorii**, apoi **actele**. Altfel actele n-au cu ce să se
-  lege și rămân cu furnizorul gol — un act fără contraparte nu se poate contabiliza.
-- Se exportă **doar furnizorii NOI** (fără `exported1cAt`). Marcajul îl pune **omul**, după un
-  import reușit (`POST /api/exports/suppliers-1c/mark`) — nu automat la descărcare: dacă
-  importul în 1C cade, furnizorii trebuie să rămână în export. `?includeExported=1` îi aduce
-  înapoi pe toți, pentru reîncărcare.
+- **Ordinea contează:** întâi **furnizorii**, apoi **actele**, apoi **plățile**. Altfel actele
+  n-au cu ce să se lege și rămân cu furnizorul gol — un act fără contraparte nu se poate
+  contabiliza.
+- **Criteriul de „de încărcat" NU e data, e MARCAJUL** (`exported1cAt` pe furnizor, pe
+  recepție și pe tranzacție). Un furnizor poate fi în aplicație de trei luni și tot să nu fie
+  în 1C; un act făcut de depozitar după ora 17 trebuie să apară la următorul export, nu să se
+  piardă între intervale de date sau să fie încărcat de două ori. Data creării e o
+  coincidență; marcajul e un fapt.
+- Marcajul îl pune **omul**, după un import reușit (`POST /api/exports/1c/mark`) — nu automat
+  la descărcare: dacă importul în 1C cade, documentele trebuie să rămână în export.
+  `reset: true` **anulează** marcajul, pentru reîncărcarea unui document corectat — acțiune
+  deliberată, cu urmă separată în audit (`unmarked-1c`).
+- Interfața listează ce e de încărcat (`GET /api/exports/1c/pending?kind=…`) cu **bife**, deci
+  se poate încărca parțial. Exportul acceptă `?ids=` pentru selecție explicită, care trece
+  peste marcaj (reîncărcare).
+- **Potrivirea DE PORNIRE** (`POST /api/exports/1c/match-suppliers`): se lipesc codurile
+  fiscale din nomenclatorul 1C și tot ce există deja acolo se marchează, ca primul export să
+  nu scoată și furnizorii vechi. Se face **o singură dată**. Potrivirea e **1C → aplicație**,
+  pe cod fiscal: lista din 1C are istoric, deci mai mulți furnizori decât aplicația; cei din
+  1C care nu-s la noi nu ne interesează. Întoarce și `missing` — furnizorii NOȘTRI care nu
+  sunt în 1C, adică exact cei de încărcat.
 - **Cheia de potrivire e codul fiscal** (`ФискКод` în 1C; IDNP la persoane fizice), nu
   denumirea — o diferență de scriere ar crea un al doilea furnizor. Un furnizor **fără cod
   fiscal nu se exportă**: ar intra în 1C nepotrivit cu nimic.

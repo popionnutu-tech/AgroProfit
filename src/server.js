@@ -85,6 +85,9 @@ const {
 const {
   exportPurchaseActs1cHandler,
   exportPayments1cHandler,
+  listPending1cHandler,
+  matchSuppliers1cHandler,
+  setExported1cHandler,
   exportSuppliers1cHandler,
   markSuppliers1cHandler,
   exportResourceHandler,
@@ -734,6 +737,29 @@ app.get(
   "/api/exports/payments-1c",
   requireRoles(["accountant", "accountant-sef", "admin"]),
   exportPayments1cHandler
+);
+
+// Ce e de incarcat in 1C (pentru bifare in interfata): `?kind=suppliers|receipts|payments`.
+app.get(
+  "/api/exports/1c/pending",
+  requireRoles(["accountant", "accountant-sef", "admin"]),
+  listPending1cHandler
+);
+
+// Marcheaza / anuleaza marcajul „incarcat in 1C" pe furnizori, acte sau plati.
+// Anularea serveste reincarcarii unui document corectat.
+app.post(
+  "/api/exports/1c/mark",
+  requireRoles(["accountant", "accountant-sef", "manager", "admin"]),
+  setExported1cHandler
+);
+
+// Potrivirea DE PORNIRE cu lista de furnizori descarcata din 1C: marcheaza tot ce exista
+// deja acolo, ca primul export sa nu scoata si furnizorii vechi. Se ruleaza O DATA.
+app.post(
+  "/api/exports/1c/match-suppliers",
+  requireRoles(["accountant", "accountant-sef", "admin"]),
+  matchSuppliers1cHandler
 );
 
 // Marcheaza furnizorii ca incarcati in 1C — apasat de om DUPA un import reusit. Aplicatia nu
