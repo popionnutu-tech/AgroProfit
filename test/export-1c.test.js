@@ -19,6 +19,11 @@ async function receptieEmisa(storage, { kg = 2907, pret = 6.15 } = {}) {
     role: "furnizor", fiscalProfile: "Persoana fizica",
     changeReason: "test", changedBy: "admin"
   });
+  // Cota din nomenclator = cea folosita la estimare (6%), ca actul si plata sa coincida.
+  await storage.updateConfigEntry("fiscalProfiles", 1, {
+    name: "Persoana fizica", withholdingPercent: 6, vat: false, active: true,
+    changeReason: "test", changedBy: "admin"
+  });
   const est = computeReceiptEstimate({
     quantity: kg / 1000, price: pret, humidity: 14, impurity: 2,
     product: { humidityNorm: 14, impurityNorm: 2 },
@@ -207,5 +212,116 @@ test("codul fiscal schimbat dupa emitere e SEMNALAT in export", async () => {
     assert.equal(r["Cod fiscal / IDNP"], "0960612543999");
     // Si se spune explicit ca hartia semnata are alt cod.
     assert.match(r["Observatii export"], /pe actul semnat codul fiscal e 0960612543420/);
+  });
+});
+
+test("ordinul de plata: suma e BRUTA, impozitul se retine din ea", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    await receptieEmisa(storage);
+    const r = (await storage.listReceipts())[0];
+
+    // Plata efectiva = suma neta din registru (ce iese din casa).
+    const net = Number(r.amountToPay ?? r.preliminaryPayableAmount);
+    await storage.createTransaction({
+      referenceType: "receipt", receiptId: r.id, partnerId: 1, supplierId: 1,
+      partner: "Anghelus Ruslan", direction: "payment", amount: net, note: "plata cereale"
+    });
+
+    const out = await storage.exportPaymentsFor1c({});
+    assert.equal(out.rows.length, 1);
+    const p = out.rows[0];
+
+    const brut = Number(p["Suma bruta (lei)"]);
+    const impozit = Number(p["Impozit retinut (lei)"]);
+    const numerar = Number(p["De plata in numerar (lei)"]);
+
+    // Ca in ordinul de plata real: brut − impozit = numerar, iar impozitul e 6% din brut.
+    assert.ok(Math.abs(brut - impozit - numerar) < 0.02, `${brut} - ${impozit} != ${numerar}`);
+    assert.ok(Math.abs(impozit - brut * 0.06) < 0.02, "impozitul nu e 6% din brut");
+    assert.equal(numerar.toFixed(2), net.toFixed(2));
+
+    // Conturile citite din exportul real.
+    assert.equal(p["Cont casa"], "241.1");
+    assert.equal(p["Cont furnizor"], "544.32");
+    assert.equal(p["Cont impozit"], "534.3");
+    // Actul care justifica datoria.
+    assert.equal(p["Acte acoperite"], "AP 914");
+    assert.equal(p["Cod fiscal / IDNP"], "0960612543420");
+  });
+});
+
+test("storno si realocarea de avans NU intra in export", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    await receptieEmisa(storage);
+    const r = (await storage.listReceipts())[0];
+    const comun = {
+      referenceType: "receipt", receiptId: r.id, partnerId: 1, supplierId: 1,
+      partner: "Anghelus Ruslan", direction: "payment", amount: 1000
+    };
+    const t = await storage.createTransaction(comun);
+    // Realocare de avans: nu sunt bani noi, ar dubla plata in contabilitate.
+    await storage.createTransaction({ ...comun, source: "advance-applied" });
+    assert.equal((await storage.exportPaymentsFor1c({})).rows.length, 1);
+
+    // Storno: plata anulata nu mai e plata.
+    await storage.updateTransaction(t.id, {
+      status: "Anulat", changeReason: "storno", changedBy: "admin"
+    });
+    assert.equal((await storage.exportPaymentsFor1c({})).rows.length, 0);
+  });
+});
+
+test("conturile se iau din setari, nu din cod", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    await storage.updateSystemSettings({
+      account1cCash: "242.1", account1cSupplier: "521.1", account1cTax: "534.9",
+      changeReason: "alt plan de conturi", changedBy: "admin"
+    });
+    await receptieEmisa(storage);
+    const r = (await storage.listReceipts())[0];
+    await storage.createTransaction({
+      referenceType: "receipt", receiptId: r.id, partnerId: 1, supplierId: 1,
+      partner: "Anghelus Ruslan", direction: "payment", amount: 100
+    });
+    const p = (await storage.exportPaymentsFor1c({})).rows[0];
+    assert.equal(p["Cont casa"], "242.1");
+    assert.equal(p["Cont furnizor"], "521.1");
+    assert.equal(p["Cont impozit"], "534.9");
+
+    // O salvare care nu menționează conturile nu are voie sa le piarda.
+    await storage.updateSystemSettings({ closeOfDayHour: 18, changeReason: "alt camp", changedBy: "admin" });
+    assert.equal((await storage.getConfig()).systemSettings.account1cCash, "242.1");
+  });
+});
+
+test("cota se ia de pe RECEPTIE, nu din nomenclatorul de acum", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    await receptieEmisa(storage);
+    const r = (await storage.listReceipts())[0];
+    const net = Number(r.amountToPay);
+    await storage.createTransaction({
+      referenceType: "receipt", receiptId: r.id, partnerId: 1, supplierId: 1,
+      partner: "Anghelus Ruslan", direction: "payment", amount: net
+    });
+
+    // Cota se SCHIMBA in nomenclator DUPA ce marfa a intrat si s-a plătit.
+    await storage.updateConfigEntry("fiscalProfiles", 1, {
+      name: "Persoana fizica", withholdingPercent: 12, vat: false, active: true,
+      changeReason: "cota noua", changedBy: "admin"
+    });
+
+    const p = (await storage.exportPaymentsFor1c({})).rows[0];
+    // Se foloseste cota de pe receptie (6%), nu cea noua (12%): altfel impozitul din
+    // ordinul de plata n-ar coincide cu cel de pe actul semnat.
+    assert.equal(p["Cota impozit (%)"], "6");
+    const brut = Number(p["Suma bruta (lei)"]);
+    assert.ok(Math.abs(brut - Number(r.preliminaryMerchandiseValue)) < 0.02,
+      "brutul din plata nu coincide cu valoarea de pe act");
+    // Si divergenta se semnaleaza, ca sa nu treaca neobservata.
+    assert.match(p["Observatii export"], /cota de pe receptie e 6%, in nomenclator e 12%/);
   });
 });

@@ -84,6 +84,7 @@ const {
 } = require("./opening-handlers");
 const {
   exportPurchaseActs1cHandler,
+  exportPayments1cHandler,
   exportSuppliers1cHandler,
   markSuppliers1cHandler,
   exportResourceHandler,
@@ -726,6 +727,13 @@ app.get(
   "/api/exports/suppliers-1c",
   requireRoles(["accountant", "accountant-sef", "admin"]),
   exportSuppliers1cHandler
+);
+
+// Ordine de plata. Se incarca in 1C DUPA acte.
+app.get(
+  "/api/exports/payments-1c",
+  requireRoles(["accountant", "accountant-sef", "admin"]),
+  exportPayments1cHandler
 );
 
 // Marcheaza furnizorii ca incarcati in 1C — apasat de om DUPA un import reusit. Aplicatia nu

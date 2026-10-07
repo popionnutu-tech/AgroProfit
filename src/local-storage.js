@@ -195,6 +195,11 @@ const defaultConfigState = {
     // Tinut AICI, nu duplicat in cod: era scris si in backend si in frontend, exact tipul de
     // duplicare care a produs bug-ul de 1000x la facturare.
     stockDustThresholdKg: 5,
+    // Conturile contabile pentru exportul in 1C. Implicitele sunt cele citite din exportul
+    // real al utilizatorului; un alt plan de conturi nu trebuie sa ceara modificare de cod.
+    account1cCash: "241.1",
+    account1cSupplier: "544.32",
+    account1cTax: "534.3",
     migrationVersion: ""
   }
 };
@@ -6334,6 +6339,22 @@ async function updateSystemSettings(payload) {
       if (Number.isFinite(cerut) && cerut > 0 && cerut <= 50) return cerut;
       const curent = Number(state.systemSettings.stockDustThresholdKg);
       return Number.isFinite(curent) && curent > 0 && curent <= 50 ? curent : 5;
+    })(),
+    // Conturile 1C: un cont are forma „241.1" / „5348". Se pastreaza valoarea curenta daca
+    // nu vine nimic valid — `systemSettings` se reconstruieste din lista, deci un camp
+    // nemenționat aici se PIERDE la prima salvare de setari.
+    ...(() => {
+      const cont = (cheie, implicit) => {
+        const cerut = String(payload[cheie] || "").trim();
+        if (/^[0-9][0-9.]{1,11}$/.test(cerut)) return cerut;
+        const curent = String(state.systemSettings[cheie] || "").trim();
+        return /^[0-9][0-9.]{1,11}$/.test(curent) ? curent : implicit;
+      };
+      return {
+        account1cCash: cont("account1cCash", "241.1"),
+        account1cSupplier: cont("account1cSupplier", "544.32"),
+        account1cTax: cont("account1cTax", "534.3")
+      };
     })()
   };
   writeConfigState(state);
@@ -6650,6 +6671,125 @@ async function exportSuppliersFor1c(options = {}) {
   return { columns: EXPORT_1C_SUPPLIER_COLUMNS, rows: randuri };
 }
 
+// ============================================================================
+// EXPORT PENTRU 1C — ordine de plata (`ДокументСсылка.РасходныйКассовый`)
+//
+// Conturile sunt CITITE din exportul real al utilizatorului (РКО.xml), nu ghicite:
+//   СчетКассы      241.1  Касса в национальной валюте        — de unde iese banul
+//   СчетПолучателя 544.32 Прочие текущие начисленные обязат. — datoria catre furnizor
+//   СчетНалог      534.3  Обязательства по подоходному налогу, удержанному у источника
+//
+// Aritmetica, verificata pe acelasi fisier: `Сумма` e BRUTUL, `Нал05` e impozitul reținut
+// (8090,43 x 6% = 485,43), iar din casa iese diferenta (7605,00).
+//
+// Plata se leaga de FURNIZOR si de contul contabil (asa lucreaza 1C). Numarul actului intra
+// in „Temei", ca sa se poata confrunta cu dosarul — in 1C plata nu refera documentul direct.
+const EXPORT_1C_PAYMENT_COLUMNS = [
+  "Nr. plata", "Data", "Furnizor", "Cod fiscal / IDNP",
+  "Suma bruta (lei)", "Cota impozit (%)", "Impozit retinut (lei)", "De plata in numerar (lei)",
+  "Cont casa", "Cont furnizor", "Cont impozit",
+  "Temei", "Acte acoperite", "Observatii export"
+];
+
+// Implicite citite din exportul real. Se pot schimba din nomenclator (`systemSettings`),
+// ca sa nu fie scrise in cod: un alt plan de conturi nu trebuie sa ceara modificare de cod.
+const CONTURI_1C_IMPLICITE = { casa: "241.1", furnizor: "544.32", impozit: "534.3" };
+
+function conturi1c() {
+  const set = readConfigState().systemSettings || {};
+  return {
+    casa: String(set.account1cCash || CONTURI_1C_IMPLICITE.casa).trim(),
+    furnizor: String(set.account1cSupplier || CONTURI_1C_IMPLICITE.furnizor).trim(),
+    impozit: String(set.account1cTax || CONTURI_1C_IMPLICITE.impozit).trim()
+  };
+}
+
+async function exportPaymentsFor1c(options = {}) {
+  const state = readReceiptsState();
+  const config = readConfigState();
+  const conturi = conturi1c();
+  const from = String(options.from || "").trim();
+  const to = String(options.to || "").trim();
+
+  const randuri = [];
+  for (const t of state.transactions || []) {
+    // Doar PLATI catre furnizori, confirmate. Storno-ul (anulat) nu e o plata.
+    if (t.direction !== "payment") continue;
+    if (!isActiveTransaction(t)) continue;
+    // Realocarea unui avans nu e bani noi — ar dubla plata in contabilitate.
+    if (t.source === "advance-applied") continue;
+    const zi = String(t.createdAt || "").slice(0, 10);
+    if (!zi) continue;
+    if (from && zi < from) continue;
+    if (to && zi > to) continue;
+
+    const partener = (config.partners || []).find(
+      (p) => Number(p.id) === Number(t.supplierId || t.partnerId)
+    );
+    const receptie = (state.receipts || []).find((r) => Number(r.id) === Number(t.receiptId));
+
+    // Cota se ia de pe RECEPTIE, inghetata la intrarea marfii — nu din nomenclatorul de
+    // acum. In 1C impozitul vine din ordinul de plata, deci trebuie sa fie ACELASI cu cel
+    // de pe act; o cota schimbata in nomenclator intre timp le-ar face sa nu coincida, iar
+    // contabilitatea ar arăta altceva decat hartia semnata.
+    const prof = (config.fiscalProfiles || []).find(
+      (f) => String(f.name || "").trim().toLowerCase() ===
+        String((partener || {}).fiscalProfile || "").trim().toLowerCase()
+    );
+    const cotaReceptie = Number((receptie || {}).withholdingPercent);
+    const cota = Number.isFinite(cotaReceptie) && cotaReceptie > 0
+      ? cotaReceptie
+      : Number((prof || {}).withholdingPercent || 0);
+
+    // Suma din registru e cea PLATITA efectiv. `Сумма` din 1C e brutul, iar impozitul se
+    // retine din el — deci brutul se reconstituie: plata / (1 - cota).
+    const platit = Number(t.appliedAmount ?? t.amount ?? 0);
+    const brut = cota > 0 && cota < 100 ? platit / (1 - cota / 100) : platit;
+    const impozit = Number((brut - platit).toFixed(2));
+
+    // Actele acoperite: ce document din dosar justifica plata.
+    const acte = receptie && Number(receptie.actNumber || 0) > 0
+      ? `${receptie.actSeries || ""} ${receptie.actNumber}`.trim()
+      : "";
+
+    const cod = String((partener || {}).idno || "").trim();
+    const avertismente = [];
+    if (!cod) avertismente.push("furnizorul nu are cod fiscal — 1C nu il poate potrivi");
+    if (!acte && t.referenceType === "receipt") {
+      avertismente.push("plata nu are act de achizitie emis");
+    }
+    if (cota <= 0 && t.referenceType === "receipt") {
+      avertismente.push("furnizorul nu are cota de retinere — verifica profilul fiscal");
+    }
+    const cotaProfil = Number((prof || {}).withholdingPercent || 0);
+    if (cota > 0 && cotaProfil > 0 && cota !== cotaProfil) {
+      avertismente.push(
+        `cota de pe receptie e ${cota}%, in nomenclator e ${cotaProfil}% — se foloseste cea de pe receptie`
+      );
+    }
+
+    randuri.push({
+      "Nr. plata": t.id,
+      Data: zi,
+      Furnizor: String(t.partner || (partener || {}).name || "").trim(),
+      "Cod fiscal / IDNP": cod,
+      "Suma bruta (lei)": Number(brut).toFixed(2),
+      "Cota impozit (%)": cota ? cota.toFixed(0) : "",
+      "Impozit retinut (lei)": impozit.toFixed(2),
+      "De plata in numerar (lei)": platit.toFixed(2),
+      "Cont casa": conturi.casa,
+      "Cont furnizor": conturi.furnizor,
+      "Cont impozit": conturi.impozit,
+      Temei: String(t.note || "plata cereale").trim(),
+      "Acte acoperite": acte,
+      "Observatii export": avertismente.join("; ")
+    });
+  }
+
+  randuri.sort((a, b) => String(a.Data).localeCompare(String(b.Data)) || a["Nr. plata"] - b["Nr. plata"]);
+  return { columns: EXPORT_1C_PAYMENT_COLUMNS, rows: randuri };
+}
+
 // Marcheaza furnizorii ca INCARCATI in 1C. Se apeleaza DUPA un import reusit, de catre om:
 // aplicatia nu are cum sa afle singura daca 1C i-a primit.
 // De atunci nu mai apar in exportul de furnizori noi, deci nu se mai creeaza dubluri.
@@ -6833,6 +6973,7 @@ module.exports = {
   createTransfer,
   createUser,
   updateEntityNote,
+  exportPaymentsFor1c,
   exportPurchaseActsFor1c,
   exportSuppliersFor1c,
   markSuppliersExported1c,

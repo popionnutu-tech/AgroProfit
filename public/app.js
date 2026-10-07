@@ -157,6 +157,15 @@ if (export1cBtn) {
   );
 }
 
+const export1cPaymentsBtn = document.getElementById("export-1c-payments-btn");
+if (export1cPaymentsBtn) {
+  // Se descarca ULTIMUL: plata se leaga de furnizor si de contul contabil, iar actul
+  // justifica datoria — deci actele trebuie sa fie deja in 1C.
+  export1cPaymentsBtn.addEventListener("click", () =>
+    descarcaExport1c("/api/exports/payments-1c", "Ordine de plată")
+  );
+}
+
 const export1cSuppliersBtn = document.getElementById("export-1c-suppliers-btn");
 const export1cMarkBtn = document.getElementById("export-1c-mark-btn");
 // Furnizorii descarcati ultima data: se tin ca sa poata fi marcati DUPA importul in 1C.

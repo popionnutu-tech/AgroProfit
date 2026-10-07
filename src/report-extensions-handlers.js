@@ -1,4 +1,5 @@
 const {
+  exportPaymentsFor1c,
   exportPurchaseActsFor1c,
   exportSuppliersFor1c,
   markSuppliersExported1c,
@@ -86,6 +87,21 @@ async function exportPurchaseActs1cHandler(req, res) {
   }
 }
 
+// Ordine de plata pe perioada. Se incarca in 1C DUPA acte: plata se leaga de furnizor si de
+// contul contabil, iar actul justifica datoria.
+async function exportPayments1cHandler(req, res) {
+  try {
+    const { columns, rows } = await exportPaymentsFor1c({
+      from: req.query && req.query.from,
+      to: req.query && req.query.to
+    });
+    trimiteCsv1c(res, columns, rows, `ordine-plata-1c-${new Date().toISOString().slice(0, 10)}.csv`);
+  } catch (error) {
+    console.error("Failed to export payments for 1C:", error.message);
+    return sendJson(res, 400, { error: error.message || "Nu am putut exporta platile." });
+  }
+}
+
 // Furnizorii de pe actele din perioada. Se incarca in 1C INAINTEA actelor.
 async function exportSuppliers1cHandler(req, res) {
   try {
@@ -152,6 +168,7 @@ async function markSuppliers1cHandler(req, res) {
 }
 
 module.exports = {
+  exportPayments1cHandler,
   markSuppliers1cHandler,
   exportPurchaseActs1cHandler,
   exportSuppliers1cHandler,

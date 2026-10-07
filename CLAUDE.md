@@ -551,6 +551,24 @@ produse duplicate** la fiecare import.
 - Ruta de export specific e înregistrată **înaintea** celei generice `/api/exports/:resource`,
   altfel ar fi prinsă de ea.
 
+**Ordine de plată** (`ДокументСсылка.РасходныйКассовый`) — pasul **3**, după acte: plata se
+leagă de furnizor și de contul contabil, iar actul justifică datoria.
+- **Conturile sunt CITITE din exportul real** al utilizatorului, nu ghicite:
+  `СчетКассы` **241.1** (de unde iese banul), `СчетПолучателя` **544.32** (datoria către
+  furnizor), `СчетНалог` **534.3** (impozitul reținut). Stau în `systemSettings`
+  (`account1cCash`/`account1cSupplier`/`account1cTax`), nu în cod — un alt plan de conturi nu
+  trebuie să ceară modificare de cod. **`updateSystemSettings` reconstruiește obiectul din
+  listă**, deci câmpurile trebuie adăugate și acolo.
+- Suma exportată e **BRUTĂ**, iar impozitul se reține din ea — ca în 1C (`Сумма 8090.43`,
+  `Нал05 485.43`). Registrul ține suma NETĂ (ce iese din casă), deci brutul se reconstituie:
+  `net / (1 − cotă/100)`.
+- **Cota se ia de pe RECEPȚIE**, înghețată la intrarea mărfii, nu din nomenclatorul de acum.
+  În 1C impozitul vine din ordinul de plată, deci trebuie să fie ACELAȘI cu cel de pe act; o
+  cotă schimbată între timp le-ar face să nu coincidă, iar contabilitatea ar arăta altceva
+  decât hârtia semnată. Divergența se semnalează în „Observatii export".
+- **Storno** (tranzacție anulată) și **realocarea de avans** (`source: "advance-applied"`) NU
+  intră în export: prima nu mai e o plată, a doua nu e bani noi și ar dubla plata.
+
 ## Deploy
 - **Push pe `main` → Vercel publică automat** pe agroprofit-plus.vercel.app (integrare Git activă).
 - Lucrează pe o **ramură separată** (implicit `dev`), testează pe preview, apoi fă merge în `main`.
