@@ -83,6 +83,7 @@ const {
   listOpeningDocumentsHandler
 } = require("./opening-handlers");
 const {
+  exportPurchaseActs1cHandler,
   exportResourceHandler,
   getDashboardHandler,
   getDeliveryDefaultsHandler,
@@ -711,6 +712,14 @@ app.get(
   getDashboardHandler
 );
 
+app.get(
+  "/api/exports/purchase-acts-1c",
+  requireRoles(["accountant", "accountant-sef", "admin"]),
+  exportPurchaseActs1cHandler
+);
+
+// Exportul generic (CSV de lucru). Ruta de mai sus e DEASUPRA, altfel „purchase-acts-1c" ar
+// fi prins de `:resource` si ar da „resursa necunoscuta".
 app.get(
   "/api/exports/:resource",
   requireRoles(["manager", "accountant", "accountant-sef", "admin", "control"]),

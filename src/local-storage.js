@@ -6467,6 +6467,94 @@ function toCsvField(value) {
   return str;
 }
 
+// ============================================================================
+// EXPORT PENTRU 1C — act de achizitie (recepții de la persoane fizice)
+//
+// Varianta „intermediara": contabilul incarca fisierul in 1C prin prelucrarea obisnuita de
+// import. NU generam direct `ФайлОбмена`: acolo 1C potriveste obiectele dupa GUID
+// (`СинхронизироватьПоИдентификатору`), iar GUID-uri inventate de noi ar CREA furnizori si
+// produse duplicate la fiecare import.
+//
+// Coloanele oglindesc documentul `ПрихНалоговаяНакладная` / `ВидОперации = АктЗакупки`:
+// numarul si data actului, contrapartida cu codul fiscal, nomenclatorul, cantitatea, pretul,
+// valoarea, cota si impozitul reținut, suma de plata, depozitul.
+//
+// Impozitul: in 1C se ia din ORDINUL DE PLATA (`РасходныйКассовый`, campul `Нал05`), nu de pe
+// act. Il punem totusi in export, ca sa poata fi confruntat — pe exemplul real,
+// 8090,43 lei x 6% = 485,43, exact cat scrie in ordinul de plata.
+//
+// CIFRELE: pe un act EMIS se exporta cele INGHEȚATE la emitere (`actFigures`), nu recalculul
+// de acum. Altfel exportul ar contrazice hartia semnata si dosarul.
+const EXPORT_1C_COLUMNS = [
+  "Seria act", "Nr. act", "Data act", "Furnizor", "Cod fiscal / IDNP",
+  "Produs", "Cantitate (kg)", "Unitate", "Pret (lei/kg)", "Valoare (lei)",
+  "Cota impozit (%)", "Impozit retinut (lei)", "Spre plata (lei)",
+  "Depozit", "Temei", "Nr. recepție"
+];
+
+async function exportPurchaseActsFor1c(options = {}) {
+  const state = readReceiptsState();
+  const config = readConfigState();
+  const from = String(options.from || "").trim();
+  const to = String(options.to || "").trim();
+  const inInterval = (value) => {
+    const zi = String(value || "").slice(0, 10);
+    if (!zi) return false;
+    if (from && zi < from) return false;
+    if (to && zi > to) return false;
+    return true;
+  };
+
+  const randuri = [];
+  for (const receipt of state.receipts || []) {
+    // Doar acte EMISE: un act neemis nu are numar, deci nu are ce cauta in contabilitate.
+    if (!(Number(receipt.actNumber || 0) > 0)) continue;
+    if (!isReceiptInStock(receipt)) continue;
+    if (!inInterval(receipt.actIssuedAt || receipt.receivedAt || receipt.createdAt)) continue;
+
+    // Captura sta pe PURTATOR; celelalte receptii ale actului au doar referinta. Se exporta
+    // o data per act, de pe purtator — altfel acelasi act ar aparea de N ori.
+    if (Number(receipt.actCarrierId || 0) > 0) continue;
+    const cifre = receipt.actFigures;
+    if (!cifre) continue;
+
+    const partener = (config.partners || []).find(
+      (item) => Number(item.id) === Number(cifre.supplierId || receipt.supplierId)
+    );
+    const cota = Number(receipt.withholdingPercent || 0);
+
+    for (const rand of cifre.rows || []) {
+      const sursa = (state.receipts || []).find((r) => Number(r.id) === Number(rand.id)) || receipt;
+      const kg = Number(rand.netKg || 0);
+      const valoare = Number(rand.value || 0);
+      randuri.push({
+        "Seria act": cifre.series || receipt.actSeries || "",
+        "Nr. act": receipt.actNumber,
+        "Data act": String(rand.date || receipt.actIssuedAt || "").slice(0, 10),
+        Furnizor: cifre.supplierName || receipt.supplier || "",
+        "Cod fiscal / IDNP": cifre.supplierIdno || (partener && partener.idno) || "",
+        Produs: rand.product || sursa.product || "",
+        "Cantitate (kg)": kg.toFixed(3).replace(/\.?0+$/, ""),
+        Unitate: "kg",
+        // Pretul se DERIVA din valoare si cantitate, ca pe act: „cantitate x pret = valoare"
+        // trebuie sa fie adevarat si in export, nu doar pe hartie.
+        "Pret (lei/kg)": kg > 0 ? (valoare / kg).toFixed(4) : "",
+        "Valoare (lei)": valoare.toFixed(2),
+        "Cota impozit (%)": cota ? cota.toFixed(0) : "",
+        "Impozit retinut (lei)": (Number(rand.value || 0) - Number(rand.netPay || 0)).toFixed(2),
+        "Spre plata (lei)": Number(rand.netPay || 0).toFixed(2),
+        Depozit: sursa.location || "",
+        Temei: sursa.note || "",
+        "Nr. recepție": rand.id
+      });
+    }
+  }
+
+  // Ordine de dosar: pe numar de act, crescator.
+  randuri.sort((a, b) => Number(a["Nr. act"]) - Number(b["Nr. act"]));
+  return { columns: EXPORT_1C_COLUMNS, rows: randuri };
+}
+
 async function exportResourceAsCsv(resource, roleCode) {
   const mapping = {
     receipts: { list: listReceipts, fields: ["id", "supplier", "product", "quantity", "status", "paymentStatus", "createdAt"] },
@@ -6605,6 +6693,7 @@ module.exports = {
   createTransfer,
   createUser,
   updateEntityNote,
+  exportPurchaseActsFor1c,
   exportResourceAsCsv,
   findUserByUsername,
   getConfig,

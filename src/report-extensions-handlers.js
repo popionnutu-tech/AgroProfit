@@ -1,4 +1,5 @@
 const {
+  exportPurchaseActsFor1c,
   exportResourceAsCsv,
   getDashboardSnapshot,
   getDeliveryDefaults,
@@ -47,6 +48,39 @@ async function getDashboardHandler(req, res) {
   }
 }
 
+// Export pentru 1C: acte de achizitie pe o perioada.
+// `;` ca separator si BOM UTF-8: asa se deschide corect in Excel pe setarile ro/ru, fara
+// „toate coloanele intr-una". Zecimala e PUNCT, ca 1C sa nu confunde separatorul de coloana
+// cu cel zecimal.
+async function exportPurchaseActs1cHandler(req, res) {
+  try {
+    const { columns, rows } = await exportPurchaseActsFor1c({
+      from: req.query && req.query.from,
+      to: req.query && req.query.to
+    });
+    const linie = (valori) =>
+      valori
+        .map((v) => {
+          const t = String(v === null || v === undefined ? "" : v);
+          return /[";\n\r]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
+        })
+        .join(";");
+    const csv = [linie(columns), ...rows.map((r) => linie(columns.map((c) => r[c])))].join("\r\n");
+
+    const nume = `acte-achizitie-1c-${new Date().toISOString().slice(0, 10)}.csv`;
+    if (typeof res.setHeader === "function") {
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename="${nume}"`);
+    }
+    if (typeof res.status === "function") res.status(200);
+    else res.statusCode = 200;
+    res.end("\ufeff" + csv);
+  } catch (error) {
+    console.error("Failed to export purchase acts for 1C:", error.message);
+    return sendJson(res, 400, { error: error.message || "Nu am putut exporta actele." });
+  }
+}
+
 async function exportResourceHandler(req, res, resource) {
   try {
     const csv = await exportResourceAsCsv(resource, req.currentUser && req.currentUser.roleCode);
@@ -68,6 +102,7 @@ async function exportResourceHandler(req, res, resource) {
 }
 
 module.exports = {
+  exportPurchaseActs1cHandler,
   exportResourceHandler,
   getDashboardHandler,
   getDeliveryDefaultsHandler,

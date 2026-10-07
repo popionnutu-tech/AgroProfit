@@ -2036,6 +2036,24 @@
 
         <section class="panel reports-panel" data-access="reports" data-view="rapoarte">
           <div class="report-accordion-list">
+            <details class="report-accordion" id="export-1c-accordion" data-access="finance">
+              <summary>Export pentru 1C · acte de achiziție</summary>
+              <p class="field-hint" style="margin:6px 0">
+                Fișier CSV cu actele de achiziție emise, pentru încărcare în 1C
+                (<i>Акт закупки</i>). Se exportă cifrele îngheţate la emitere, deci coincid cu
+                hârtia semnată. Impozitul e inclus pentru verificare — în 1C el se ia din
+                ordinul de plată.
+              </p>
+              <div class="split">
+                <label>De la<input type="date" id="export-1c-from" /></label>
+                <label>Până la<input type="date" id="export-1c-to" /></label>
+              </div>
+              <div class="report-actions" style="margin:6px 0">
+                <button type="button" id="export-1c-btn" class="cell-btn cell-btn-primary">⬇ Descarcă CSV</button>
+                <span class="field-hint" id="export-1c-hint"></span>
+              </div>
+            </details>
+
             <details class="report-accordion" id="losses-report-accordion">
               <summary>Pierderi cantitative</summary>
               <p class="field-hint" style="margin-top:6px">Fluxul cantității pe produs: primit → procesare → livrat, cu diferența necontabilizată</p>

@@ -128,6 +128,31 @@ const stockDustWrap = document.getElementById("stock-dust-wrap");
 const stockDustBtn = document.getElementById("stock-dust-btn");
 const stockDustHintEl = document.getElementById("stock-dust-hint");
 
+// Export pentru 1C: acte de achizitie pe perioada. Descarcarea se face prin navigare, nu
+// prin `fetch` + blob: raspunsul are deja `Content-Disposition`, iar cookie-ul de sesiune
+// merge la fel. Asa nu ținem in memorie un fisier care poate fi mare.
+const export1cBtn = document.getElementById("export-1c-btn");
+if (export1cBtn) {
+  export1cBtn.addEventListener("click", () => {
+    const from = (document.getElementById("export-1c-from") || {}).value || "";
+    const to = (document.getElementById("export-1c-to") || {}).value || "";
+    if (from && to && from > to) {
+      window.alert("Perioada e inversată: data de început e după cea de sfârșit.");
+      return;
+    }
+    const q = new URLSearchParams();
+    if (from) q.set("from", from);
+    if (to) q.set("to", to);
+    const hint = document.getElementById("export-1c-hint");
+    if (hint) {
+      hint.textContent = from || to
+        ? `Se descarcă actele din perioada ${from || "început"} … ${to || "azi"}.`
+        : "Se descarcă TOATE actele emise.";
+    }
+    window.location.href = `/api/exports/purchase-acts-1c${q.toString() ? "?" + q : ""}`;
+  });
+}
+
 // Curatarea resturilor: fiecare rand se asaza la ZERO prin aceeasi corectie de inventar ca
 // manual, deci cu motiv, urma in audit si intrare in coloana „Corectii inventar" in ambele
 // ecrane. Nu scrie direct in stoc (regula 8: orice pierdere e RECUNOSCUTA).
