@@ -6489,7 +6489,7 @@ const EXPORT_1C_COLUMNS = [
   "Seria act", "Nr. act", "Data act", "Furnizor", "Cod fiscal / IDNP",
   "Produs", "Cantitate (kg)", "Unitate", "Pret (lei/kg)", "Valoare (lei)",
   "Cota impozit (%)", "Impozit retinut (lei)", "Spre plata (lei)",
-  "Depozit", "Temei", "Nr. recepție"
+  "Depozit", "Temei", "Nr. recepție", "Observatii export"
 ];
 
 async function exportPurchaseActsFor1c(options = {}) {
@@ -6522,6 +6522,19 @@ async function exportPurchaseActsFor1c(options = {}) {
       (item) => Number(item.id) === Number(cifre.supplierId || receipt.supplierId)
     );
     const cota = Number(receipt.withholdingPercent || 0);
+    // Codul fiscal e CHEIA de potrivire in 1C, nu o cifra de bani: aici conteaza sa fie
+    // ACELASI pe act si in nomenclatorul de furnizori, altfel 1C creeaza un furnizor nou si
+    // actul rămâne nelegat. Se exporta cel CURENT (cu care furnizorul intra in 1C), iar daca
+    // difera de cel inghetat pe act, se semnaleaza — hartia semnata are alt cod, deci actul
+    // ar trebui reemis.
+    const codCurent = String((partener && partener.idno) || "").trim();
+    const codInghetat = String(cifre.supplierIdno || "").trim();
+    const avertisment =
+      codInghetat && codCurent && codInghetat !== codCurent
+        ? `ATENTIE: pe actul semnat codul fiscal e ${codInghetat}, in nomenclator e ${codCurent}`
+        : !codCurent
+          ? "ATENTIE: furnizorul nu are cod fiscal in nomenclator — 1C nu il poate potrivi"
+          : "";
 
     for (const rand of cifre.rows || []) {
       const sursa = (state.receipts || []).find((r) => Number(r.id) === Number(rand.id)) || receipt;
@@ -6532,7 +6545,7 @@ async function exportPurchaseActsFor1c(options = {}) {
         "Nr. act": receipt.actNumber,
         "Data act": String(rand.date || receipt.actIssuedAt || "").slice(0, 10),
         Furnizor: cifre.supplierName || receipt.supplier || "",
-        "Cod fiscal / IDNP": cifre.supplierIdno || (partener && partener.idno) || "",
+        "Cod fiscal / IDNP": codCurent || codInghetat,
         Produs: rand.product || sursa.product || "",
         "Cantitate (kg)": kg.toFixed(3).replace(/\.?0+$/, ""),
         Unitate: "kg",
@@ -6545,7 +6558,8 @@ async function exportPurchaseActsFor1c(options = {}) {
         "Spre plata (lei)": Number(rand.netPay || 0).toFixed(2),
         Depozit: sursa.location || "",
         Temei: sursa.note || "",
-        "Nr. recepție": rand.id
+        "Nr. recepție": rand.id,
+        "Observatii export": avertisment
       });
     }
   }
@@ -6553,6 +6567,132 @@ async function exportPurchaseActsFor1c(options = {}) {
   // Ordine de dosar: pe numar de act, crescator.
   randuri.sort((a, b) => Number(a["Nr. act"]) - Number(b["Nr. act"]));
   return { columns: EXPORT_1C_COLUMNS, rows: randuri };
+}
+
+// ============================================================================
+// EXPORT PENTRU 1C — furnizori (`СправочникСсылка.Контрагenty`)
+//
+// Se incarca in 1C INAINTEA actelor: asa fiecare act gaseste furnizorul deja existent, deci
+// nu rămâne niciun camp gol si nu se creeaza dubluri.
+//
+// Cheia de potrivire e CODUL FISCAL (`ФискКод` in 1C — IDNP la persoane fizice), nu
+// denumirea: o diferenta de scriere („Anghelus" / „Anghelus Ruslan") ar crea un al doilea
+// furnizor. Un furnizor fara cod fiscal NU se exporta — ar intra in 1C nepotrivit cu nimic.
+//
+// Coloanele oglindesc exact ce are un contragent persoana fizica in exportul real din 1C:
+// `ФискКод`, `Наименование`, `НаименованиеПолное`, `ВидКонтрагента` (ЧастноеЛицо),
+// `ЮрАдрес`, `НеРезидент`, telefoane.
+const EXPORT_1C_SUPPLIER_COLUMNS = [
+  "Cod fiscal / IDNP", "Denumire", "Denumire completa", "Tip contraparte",
+  "Adresa juridica", "Telefon", "Nerezident", "Banca", "IBAN", "Profil fiscal"
+];
+
+async function exportSuppliersFor1c(options = {}) {
+  const state = readReceiptsState();
+  const config = readConfigState();
+  const from = String(options.from || "").trim();
+  const to = String(options.to || "").trim();
+  const doarDinActe = options.onlyFromActs !== false;
+  // DOAR FURNIZORII NOI: cei care nu au fost inca marcati ca incarcati in 1C. Aplicatia nu
+  // poate STI ce e in 1C, deci marcajul il pune omul, dupa un import reusit — altfel un
+  // import eșuat ar face furnizorii sa dispara din export si actele n-ar mai gasi pe nimeni.
+  const doarNoi = options.onlyNew !== false;
+
+  // Furnizorii care apar pe ACTELE din perioada: exact cei de care 1C are nevoie ca sa
+  // poata primi actele. Fara perioada, toti furnizorii cu cod fiscal.
+  let idUri = null;
+  if (doarDinActe) {
+    idUri = new Set();
+    for (const receipt of state.receipts || []) {
+      if (!(Number(receipt.actNumber || 0) > 0)) continue;
+      if (Number(receipt.actCarrierId || 0) > 0) continue;
+      const zi = String(receipt.actIssuedAt || receipt.createdAt || "").slice(0, 10);
+      if (from && zi < from) continue;
+      if (to && zi > to) continue;
+      const id = Number((receipt.actFigures && receipt.actFigures.supplierId) || receipt.supplierId);
+      if (id) idUri.add(id);
+    }
+  }
+
+  const profile = config.fiscalProfiles || [];
+  const randuri = [];
+  for (const p of config.partners || []) {
+    if (idUri && !idUri.has(Number(p.id))) continue;
+    if (!String(p.role || "").match(/furnizor|ambele/i)) continue;
+    if (doarNoi && String(p.exported1cAt || "").trim()) continue;
+    const cod = String(p.idno || "").trim();
+    // Fara cod fiscal nu are cu ce sa fie potrivit in 1C: ar intra ca furnizor nou si ar
+    // produce exact dublura pe care exportul o evita.
+    if (!cod) continue;
+
+    const prof = profile.find(
+      (f) => String(f.name || "").trim().toLowerCase() === String(p.fiscalProfile || "").trim().toLowerCase()
+    );
+    // Persoana fizica = cea la care se retine impozit la sursa (acelasi criteriu ca pe act).
+    const persoanaFizica = Number((prof || {}).withholdingPercent || 0) > 0;
+
+    randuri.push({
+      "Cod fiscal / IDNP": cod,
+      Denumire: String(p.name || "").trim(),
+      "Denumire completa": String(p.name || "").trim(),
+      "Tip contraparte": persoanaFizica ? "ЧастноеЛицо" : "ЮридическоеЛицо",
+      "Adresa juridica": String(p.address || "").trim(),
+      Telefon: String(p.phone || "").trim(),
+      Nerezident: "false",
+      Banca: String(p.bankName || "").trim(),
+      IBAN: String(p.iban || "").trim(),
+      "Profil fiscal": String(p.fiscalProfile || "").trim(),
+      _id: p.id
+    });
+  }
+
+  randuri.sort((a, b) => a.Denumire.localeCompare(b.Denumire, "ro", { sensitivity: "base" }));
+  return { columns: EXPORT_1C_SUPPLIER_COLUMNS, rows: randuri };
+}
+
+// Marcheaza furnizorii ca INCARCATI in 1C. Se apeleaza DUPA un import reusit, de catre om:
+// aplicatia nu are cum sa afle singura daca 1C i-a primit.
+// De atunci nu mai apar in exportul de furnizori noi, deci nu se mai creeaza dubluri.
+async function markSuppliersExported1c(payload = {}) {
+  const currentUser = payload.currentUser || {};
+  if (!CAN_EDIT_BILLING_ROLES.includes(normalizeRoleCode(currentUser.roleCode))) {
+    throw forbiddenError("Doar contabilul, managerul sau administratorul pot marca furnizorii.");
+  }
+  const brute = Array.isArray(payload.partnerIds) ? payload.partnerIds : [];
+  if (!brute.length || brute.some((v) => typeof v !== "number" && typeof v !== "string")) {
+    throw new Error("Lista de furnizori e invalida.");
+  }
+  const idUri = [...new Set(brute.map(Number))].filter((n) => Number.isInteger(n) && n > 0);
+  if (!idUri.length) {
+    throw new Error("Lista de furnizori e invalida.");
+  }
+
+  const config = readConfigState();
+  const acum = new Date().toISOString();
+  const marcati = [];
+  for (const p of config.partners || []) {
+    if (!idUri.includes(Number(p.id))) continue;
+    if (String(p.exported1cAt || "").trim()) continue; // deja marcat, nu se rescrie data
+    p.exported1cAt = acum;
+    marcati.push({ id: p.id, name: p.name, idno: p.idno });
+  }
+  if (!marcati.length) {
+    return { marked: [] };
+  }
+  writeConfigState(config);
+
+  const state = readReceiptsState();
+  createAuditEntry(state, {
+    entityType: "partner",
+    entityId: marcati[0].id,
+    action: "suppliers-marked-1c",
+    reason: `Marcati ca incarcati in 1C: ${marcati.map((m) => m.name).join(", ")}`,
+    user: payload.changedBy || "dashboard",
+    oldValue: { exported1cAt: null },
+    newValue: { exported1cAt: acum, partners: marcati }
+  });
+  writeReceiptsState(state);
+  return { marked: marcati };
 }
 
 async function exportResourceAsCsv(resource, roleCode) {
@@ -6694,6 +6834,8 @@ module.exports = {
   createUser,
   updateEntityNote,
   exportPurchaseActsFor1c,
+  exportSuppliersFor1c,
+  markSuppliersExported1c,
   exportResourceAsCsv,
   findUserByUsername,
   getConfig,

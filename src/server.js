@@ -84,6 +84,8 @@ const {
 } = require("./opening-handlers");
 const {
   exportPurchaseActs1cHandler,
+  exportSuppliers1cHandler,
+  markSuppliers1cHandler,
   exportResourceHandler,
   getDashboardHandler,
   getDeliveryDefaultsHandler,
@@ -716,6 +718,23 @@ app.get(
   "/api/exports/purchase-acts-1c",
   requireRoles(["accountant", "accountant-sef", "admin"]),
   exportPurchaseActs1cHandler
+);
+
+// Furnizorii de pe actele din perioada. Se incarca in 1C INAINTEA actelor, ca fiecare act
+// sa gaseasca furnizorul existent — fara cimpuri goale si fara dubluri.
+app.get(
+  "/api/exports/suppliers-1c",
+  requireRoles(["accountant", "accountant-sef", "admin"]),
+  exportSuppliers1cHandler
+);
+
+// Marcheaza furnizorii ca incarcati in 1C — apasat de om DUPA un import reusit. Aplicatia nu
+// poate sti singura daca 1C i-a primit, iar un marcaj automat pe descarcare i-ar scoate din
+// export chiar daca importul a cazut.
+app.post(
+  "/api/exports/suppliers-1c/mark",
+  requireRoles(["accountant", "accountant-sef", "manager", "admin"]),
+  markSuppliers1cHandler
 );
 
 // Exportul generic (CSV de lucru). Ruta de mai sus e DEASUPRA, altfel „purchase-acts-1c" ar

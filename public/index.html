@@ -2049,9 +2049,23 @@
                 <label>Până la<input type="date" id="export-1c-to" /></label>
               </div>
               <div class="report-actions" style="margin:6px 0">
-                <button type="button" id="export-1c-btn" class="cell-btn cell-btn-primary">⬇ Descarcă CSV</button>
+                <button type="button" id="export-1c-suppliers-btn" class="cell-btn">1 · Furnizori noi</button>
+                <button type="button" id="export-1c-mark-btn" class="cell-btn" hidden>✓ Am încărcat în 1C</button>
+                <button type="button" id="export-1c-btn" class="cell-btn cell-btn-primary">2 · Acte de achiziție</button>
                 <span class="field-hint" id="export-1c-hint"></span>
               </div>
+              <p class="field-hint" style="margin:2px 0 6px">
+                <b>Ordinea contează.</b> „Furnizori noi" scoate doar furnizorii care nu au
+                fost încă încărcați în 1C. După ce îi importezi acolo, apasă
+                <b>„Am încărcat în 1C"</b> — de atunci nu mai apar în export, deci nu se
+                creează dubluri. Apoi descarcă <b>actele</b>.
+              </p>
+              <p class="field-hint" style="margin:2px 0 6px">
+                Potrivirea în 1C se face după <b>codul fiscal / IDNP</b>, nu după denumire —
+                un furnizor fără cod fiscal nu se exportă, fiindcă 1C nu l-ar putea lega de
+                nimic. Marcajul se apasă de tine, nu automat la descărcare: dacă importul în
+                1C cade, furnizorii trebuie să rămână în export.
+              </p>
             </details>
 
             <details class="report-accordion" id="losses-report-accordion">

@@ -12,6 +12,13 @@ const PF = {
 };
 
 async function receptieEmisa(storage, { kg = 2907, pret = 6.15 } = {}) {
+  // Partenerul din nomenclator e cel pe care il citeste exportul de furnizori: trebuie sa
+  // fie acelasi cu cel de pe act, altfel 1C n-ar putea lega actul de furnizor.
+  await storage.updateConfigEntry("partners", 1, {
+    name: "Anghelus Ruslan", idno: "0960612543420", address: "s. Briceni",
+    role: "furnizor", fiscalProfile: "Persoana fizica",
+    changeReason: "test", changedBy: "admin"
+  });
   const est = computeReceiptEstimate({
     quantity: kg / 1000, price: pret, humidity: 14, impurity: 2,
     product: { humidityNorm: 14, impurityNorm: 2 },
@@ -110,5 +117,95 @@ test("filtrarea pe perioada", async () => {
     const azi = new Date().toISOString().slice(0, 10);
     assert.equal((await storage.exportPurchaseActsFor1c({ from: azi, to: azi })).rows.length, 1);
     assert.equal((await storage.exportPurchaseActsFor1c({ from: "2020-01-01", to: "2020-12-31" })).rows.length, 0);
+  });
+});
+
+test("exportul de furnizori scoate doar cei NOI, dupa marcare nu mai apar", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const CONT = { currentUser: { roleCode: "accountant" }, changedBy: "contabil" };
+    await receptieEmisa(storage);
+
+    // Prima descarcare: furnizorul e nou.
+    let r = await storage.exportSuppliersFor1c({});
+    assert.equal(r.rows.length, 1);
+    assert.equal(r.rows[0]["Cod fiscal / IDNP"], "0960612543420");
+    assert.equal(r.rows[0]["Tip contraparte"], "ЧастноеЛицо");
+
+    // Marcat ca incarcat in 1C -> nu mai apare.
+    const m = await storage.markSuppliersExported1c({ ...CONT, partnerIds: [r.rows[0]._id] });
+    assert.equal(m.marked.length, 1);
+    assert.equal((await storage.exportSuppliersFor1c({})).rows.length, 0);
+
+    // Dar se poate reincarca explicit, daca importul in 1C a cazut.
+    assert.equal((await storage.exportSuppliersFor1c({ onlyNew: false })).rows.length, 1);
+  });
+});
+
+test("furnizorul fara cod fiscal nu se exporta", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const est = computeReceiptEstimate({
+      quantity: 1, price: 6, humidity: 14, impurity: 2,
+      product: { humidityNorm: 14, impurityNorm: 2 },
+      tariffs: TARIFFS, fiscalProfile: { withholdingPercent: 6 }
+    });
+    const r = await storage.createReceipt({
+      supplier: "Fara cod", supplierId: 1, product: "Grau", productId: 1,
+      quantity: 1, grossQuantity: 1, unit: "tone", price: 6,
+      location: "Cilindru 1", locationId: 1, ...est
+    });
+    // Furnizor fara IDNO in nomenclator.
+    await storage.updateConfigEntry("partners", 1, {
+      name: "Fara cod", idno: "", role: "furnizor", fiscalProfile: "Persoana fizica",
+      changeReason: "test", changedBy: "admin"
+    });
+    await storage.assignActNumber([r.id], { ...PF, supplier: { name: "Fara cod", idno: "" } });
+
+    const out = await storage.exportSuppliersFor1c({});
+    assert.equal(out.rows.length, 0, "un furnizor fara cod fiscal nu are cum sa fie potrivit in 1C");
+  });
+});
+
+test("marcarea cere drept financiar si lista valida", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    await receptieEmisa(storage);
+    for (const rol of ["operator", "control", undefined]) {
+      await assert.rejects(
+        () => storage.markSuppliersExported1c({
+          currentUser: { roleCode: rol }, partnerIds: [1], changedBy: "x"
+        }),
+        /contabilul/i,
+        `rolul ${rol} nu trebuia sa poata`
+      );
+    }
+    const CONT = { currentUser: { roleCode: "accountant" }, changedBy: "contabil" };
+    for (const rea of [[], [true], [0], [-1]]) {
+      await assert.rejects(
+        () => storage.markSuppliersExported1c({ ...CONT, partnerIds: rea }),
+        /invalida/i
+      );
+    }
+  });
+});
+
+test("codul fiscal schimbat dupa emitere e SEMNALAT in export", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    await receptieEmisa(storage);
+
+    // Codul fiscal se corecteaza in nomenclator DUPA emiterea actului.
+    await storage.updateConfigEntry("partners", 1, {
+      name: "Anghelus Ruslan", idno: "0960612543999", address: "s. Briceni",
+      role: "furnizor", fiscalProfile: "Persoana fizica",
+      changeReason: "corectie IDNP", changedBy: "admin"
+    });
+
+    const r = (await storage.exportPurchaseActsFor1c({})).rows[0];
+    // Se exporta codul CURENT (cu care furnizorul intra in 1C), ca actul sa se lege.
+    assert.equal(r["Cod fiscal / IDNP"], "0960612543999");
+    // Si se spune explicit ca hartia semnata are alt cod.
+    assert.match(r["Observatii export"], /pe actul semnat codul fiscal e 0960612543420/);
   });
 });

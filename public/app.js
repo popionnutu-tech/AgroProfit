@@ -131,11 +131,45 @@ const stockDustHintEl = document.getElementById("stock-dust-hint");
 // Export pentru 1C: acte de achizitie pe perioada. Descarcarea se face prin navigare, nu
 // prin `fetch` + blob: raspunsul are deja `Content-Disposition`, iar cookie-ul de sesiune
 // merge la fel. Asa nu ținem in memorie un fisier care poate fi mare.
+function descarcaExport1c(ruta, eticheta) {
+  const from = (document.getElementById("export-1c-from") || {}).value || "";
+  const to = (document.getElementById("export-1c-to") || {}).value || "";
+  if (from && to && from > to) {
+    window.alert("Perioada e inversată: data de început e după cea de sfârșit.");
+    return;
+  }
+  const q = new URLSearchParams();
+  if (from) q.set("from", from);
+  if (to) q.set("to", to);
+  const hint = document.getElementById("export-1c-hint");
+  if (hint) {
+    hint.textContent = from || to
+      ? `${eticheta}: perioada ${from || "început"} … ${to || "azi"}.`
+      : `${eticheta}: toate înregistrările.`;
+  }
+  window.location.href = `${ruta}${q.toString() ? "?" + q : ""}`;
+}
+
 const export1cBtn = document.getElementById("export-1c-btn");
 if (export1cBtn) {
-  export1cBtn.addEventListener("click", () => {
+  export1cBtn.addEventListener("click", () =>
+    descarcaExport1c("/api/exports/purchase-acts-1c", "Acte de achiziție")
+  );
+}
+
+const export1cSuppliersBtn = document.getElementById("export-1c-suppliers-btn");
+const export1cMarkBtn = document.getElementById("export-1c-mark-btn");
+// Furnizorii descarcati ultima data: se tin ca sa poata fi marcati DUPA importul in 1C.
+let furnizoriDescarcati1c = [];
+
+if (export1cSuppliersBtn) {
+  // Se descarca PRIMUL: doar furnizorii NOI de pe actele din perioada. Aici folosim `fetch`,
+  // nu navigare, fiindca avem nevoie de id-urile din antet ca sa putem marca exact ce s-a
+  // descarcat — altfel am marca si furnizori care n-au intrat in fisier.
+  export1cSuppliersBtn.addEventListener("click", async () => {
     const from = (document.getElementById("export-1c-from") || {}).value || "";
     const to = (document.getElementById("export-1c-to") || {}).value || "";
+    const hint = document.getElementById("export-1c-hint");
     if (from && to && from > to) {
       window.alert("Perioada e inversată: data de început e după cea de sfârșit.");
       return;
@@ -143,13 +177,75 @@ if (export1cBtn) {
     const q = new URLSearchParams();
     if (from) q.set("from", from);
     if (to) q.set("to", to);
-    const hint = document.getElementById("export-1c-hint");
-    if (hint) {
-      hint.textContent = from || to
-        ? `Se descarcă actele din perioada ${from || "început"} … ${to || "azi"}.`
-        : "Se descarcă TOATE actele emise.";
+    export1cSuppliersBtn.disabled = true;
+    try {
+      const res = await fetch(`/api/exports/suppliers-1c${q.toString() ? "?" + q : ""}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Nu am putut descărca furnizorii.");
+      }
+      const text = await res.text();
+      furnizoriDescarcati1c = String(res.headers.get("X-Supplier-Ids") || "")
+        .split(",")
+        .map(Number)
+        .filter(Boolean);
+
+      // Doar antetul => niciun furnizor nou. Nu descarcam un fisier gol.
+      if (!furnizoriDescarcati1c.length) {
+        if (hint) hint.textContent = "Niciun furnizor nou în perioada aleasă — treci direct la acte.";
+        if (export1cMarkBtn) export1cMarkBtn.hidden = true;
+        return;
+      }
+
+      const url = URL.createObjectURL(new Blob([text], { type: "text/csv;charset=utf-8" }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `furnizori-1c-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      if (hint) {
+        hint.textContent =
+          `${furnizoriDescarcati1c.length} furnizori noi descărcați. ` +
+          "După ce îi încarci în 1C, apasă „Am încărcat în 1C”.";
+      }
+      if (export1cMarkBtn) export1cMarkBtn.hidden = false;
+    } catch (err) {
+      window.alert(err.message);
+    } finally {
+      export1cSuppliersBtn.disabled = false;
     }
-    window.location.href = `/api/exports/purchase-acts-1c${q.toString() ? "?" + q : ""}`;
+  });
+}
+
+if (export1cMarkBtn) {
+  export1cMarkBtn.addEventListener("click", async () => {
+    if (!furnizoriDescarcati1c.length) return;
+    const ok = window.confirm(
+      `Se marchează ${furnizoriDescarcati1c.length} furnizori ca încărcați în 1C.\n` +
+      "De atunci nu mai apar în export. Apasă OK doar dacă importul în 1C a reușit."
+    );
+    if (!ok) return;
+    export1cMarkBtn.disabled = true;
+    try {
+      const res = await fetch("/api/exports/suppliers-1c/mark", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ partnerIds: furnizoriDescarcati1c })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Nu am putut marca furnizorii.");
+      const hint = document.getElementById("export-1c-hint");
+      if (hint) {
+        hint.textContent = `${(data.marked || []).length} furnizori marcați. Treci la acte.`;
+      }
+      furnizoriDescarcati1c = [];
+      export1cMarkBtn.hidden = true;
+    } catch (err) {
+      window.alert(err.message);
+    } finally {
+      export1cMarkBtn.disabled = false;
+    }
   });
 }
 

@@ -520,6 +520,37 @@ citesc de pe cont la **fiecare cerere** (`attachCurrentUser`).
   cea curentă: fără token nou, omul primea 401 imediat după ce își schimba parola — iar pe un
   cont cu `requirePasswordChange` asta se întâmpla la FIECARE primă intrare.
 
+### 13. Export pentru 1C (acte de achiziție + furnizori)
+Varianta **intermediară**: CSV pe care contabilul îl încarcă în 1C. NU generăm direct
+`ФайлОбмена` — acolo 1C potrivește obiectele după **GUID**
+(`СинхронизироватьПоИдентификатору`), iar GUID-uri inventate de noi ar **crea furnizori și
+produse duplicate** la fiecare import.
+- **Ordinea contează:** întâi **furnizorii**, apoi **actele**. Altfel actele n-au cu ce să se
+  lege și rămân cu furnizorul gol — un act fără contraparte nu se poate contabiliza.
+- Se exportă **doar furnizorii NOI** (fără `exported1cAt`). Marcajul îl pune **omul**, după un
+  import reușit (`POST /api/exports/suppliers-1c/mark`) — nu automat la descărcare: dacă
+  importul în 1C cade, furnizorii trebuie să rămână în export. `?includeExported=1` îi aduce
+  înapoi pe toți, pentru reîncărcare.
+- **Cheia de potrivire e codul fiscal** (`ФискКод` în 1C; IDNP la persoane fizice), nu
+  denumirea — o diferență de scriere ar crea un al doilea furnizor. Un furnizor **fără cod
+  fiscal nu se exportă**: ar intra în 1C nepotrivit cu nimic.
+- Pe act, codul fiscal exportat e cel **CURENT** (cu care furnizorul intră în 1C), nu cel
+  îngheţat: aici e o cheie de identitate, nu o cifră de bani. Dacă diferă de cel de pe hârtia
+  semnată, coloana **„Observatii export"** o spune explicit — actul ar trebui reemis.
+- **Cifrele** sunt cele **îngheţate la emitere** (`actFigures`), nu recalculul de acum: altfel
+  exportul ar contrazice hârtia semnată. Se exportă doar actele EMISE, **o dată per act**
+  (captura stă pe purtător, deci un act pe N recepții dă N rânduri, nu N acte).
+- Verificat pe exportul real din 1C (`РКО`): `Сумма 8090.43`, `Нал05 485.43` — exact 6%, deci
+  suma e brută și impozitul se reține din ea. Exportul respectă aceeași aritmetică; există
+  test că `cantitate × preț = valoare` și `valoare − impozit = spre plată`.
+- **Impozitul** în 1C se ia din **ordinul de plată** (`РасходныйКассовый`, câmpul `Нал05`), nu
+  de pe act. E inclus în export doar pentru verificare.
+- CSV: separator `;`, BOM UTF-8 (se deschide corect în Excel pe setări ro/ru), zecimala
+  **PUNCT** — ca 1C să nu confunde separatorul de coloană cu cel zecimal. Un singur loc scrie
+  CSV-ul (`trimiteCsv1c`), ca setările să nu divergeze între cele două exporturi.
+- Ruta de export specific e înregistrată **înaintea** celei generice `/api/exports/:resource`,
+  altfel ar fi prinsă de ea.
+
 ## Deploy
 - **Push pe `main` → Vercel publică automat** pe agroprofit-plus.vercel.app (integrare Git activă).
 - Lucrează pe o **ramură separată** (implicit `dev`), testează pe preview, apoi fă merge în `main`.
