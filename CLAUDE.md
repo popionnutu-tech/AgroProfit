@@ -205,6 +205,13 @@ introducă. Îl creează în status **`Proiect`**.
   **Nu scrie direct în stoc:** orice pierdere e recunoscută. Corecțiile se fac **secvențial**
   — în paralel, ultima scriere ar șterge celelalte. Butonul apare doar când există ce curățat,
   doar pentru admin. Un prag `0` trimis explicit e RESPINS (nu cade pe valoarea implicită).
+  Pragul stă în `systemSettings.stockDustThresholdKg` (implicit 5), nu scris în cod: era
+  duplicat în backend și în frontend — exact tipul de divergență care a produs bugul de
+  1000× la facturare. **`updateSystemSettings` reconstruiește obiectul din listă**, deci
+  orice câmp nemenționat acolo se pierde la prima salvare de setări.
+  Un rând care cade nu abandonează lotul (se raportează în `skipped`), iar rândurile care
+  rezolvă la aceeași pereche canonică („Grau" / „grau") se sar — altfel al doilea găsea
+  delta 0 și opera tot lotul.
 - **Nu ascunde un rând negativ.** Se afișează tot ce nu e zero. Un minus ascuns rămâne fără
   butonul „Corectează" — vizibil în „Mișcarea stocului", imposibil de închis din „Stoc".
 
@@ -384,6 +391,15 @@ Actul de achiziție e document fiscal: numărul lui ajunge în dosarul de hârti
   Mecanismul folosit se consemnează pe document (`actNumberSource`) și în audit (`numberSource`):
   „postgres" sau „blob". Orice ALTĂ eroare de alocare se propagă — o alocare eșuată nu are voie
   să cadă tăcut pe metoda mai slabă.
+- **`ACT_NUMBERS_PG=1`** se setează DUPĂ ce migrarea e aplicată și verificată. De atunci,
+  derivarea din blob nu mai e acceptată ca rezervă: o alocare care nu trece prin Postgres
+  cade **zgomotos**. Fără comutator, un `PGRST202` tranzitoriu (cache de schemă vechi —
+  PostgREST folosește același cod și pentru „funcția nu există") ar emite un număr din blob,
+  deja rezervat în Postgres. Exact duplicatul pe care migrarea îl previne.
+- Migrarea ține un **marcaj de nivel** (`purchase_act_watermark`), monoton crescător.
+  Alocarea ia `greatest(max(number), watermark) + 1`, deci un `delete` pe registru — curățare
+  de test, restaurare, „am șters rândul greșit" — **nu poate reporni** numerotarea peste
+  numere deja tipărite și semnate.
 - ⚠️ **Fără migrare, unicitatea nu e garantată de cod, doar verificată.** Persistența e un blob JSON unic
   scris cu upsert necondiționat (fără versiune, fără compare-and-set) și cu debounce: o
   scriere concurentă poate reîncărca blobul de DINAINTE de atribuire și îl poate suprascrie —

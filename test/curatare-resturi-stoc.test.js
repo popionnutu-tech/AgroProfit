@@ -111,3 +111,49 @@ test("fara praf nu se face nicio corectie", async () => {
     assert.equal((await storage.listStockCorrections()).length, 0);
   });
 });
+
+test("pragul vine din setari, nu din cod, si se pastreaza la salvare", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const cfg = await storage.getConfig();
+    assert.equal(cfg.systemSettings.stockDustThresholdKg, 5, "lipseste pragul din setari");
+
+    await storage.updateSystemSettings({
+      stockDustThresholdKg: 12, changeReason: "prag nou", changedBy: "admin"
+    });
+    assert.equal((await storage.getConfig()).systemSettings.stockDustThresholdKg, 12);
+
+    // O salvare care NU menționează pragul nu are voie sa-l piarda.
+    await storage.updateSystemSettings({ closeOfDayHour: 18, changeReason: "alt camp", changedBy: "admin" });
+    assert.equal((await storage.getConfig()).systemSettings.stockDustThresholdKg, 12, "pragul s-a pierdut");
+
+    // O valoare invalida nu scrie peste una buna.
+    await storage.updateSystemSettings({ stockDustThresholdKg: 999, changeReason: "invalid", changedBy: "admin" });
+    assert.equal((await storage.getConfig()).systemSettings.stockDustThresholdKg, 12);
+  });
+});
+
+test("pragul din setari se aplica efectiv la curatare", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    await storage.createReceipt({
+      supplier: "F", supplierId: 1, product: "Rapita", productId: 1,
+      quantity: 0.008, grossQuantity: 0.008, provisionalNetQuantity: 0.008,
+      unit: "tone", price: 6, location: "Cilindru 1", locationId: 1
+    });
+    const ADMIN = { currentUser: { roleCode: "admin" }, changedBy: "admin" };
+
+    // 8 kg: peste pragul implicit de 5, deci nu se atinge.
+    let r = await storage.clearStockDust({ ...ADMIN, changeReason: "x" });
+    assert.equal(r.cleared.length, 0);
+    assert.equal(r.thresholdKg, 5);
+
+    // Pragul urcat la 10 din setari: acum 8 kg intra.
+    await storage.updateSystemSettings({
+      stockDustThresholdKg: 10, changeReason: "prag", changedBy: "admin"
+    });
+    r = await storage.clearStockDust({ ...ADMIN, changeReason: "x" });
+    assert.equal(r.thresholdKg, 10);
+    assert.equal(r.cleared.length, 1);
+  });
+});

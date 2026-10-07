@@ -41,6 +41,22 @@ comment on table public.purchase_act_numbers is
 -- Șirul pornește de la 914: actul lui Cojocari Ana din 02.10.2026, numerotat pe
 -- hârtie. Actele de dinainte rămân nenumerotate în aplicație — au numere scrise
 -- de mână și nu se rescrie nimic semnat.
+-- Marcajul de nivel: cel mai mare număr emis vreodată pentru o firmă. Crește DOAR.
+--
+-- Fără el, numerotarea se calculează din `max(number)` al tabelului, deci un `delete`
+-- (curățare de test, restaurare, „am șters rândul greșit") ar reporni șirul peste numere
+-- deja tipărite și semnate. Marcajul face repornirea imposibilă chiar dacă registrul
+-- e golit.
+create table if not exists public.purchase_act_watermark (
+  company_id  integer     not null primary key,
+  last_number integer     not null,
+  updated_at  timestamptz not null default now()
+);
+
+comment on table public.purchase_act_watermark is
+  'Cel mai mare număr de act emis per firmă. Monoton crescător: un delete pe '
+  'purchase_act_numbers nu poate reporni numerotarea.';
+
 create or replace function public.allocate_purchase_act_number(
   p_company_id integer,
   p_series     text,
@@ -66,13 +82,25 @@ begin
   -- cu alocarea de acte, fără nicio legătură logică.
   perform pg_advisory_xact_lock(hashtext('purchase_act_number'), p_company_id);
 
-  select coalesce(max(number), 913) + 1
-    into v_number
-    from public.purchase_act_numbers
-   where company_id = p_company_id;
+  -- Cel mai mare dintre: ce e în registru acum și marcajul de nivel. Așa un `delete`
+  -- pe registru nu poate reporni numerotarea peste numere deja tipărite.
+  select greatest(
+           coalesce((select max(number) from public.purchase_act_numbers
+                      where company_id = p_company_id), 913),
+           coalesce((select last_number from public.purchase_act_watermark
+                      where company_id = p_company_id), 913)
+         ) + 1
+    into v_number;
 
   insert into public.purchase_act_numbers (company_id, number, series, receipt_ids)
   values (p_company_id, v_number, coalesce(p_series, ''), coalesce(p_receipt_ids, '[]'::jsonb));
+
+  -- Marcajul crește doar: `greatest` împiedică scăderea chiar dacă s-ar apela în altă ordine.
+  insert into public.purchase_act_watermark (company_id, last_number)
+  values (p_company_id, v_number)
+  on conflict (company_id) do update
+    set last_number = greatest(public.purchase_act_watermark.last_number, excluded.last_number),
+        updated_at  = now();
 
   return v_number;
 end;
@@ -97,6 +125,9 @@ revoke all on function public.allocate_purchase_act_number(integer, text, jsonb)
 grant execute on function public.allocate_purchase_act_number(integer, text, jsonb)
   to service_role;
 revoke all on table public.purchase_act_numbers from anon, authenticated;
+
+alter table public.purchase_act_watermark enable row level security;
+revoke all on table public.purchase_act_watermark from anon, authenticated;
 
 -- ============================================================================
 -- SEMĂNAREA din numerele deja emise
@@ -124,6 +155,16 @@ where k.key = 'receipts'
   and (r->>'actNumber')::integer > 0
 on conflict (company_id, number) do nothing;
 
+-- Marcajul pornește de la cel mai mare număr semănat: altfel un `delete` imediat după
+-- migrare ar readuce numerotarea la 914.
+insert into public.purchase_act_watermark (company_id, last_number)
+select company_id, max(number)
+  from public.purchase_act_numbers
+ group by company_id
+on conflict (company_id) do update
+  set last_number = greatest(public.purchase_act_watermark.last_number, excluded.last_number),
+      updated_at  = now();
+
 -- ============================================================================
 -- VERIFICARE (opțional, rulează separat după migrare)
 --
@@ -134,8 +175,12 @@ on conflict (company_id, number) do nothing;
 -- Următorul număr care se va aloca pentru firma 1:
 --   select coalesce(max(number), 913) + 1 from public.purchase_act_numbers where company_id = 1;
 --
+-- Marcajul de nivel (nu scade niciodată):
+--   select * from public.purchase_act_watermark order by company_id;
+--
 -- NU rula `allocate_purchase_act_number` „de test": fiecare apel CONSUMĂ definitiv un
--- număr din șirul fiscal. Testează pe o firmă inexistentă (ex. 999) și șterge după:
+-- număr din șirul fiscal. Testează pe o firmă inexistentă (ex. 999) și curăță AMBELE:
 --   select public.allocate_purchase_act_number(999, 'TEST', '[]'::jsonb);
---   delete from public.purchase_act_numbers where company_id = 999;
+--   delete from public.purchase_act_numbers   where company_id = 999;
+--   delete from public.purchase_act_watermark where company_id = 999;
 -- ============================================================================

@@ -1376,7 +1376,9 @@ function renderStockSummary(summary) {
   const canCorrectStock = currentSessionUser?.roleCode === "admin";
   // Praful: resturi de cateva kg, din rotunjiri si din documente retroactive. Butonul apare
   // DOAR cand exista ce curatat — altfel e un buton care nu face nimic.
-  const PRAG_PRAF_KG = 5;
+  // Pragul vine din nomenclator (`systemSettings`), nu scris aici: duplicat in doua locuri,
+  // era exact tipul de divergenta care a produs bug-ul de 1000x la facturare.
+  const PRAG_PRAF_KG = Number(currentConfig?.systemSettings?.stockDustThresholdKg) || 5;
   const praf = stockRows.filter((item) => {
     const kg = Math.abs(Number(item.quantity || 0) * 1000);
     return kg > 0 && kg < PRAG_PRAF_KG;

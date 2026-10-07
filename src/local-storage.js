@@ -191,6 +191,10 @@ const defaultConfigState = {
     reportChannel: "telegram",
     reportAudience: "manager,control",
     defaultCurrency: "MDL",
+    // Pragul sub care un rest de stoc e considerat „praf" si se poate asaza la zero in bloc.
+    // Tinut AICI, nu duplicat in cod: era scris si in backend si in frontend, exact tipul de
+    // duplicare care a produs bug-ul de 1000x la facturare.
+    stockDustThresholdKg: 5,
     migrationVersion: ""
   }
 };
@@ -305,6 +309,10 @@ function normalizeCurrency(value) {
 // DINAINTE rămân nenumerotate in aplicatie: au deja numere scrise de mana si nu se rescrie
 // nimic din ce e deja semnat (decizia utilizatorului, 03.10.2026).
 const ACT_NUMBER_START = 914;
+// Se seteaza DUPA ce migrarea de numerotare atomica e aplicata si verificata. De atunci,
+// derivarea din blob (mai slaba) nu mai e acceptata ca rezerva.
+const REQUIRE_PG_ACT_NUMBERS =
+  ["1", "true", "yes"].includes(String(process.env.ACT_NUMBERS_PG || "").trim().toLowerCase());
 // Doar achizitiile de la PERSOANE FIZICE consuma numere: actul de achizitie se intocmeste
 // acolo, fiindca acolo se retine impozitul la sursa. Astfel sirul rămâne compact si coincide
 // cu dosarul de hartie.
@@ -2037,6 +2045,18 @@ async function assignActNumber(ids, options = {}) {
     if (numar) sursaNumar = "postgres";
   }
   if (!numar) {
+    // DUPA migrare, fallback-ul nu mai e plasa de siguranta, e un RISC: PostgREST intoarce
+    // acelasi `PGRST202` si pentru „functia nu exista" si pentru un cache de schema vechi.
+    // Un astfel de eșec tranzitoriu ar face sa se emita un numar din blob, care in Postgres
+    // e deja rezervat — exact duplicatul pe care migrarea il previne.
+    // `ACT_NUMBERS_PG=1` se seteaza DUPA ce migrarea e aplicata si verificata: de atunci,
+    // o alocare care nu trece prin Postgres cade zgomotos, nu tacit.
+    if (REQUIRE_PG_ACT_NUMBERS) {
+      throw new Error(
+        "Numerotarea atomica nu a raspuns (ACT_NUMBERS_PG=1). Nu s-a emis niciun numar: " +
+        "reincearca. Daca se repeta, verifica functia allocate_purchase_act_number."
+      );
+    }
     numar = nextActNumber(state, companie);
   }
 
@@ -5653,7 +5673,10 @@ async function listStockCorrections() {
 // Se asaza la ZERO prin ACEEASI corectie de inventar ca manual (`createStockCorrection`):
 // fiecare rand primeste urma in audit si intra in coloana „Corectii inventar" in AMBELE
 // ecrane. Nu se scrie direct in stoc — regula 8 cere ca orice pierdere sa fie recunoscuta.
-const STOCK_DUST_THRESHOLD_KG = 5;
+function stockDustThresholdKg() {
+  const din = Number((readConfigState().systemSettings || {}).stockDustThresholdKg);
+  return Number.isFinite(din) && din > 0 && din <= 50 ? din : 5;
+}
 
 async function clearStockDust(payload = {}) {
   const currentUser = payload.currentUser || {};
@@ -5665,7 +5688,7 @@ async function clearStockDust(payload = {}) {
   const pragBrut = payload.thresholdKg;
   const prag =
     pragBrut === undefined || pragBrut === null || String(pragBrut).trim() === ""
-      ? STOCK_DUST_THRESHOLD_KG
+      ? stockDustThresholdKg()
       : Number(String(pragBrut).replace(",", ".").trim());
   if (!Number.isFinite(prag) || prag <= 0 || prag > 50) {
     throw new Error("Pragul trebuie sa fie un numar intre 0 si 50 kg.");
@@ -6302,7 +6325,16 @@ async function updateSystemSettings(payload) {
     closeOfDayHour: sanitizeNumber(payload.closeOfDayHour ?? state.systemSettings.closeOfDayHour),
     reportChannel: String(payload.reportChannel || state.systemSettings.reportChannel).trim(),
     reportAudience: normalizeReportAudience(payload.reportAudience || state.systemSettings.reportAudience),
-    defaultCurrency: String(payload.defaultCurrency || state.systemSettings.defaultCurrency).trim()
+    defaultCurrency: String(payload.defaultCurrency || state.systemSettings.defaultCurrency).trim(),
+    // `systemSettings` se reconstruieste din lista, deci un camp nemenționat aici se PIERDE
+    // la prima salvare de setari. Pragul se pastreaza, iar o valoare in afara intervalului
+    // (0, 50] e ignorata — nu scrie peste o setare buna cu una invalida.
+    stockDustThresholdKg: (() => {
+      const cerut = Number(payload.stockDustThresholdKg);
+      if (Number.isFinite(cerut) && cerut > 0 && cerut <= 50) return cerut;
+      const curent = Number(state.systemSettings.stockDustThresholdKg);
+      return Number.isFinite(curent) && curent > 0 && curent <= 50 ? curent : 5;
+    })()
   };
   writeConfigState(state);
   const receiptsState = readReceiptsState();
