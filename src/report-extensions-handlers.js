@@ -1,9 +1,13 @@
 const {
+  exportPurchaseActsFor1c,
+  exportSuppliersFor1c,
+  markSuppliersExported1c,
   exportResourceAsCsv,
   getDashboardSnapshot,
   getDeliveryDefaults,
   getReceiptDefaults
 } = require("./storage");
+const { getActorLabel } = require("./auth");
 
 function sendJson(res, statusCode, payload) {
   if (typeof res.status === "function" && typeof res.json === "function") {
@@ -47,6 +51,69 @@ async function getDashboardHandler(req, res) {
   }
 }
 
+// Export pentru 1C: acte de achizitie pe o perioada.
+// `;` ca separator si BOM UTF-8: asa se deschide corect in Excel pe setarile ro/ru, fara
+// „toate coloanele intr-una". Zecimala e PUNCT, ca 1C sa nu confunde separatorul de coloana
+// cu cel zecimal.
+function trimiteCsv1c(res, columns, rows, numeFisier) {
+  const linie = (valori) =>
+    valori
+      .map((v) => {
+        const t = String(v === null || v === undefined ? "" : v);
+        return /[";\n\r]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
+      })
+      .join(";");
+  const csv = [linie(columns), ...rows.map((r) => linie(columns.map((c) => r[c])))].join("\r\n");
+  if (typeof res.setHeader === "function") {
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${numeFisier}"`);
+  }
+  if (typeof res.status === "function") res.status(200);
+  else res.statusCode = 200;
+  res.end("\ufeff" + csv);
+}
+
+async function exportPurchaseActs1cHandler(req, res) {
+  try {
+    const { columns, rows } = await exportPurchaseActsFor1c({
+      from: req.query && req.query.from,
+      to: req.query && req.query.to
+    });
+    trimiteCsv1c(res, columns, rows, `acte-achizitie-1c-${new Date().toISOString().slice(0, 10)}.csv`);
+  } catch (error) {
+    console.error("Failed to export purchase acts for 1C:", error.message);
+    return sendJson(res, 400, { error: error.message || "Nu am putut exporta actele." });
+  }
+}
+
+// Furnizorii de pe actele din perioada. Se incarca in 1C INAINTEA actelor.
+async function exportSuppliers1cHandler(req, res) {
+  try {
+    const { columns, rows } = await exportSuppliersFor1c({
+      from: req.query && req.query.from,
+      to: req.query && req.query.to,
+      // `?all=1` -> toti furnizorii cu cod fiscal, nu doar cei din perioada.
+      onlyFromActs: !["1", "true"].includes(String((req.query || {}).all || "").toLowerCase()),
+      // `?includeExported=1` -> si cei deja marcati (pentru reincarcare, daca importul a cazut).
+      onlyNew: !["1", "true"].includes(String((req.query || {}).includeExported || "").toLowerCase())
+    });
+    // Id-urile ajung in antet, nu in CSV: 1C n-are ce face cu ele, dar interfata are nevoie
+    // de ele ca sa poata marca exact furnizorii descarcati.
+    if (typeof res.setHeader === "function") {
+      res.setHeader("X-Supplier-Ids", rows.map((r) => r._id).join(","));
+    }
+    const curate = rows.map((r) => {
+      const copie = { ...r };
+      delete copie._id;
+      return copie;
+    });
+    trimiteCsv1c(res, columns, curate, `furnizori-1c-${new Date().toISOString().slice(0, 10)}.csv`);
+  } catch (error) {
+    console.error("Failed to export suppliers for 1C:", error.message);
+    return sendJson(res, 400, { error: error.message || "Nu am putut exporta furnizorii." });
+  }
+}
+
 async function exportResourceHandler(req, res, resource) {
   try {
     const csv = await exportResourceAsCsv(resource, req.currentUser && req.currentUser.roleCode);
@@ -67,7 +134,27 @@ async function exportResourceHandler(req, res, resource) {
   }
 }
 
+// Marcheaza furnizorii ca incarcati in 1C. Apelat de om DUPA un import reusit.
+async function markSuppliers1cHandler(req, res) {
+  try {
+    const rezultat = await markSuppliersExported1c({
+      partnerIds: (req.body || {}).partnerIds,
+      currentUser: req.currentUser || {},
+      changedBy: getActorLabel(req)
+    });
+    return sendJson(res, 200, { ok: true, ...rezultat });
+  } catch (error) {
+    console.error("Failed to mark suppliers as exported:", error.message);
+    return sendJson(res, error.statusCode || 400, {
+      error: error.message || "Nu am putut marca furnizorii."
+    });
+  }
+}
+
 module.exports = {
+  markSuppliers1cHandler,
+  exportPurchaseActs1cHandler,
+  exportSuppliers1cHandler,
   exportResourceHandler,
   getDashboardHandler,
   getDeliveryDefaultsHandler,

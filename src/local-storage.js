@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const { createPasswordRecord } = require("./auth");
@@ -190,6 +191,10 @@ const defaultConfigState = {
     reportChannel: "telegram",
     reportAudience: "manager,control",
     defaultCurrency: "MDL",
+    // Pragul sub care un rest de stoc e considerat „praf" si se poate asaza la zero in bloc.
+    // Tinut AICI, nu duplicat in cod: era scris si in backend si in frontend, exact tipul de
+    // duplicare care a produs bug-ul de 1000x la facturare.
+    stockDustThresholdKg: 5,
     migrationVersion: ""
   }
 };
@@ -210,7 +215,50 @@ const configEntities = [
   "fields"
 ];
 
-const defaultUserPassword = process.env.DEFAULT_USER_PASSWORD || "Agro2026!";
+// Parola cu care se seamana conturile fara parola si adminul de pornire.
+//
+// NU are voie sa fie o constanta in cod: repo-ul e PUBLIC, deci o valoare scrisa aici e
+// cunoscuta de oricine si functioneaza pe orice cont care nu si-a schimbat parola inca.
+// Daca `DEFAULT_USER_PASSWORD` nu e setata, se genereaza una ALEATOARE si se scrie in logul
+// serverului — bootstrap-ul rămâne posibil, dar nimic nu e cunoscut din afara.
+// Parola cu care se seamana conturile fara parola si adminul de pornire.
+//
+// LENESA, nu constanta la incarcarea modulului: o aruncare aici lasa `api/index.js` cu
+// `app = null`, deci FIECARE cerere raspunde 500 — inclusiv login-ul. O cerinta de mediu nu
+// are voie sa doboare serverul; se cade doar pe drumul care are efectiv nevoie de parola.
+let parolaInitialaCache = null;
+
+function defaultUserPasswordValue() {
+  if (parolaInitialaCache) return parolaInitialaCache;
+
+  const dinMediu = String(process.env.DEFAULT_USER_PASSWORD || "").trim();
+  if (dinMediu) {
+    parolaInitialaCache = dinMediu;
+    return parolaInitialaCache;
+  }
+
+  const publicat = String(process.env.STORAGE_DRIVER || "").trim().toLowerCase() === "supabase";
+  if (publicat) {
+    // In productie nu se logheaza nimic: parola ar ajunge in logurile platformei, vizibile
+    // oricui are acces la proiect si pastrate cu retentie. Nici nu se genereaza tacit o
+    // parola „valabila": un cont semanat cu ea ar fi inaccesibil oricum. Se cade cu mesaj
+    // clar, DOAR daca se ajunge aici (in practica: niciun admin activ).
+    throw new Error(
+      "DEFAULT_USER_PASSWORD nu e setata. Seteaz-o in variabilele de mediu inainte de a " +
+      "crea conturi initiale — altfel parola ar ajunge in loguri."
+    );
+  }
+
+  // Local: se genereaza si se scrie in consola, ca sa fie posibila prima intrare.
+  // Se garanteaza o CIFRA: politica stricta cere una, iar din 12 caractere base64url una
+  // din opt parole nu avea niciuna — si pornirea cadea exact pe calea de recuperare.
+  parolaInitialaCache = `Ap${crypto.randomInt(10)}-${crypto.randomBytes(9).toString("base64url")}!`;
+  console.warn(
+    "[securitate] DEFAULT_USER_PASSWORD nu e setata (mediu local). Parola initiala pentru " +
+    `aceasta pornire: ${parolaInitialaCache}`
+  );
+  return parolaInitialaCache;
+}
 
 const DELIVERY_STATUSES = ["Proiect", "Confirmat", "Livrat", "Inchis", "Anulat", "Redeschis", "Returnat"];
 const RECEIPT_STATUSES = ["Proiect", "In descarcare", "Draft", "Procesata", "Confirmat", "Inchis", "Anulat", "Redeschis"];
@@ -261,6 +309,10 @@ function normalizeCurrency(value) {
 // DINAINTE rămân nenumerotate in aplicatie: au deja numere scrise de mana si nu se rescrie
 // nimic din ce e deja semnat (decizia utilizatorului, 03.10.2026).
 const ACT_NUMBER_START = 914;
+// Se seteaza DUPA ce migrarea de numerotare atomica e aplicata si verificata. De atunci,
+// derivarea din blob (mai slaba) nu mai e acceptata ca rezerva.
+const REQUIRE_PG_ACT_NUMBERS =
+  ["1", "true", "yes"].includes(String(process.env.ACT_NUMBERS_PG || "").trim().toLowerCase());
 // Doar achizitiile de la PERSOANE FIZICE consuma numere: actul de achizitie se intocmeste
 // acolo, fiindca acolo se retine impozitul la sursa. Astfel sirul rămâne compact si coincide
 // cu dosarul de hartie.
@@ -486,7 +538,7 @@ function ensureUserSecurityState(users = []) {
     }
 
     if (!nextUser.passwordSalt || !nextUser.passwordHash) {
-      const passwordRecord = createPasswordRecord(defaultUserPassword, { mode: "lenient" });
+      const passwordRecord = createPasswordRecord(defaultUserPasswordValue(), { mode: "lenient" });
       nextUser.passwordSalt = passwordRecord.salt;
       nextUser.passwordHash = passwordRecord.hash;
       if (nextUser.requirePasswordChange === undefined) {
@@ -512,7 +564,9 @@ function ensureBootstrapAdmin(users = []) {
   }
 
   const nextUsers = [...users];
-  const passwordRecord = createPasswordRecord(defaultUserPassword);
+  // Politica LENIENT, ca la celelalte doua apeluri: o parola venita din variabila de mediu
+  // nu are voie sa impiedice crearea adminului de recuperare.
+  const passwordRecord = createPasswordRecord(defaultUserPasswordValue(), { mode: "lenient" });
   nextUsers.push({
     id: nextUsers.reduce((max, item) => Math.max(max, Number(item.id || 0)), 0) + 1,
     name: "Administrator",
@@ -522,6 +576,10 @@ function ensureBootstrapAdmin(users = []) {
     active: true,
     passwordSalt: passwordRecord.salt,
     passwordHash: passwordRecord.hash,
+    // OBLIGATORIU: parola de pornire e cunoscuta (din variabila de mediu sau din log).
+    // Fara asta, `ensureUserSecurityState` o lasa pe `false` la urmatoarea citire (hash-ul
+    // exista deja), deci credentialul rămânea valabil nelimitat.
+    requirePasswordChange: true,
     createdAt: new Date().toISOString()
   });
 
@@ -1784,48 +1842,318 @@ function nextActNumber(state, companyId) {
   return Math.max(maxim + 1, ACT_NUMBER_START);
 }
 
+// Numarul NU se intoarce pana nu e DURABIL si purtat de EXACT receptiile actului.
+//
+// Persistenta e un blob JSON unic, scris cu upsert necondiționat (fara versiune, fara
+// compare-and-set) si cu debounce. O scriere concurenta — operatorul salveaza o receptie in
+// timp ce contabilul tipareste — poate reincarca blobul DE DINAINTE de atribuire si il poate
+// suprascrie: hartia iese cu 914, datele nu mai stiu de el, iar actul urmator ia din nou 914.
+//
+// Mitigarea nu elimina cursa (pentru asta e nevoie de alocare atomica in baza), dar o face
+// VIZIBILA. Rulează si dupa scrierea de REPARARE: altfel reparatia insasi putea fi o scriere
+// pierduta, iar receptiile nemarcate ardeau un numar nou mai tarziu.
+async function assertActNumberPersisted(numar, companyId, idsAsteptate, sursa) {
+  await flushPendingWrites();
+  if (!USE_SUPABASE || !kvBackend) return;
+  // Cu alocare ATOMICA, numarul e deja rezervat in Postgres si nu se poate refolosi, iar
+  // `flushPendingWrites` arunca daca scrierea a eșuat. Recitirea blobului INTREG (pana la
+  // zeci de MB, de trei ori per act tiparit) nu mai aduce nimic.
+  // Pe calea veche (derivare din blob) verificarea rămâne singura aparare: acolo numarul
+  // s-ar putea refolosi, deci se plateste citirea.
+  if (sursa === "postgres") return;
+  let persistat = null;
+  try {
+    persistat = await kvBackend.loadKv("receipts", null);
+  } catch (err) {
+    throw new Error(
+      "Nu am putut confirma salvarea numarului de act. Nu tipari actul: reincearca."
+    );
+  }
+  const cuNumar = ((persistat && persistat.receipts) || []).filter(
+    (item) =>
+      Number(item.actNumber || 0) === Number(numar) &&
+      Number(item.actCompanyId || 0) === Number(companyId || 0)
+  );
+  const gasite = cuNumar.map((item) => Number(item.id)).sort((a, b) => a - b).join(",");
+  const asteptate = [...new Set(idsAsteptate.map(Number))].sort((a, b) => a - b).join(",");
+  if (gasite !== asteptate) {
+    // Cu alocare atomica numarul rămâne REZERVAT in Postgres chiar daca blobul s-a pierdut:
+    // nu se refoloseste, deci reincercarea e sigura. Fara ea, reincercarea putea produce un
+    // duplicat — de aceea mesajul e diferit.
+    throw new Error(
+      sursa === "postgres"
+        ? `Numarul ${numar} e rezervat, dar documentul nu s-a salvat. Nu tipari actul: reincearca (numarul nu se refoloseste).`
+        : `Numarul ${numar} nu s-a inregistrat corect (o alta operatie a scris in acelasi timp). Nu tipari actul: reincearca.`
+    );
+  }
+  receiptsCache = persistat;
+}
+
 // Atribuie numarul actului de achizitie. IDEMPOTENT: daca receptia are deja numar, il
 // intoarce neschimbat. Un numar atribuit NU se schimba niciodata — altfel reimprimarea ar
 // da alt numar decat cel din dosar, iar doua acte ar putea purta acelasi numar.
-async function assignActNumber(id, options = {}) {
+// `ids` = TOATE receptiile acoperite de act. Un act care acopera mai multe receptii consuma
+// UN numar, dar il primesc toate: marcat doar pe cea mai veche, una dintre celelalte tiparita
+// ulterior individual apare nenumerotata si ARDE un numar nou pentru marfa deja acoperita —
+// dubla invizibila, imposibil de prins din interfata.
+async function assignActNumber(ids, options = {}) {
   const state = readReceiptsState();
-  const receipt = (state.receipts || []).find((item) => item.id === Number(id));
-  if (!receipt) {
-    throw new Error("Receptia nu a fost gasita.");
+
+  // Intrare tipizata: `.map(Number)` accepta booleeni si tablouri imbricate.
+  const brute = Array.isArray(ids) ? ids : [ids];
+  // `Number(true)` e 1 si `Number([7])` e 7: fara verificarea de TIP, un boolean sau un
+  // tablou imbricat devine un id valid si marcheaza o receptie la intamplare.
+  if (!brute.length || brute.some((v) => typeof v !== "number" && typeof v !== "string")) {
+    throw new Error("Lista de receptii pentru act e invalida.");
   }
+  const lista = [...new Set(brute.map(Number))];
+  if (lista.some((id) => !Number.isInteger(id) || id <= 0)) {
+    throw new Error("Lista de receptii pentru act e invalida.");
+  }
+  if (lista.length > 50) {
+    throw new Error("Un act nu poate acoperi mai mult de 50 de receptii.");
+  }
+
+  const receipts = lista.map((id) => {
+    const found = (state.receipts || []).find((item) => item.id === id);
+    if (!found) throw new Error(`Receptia #${id} nu a fost gasita.`);
+    return found;
+  });
+  const receipt = receipts[0];
 
   const role = normalizeRoleCode(options.actorRole);
   if (!CAN_ISSUE_ACTS_ROLES.includes(role)) {
     throw forbiddenError("Doar contabilul sau administratorul pot emite acte de achizitie.");
   }
-  if (Number(receipt.actNumber || 0) > 0) {
-    return receipt; // deja emis — acelasi numar, oricate reimprimari
+
+  // „In stoc" se verifica INAINTE de orice ieșire: altfel o retiparire cu o receptie-proiect
+  // in selectie scotea hartie pentru marfa care n-a intrat.
+  for (const item of receipts) {
+    if (!isReceiptInStock(item)) {
+      throw new Error(`Receptia #${item.id} nu e in stoc (${item.status}). Nu se emite act pentru ea.`);
+    }
   }
-  if (!isReceiptInStock(receipt)) {
-    throw new Error("Receptia nu e in stoc (proiect/anulata). Nu se emite act pentru ea.");
+
+  // ACT DEJA EMIS. Se intoarce acelasi numar, dar numai daca selectia e EXACT cea acoperita:
+  // o selectie amestecata (acoperit + marfa noua) reactiva actul vechi, tiparea alt conținut
+  // sub acelasi numar fiscal, iar marfa noua ramanea pe niciun act.
+  const dejaEmis = receipts.find((item) => Number(item.actNumber || 0) > 0);
+  if (dejaEmis) {
+    const purtator =
+      receipts.find((item) => item.actFigures) ||
+      (state.receipts || []).find(
+        (item) =>
+          item.actFigures &&
+          Number(item.actNumber) === Number(dejaEmis.actNumber) &&
+          Number(item.actCompanyId || 0) === Number(dejaEmis.actCompanyId || 0)
+      ) ||
+      dejaEmis;
+    const acoperite = [...new Set(
+      ((purtator.actFigures && purtator.actFigures.receiptIds) || [Number(dejaEmis.id)]).map(Number)
+    )];
+    // REIMPRIMARE: selectia e o parte din actul emis (ex. de pe randul unei singure receptii
+    // acoperite). Se intoarce actul INTREG, cu toate randurile lui — nu un act de un rand sub
+    // acelasi numar fiscal.
+    // EMITERE AMESTECATA: unele acoperite, altele nu. Refuzata: altfel actul vechi se reactiva
+    // cu alt conținut sub acelasi numar, iar marfa noua rămânea pe niciun act.
+    // DUPLICAT. Verificarea post-scriere arunca si cere reincercare; dar reincercarea intra
+    // aici, gaseste un numar si il intoarce — deci un numar dublat de o scriere pierduta
+    // trecea drept succes. Doua acte semnate, doi furnizori, acelasi numar in dosar.
+    // Se numara cine poarta numarul: trebuie sa fie exact receptiile actului.
+    const purtatoriiNumarului = (state.receipts || []).filter(
+      (item) =>
+        Number(item.actNumber || 0) === Number(dejaEmis.actNumber) &&
+        Number(item.actCompanyId || 0) === Number(dejaEmis.actCompanyId || 0)
+    );
+    const strainiPeNumar = purtatoriiNumarului.filter(
+      (item) => !acoperite.includes(Number(item.id))
+    );
+    if (strainiPeNumar.length) {
+      throw new Error(
+        `Numarul ${dejaEmis.actSeries || ""} ${dejaEmis.actNumber} e purtat si de receptiile ` +
+        `${strainiPeNumar.map((x) => x.id).join(",")}, care nu fac parte din acest act. ` +
+        "Numar dublat — nu tipari: e nevoie de intervenție pe date."
+      );
+    }
+
+    const neacoperite = lista.filter((id) => !acoperite.includes(id));
+    if (neacoperite.length) {
+      throw new Error(
+        `Receptiile ${acoperite.join(",")} sunt deja pe actul ${dejaEmis.actSeries || ""} ${dejaEmis.actNumber}, iar ${neacoperite.join(",")} nu. Emite un act separat pentru ele sau storneaza actul.`
+      );
+    }
+    // Reparare: o scriere partiala (purtator marcat, restul nu) nu are voie sa treaca drept
+    // succes la reincercare — altfel recepțiile nemarcate ard un numar nou mai tarziu.
+    let reparat = false;
+    const aleActului = (state.receipts || []).filter((item) => acoperite.includes(Number(item.id)));
+    for (const item of aleActului) {
+      if (Number(item.actNumber || 0) !== Number(dejaEmis.actNumber)) {
+        item.actNumber = dejaEmis.actNumber;
+        item.actSeries = dejaEmis.actSeries;
+        item.actCompanyId = dejaEmis.actCompanyId;
+        item.actIssuedAt = dejaEmis.actIssuedAt;
+        reparat = true;
+      }
+      // Referinta, nu copie (vezi mai sus). Purtatorul isi pastreaza captura.
+      if (item.id !== purtator.id && Number(item.actCarrierId || 0) !== Number(purtator.id)) {
+        item.actCarrierId = purtator.id;
+        delete item.actFigures;
+        reparat = true;
+      }
+    }
+    if (reparat) {
+      writeReceiptsState(state);
+      await assertActNumberPersisted(
+        dejaEmis.actNumber,
+        dejaEmis.actCompanyId,
+        acoperite,
+        dejaEmis.actNumberSource
+      );
+    }
+    return purtator;
   }
+
   // Numar consumat degeaba = gaura in sirul din dosar, imposibil de explicat la control.
   if (options.isNaturalPerson !== true) {
     throw new Error("Actul de achizitie se intocmeste doar la cumpararea de la persoane fizice.");
   }
-
   if (!options.companyId) {
     throw new Error("Firma emitenta e obligatorie: seria si numarul se inregistreaza pe act.");
   }
-  receipt.actNumber = nextActNumber(state, options.companyId);
-  receipt.actSeries = String(options.series || "").trim();
-  receipt.actCompanyId = options.companyId ? Number(options.companyId) : null;
-  receipt.actIssuedAt = new Date().toISOString();
-  receipt.updatedAt = receipt.actIssuedAt;
+  // Un act e al UNUI furnizor. Lipsa furnizorului pe ambele parti nu inseamna „acelasi".
+  for (const item of receipts) {
+    if (!Number(item.supplierId)) {
+      throw new Error(`Receptia #${item.id} nu are furnizor. Nu se emite act pe ea.`);
+    }
+    if (Number(item.supplierId) !== Number(receipt.supplierId)) {
+      throw new Error("Actul de achizitie acopera receptiile unui singur furnizor.");
+    }
+  }
+
+  const serie = String(options.series || "").trim();
+  const companie = Number(options.companyId);
+  const acum = new Date().toISOString();
+
+  // Alocare ATOMICA in PostgreSQL, cand migrarea e aplicata: advisory lock pe firma +
+  // cheie primara (firma, numar), deci duplicatul e IMPOSIBIL, nu doar detectat.
+  // Daca functia nu exista (migrarea nu e rulata), se cade pe derivarea din blob — mai
+  // slaba, dar aplicatia merge. Diferenta se vede in `numberSource`, consemnata in audit.
+  let numar = null;
+  let sursaNumar = "blob";
+  if (USE_SUPABASE && kvBackend && typeof kvBackend.allocateActNumber === "function") {
+    numar = await kvBackend.allocateActNumber(companie, serie, lista);
+    if (numar) sursaNumar = "postgres";
+  }
+  if (!numar) {
+    // DUPA migrare, fallback-ul nu mai e plasa de siguranta, e un RISC: PostgREST intoarce
+    // acelasi `PGRST202` si pentru „functia nu exista" si pentru un cache de schema vechi.
+    // Un astfel de eșec tranzitoriu ar face sa se emita un numar din blob, care in Postgres
+    // e deja rezervat — exact duplicatul pe care migrarea il previne.
+    // `ACT_NUMBERS_PG=1` se seteaza DUPA ce migrarea e aplicata si verificata: de atunci,
+    // o alocare care nu trece prin Postgres cade zgomotos, nu tacit.
+    if (REQUIRE_PG_ACT_NUMBERS) {
+      throw new Error(
+        "Numerotarea atomica nu a raspuns (ACT_NUMBERS_PG=1). Nu s-a emis niciun numar: " +
+        "reincearca. Daca se repeta, verifica functia allocate_purchase_act_number."
+      );
+    }
+    numar = nextActNumber(state, companie);
+  }
+
+  // Se ingheata RANDURILE, nu doar totalurile: randul se construia din receptie, deci dupa o
+  // corectie de suma actul se contrazicea pe aceeasi hartie (rand 35.756,10 sub total
+  // 17.878,05, pe un formular care afirma „5 = 3 x 4"). Se pastreaza si denumirea produsului,
+  // DATELE (rubrica „din / от" intra si in codul QR) si identitatea parților: nomenclatorul
+  // se poate redenumi, iar furnizorul se poate schimba dupa emitere.
+  const randuri = receipts.map((item) => {
+    const kg = receiptPayableTonnes(item) * 1000;
+    const brut = Number(item.preliminaryMerchandiseValue || 0) || kg * Number(item.price || 0);
+    const net = Number(item.amountToPay ?? item.preliminaryPayableAmount ?? 0) || brut;
+    return {
+      id: item.id,
+      product: String(item.product || ""),
+      date: item.receivedAt || item.createdAt || "",
+      netKg: Number(kg.toFixed(3)),
+      value: Number(brut.toFixed(2)),
+      netPay: Number(net.toFixed(2))
+    };
+  });
+  const total = randuri.reduce(
+    (acc, r) => ({ kg: acc.kg + r.netKg, brut: acc.brut + r.value, net: acc.net + r.netPay }),
+    { kg: 0, brut: 0, net: 0 }
+  );
+  // Identitatea PARTILOR si antetul FIRMEI se ingheata la fel ca banii. Altfel:
+  //  - IDNP-ul si adresa furnizorului (rubrica legala a formularului) se citeau LIVE, iar
+  //    operatorul creeaza adesea furnizorul doar cu numele, contabilul completeaza IDNP-ul
+  //    dupa ce actul e semnat — retiparirea nu mai era hartia semnata;
+  //  - antetul firmei se lua din selectia de acum, iar la dezactivarea firmei emitente se
+  //    cadea pe prima firma activa: ALT emitent sub acelasi numar.
+  // Datele vin din handler (acolo e nomenclatorul); magazia nu citeste configul.
+  const snapshot = {
+    netKg: Number(total.kg.toFixed(3)),
+    value: Number(total.brut.toFixed(2)),
+    netPay: Number(total.net.toFixed(2)),
+    tax: Math.max(Number((total.brut - total.net).toFixed(2)), 0),
+    rows: randuri,
+    receiptIds: lista,
+    companyId: companie,
+    series: serie,
+    supplierId: Number(receipt.supplierId),
+    supplierName: String((options.supplier && options.supplier.name) || receipt.supplier || ""),
+    supplierIdno: String((options.supplier && options.supplier.idno) || ""),
+    supplierAddress: String((options.supplier && options.supplier.address) || ""),
+    company: {
+      name: String((options.company && options.company.name) || ""),
+      shortName: String((options.company && options.company.shortName) || ""),
+      idno: String((options.company && options.company.idno) || ""),
+      address: String((options.company && options.company.address) || ""),
+      admin: String((options.company && options.company.admin) || ""),
+      logoUrl: String((options.company && options.company.logoUrl) || "")
+    }
+  };
+
+  for (const item of receipts) {
+    item.actNumber = numar;
+    item.actNumberSource = sursaNumar;
+    item.actSeries = serie;
+    item.actCompanyId = companie;
+    item.actIssuedAt = acum;
+    // Captura o SINGURA data, pe purtator. Scrisa pe toate, un act de 50 de receptii
+    // ingrosa blobul cu 364 KB — iar blobul se descarca la FIECARE cerere.
+    // Celelalte primesc o referinta: tiparirea rezolva captura prin purtator, deci nu mai
+    // cade pe recalcul (asta era gaura inchisa anterior prin duplicare).
+    if (item.id === receipt.id) {
+      item.actFigures = snapshot;
+      delete item.actCarrierId;
+    } else {
+      delete item.actFigures;
+      item.actCarrierId = receipt.id;
+    }
+    item.updatedAt = acum;
+  }
 
   createAuditEntry(state, {
     entityType: "receipt",
     entityId: receipt.id,
     action: "receipt-act-number",
-    reason: `Act de achizitie emis: ${receipt.actSeries} ${receipt.actNumber}`,
+    reason: `Act de achizitie emis: ${serie} ${numar}`,
     user: options.changedBy || "dashboard",
     oldValue: { actNumber: null },
-    newValue: { actNumber: receipt.actNumber, actSeries: receipt.actSeries }
+    newValue: {
+      actNumber: numar,
+      actSeries: serie,
+      receiptIds: lista,
+      numberSource: sursaNumar,
+      // Doar totalurile: captura intreaga (cu toate randurile si antetul firmei) mai era o
+      // copie completa in `auditLogs`, in ACELASI blob care se descarca la fiecare cerere.
+      // Cifrele de pe hartie se citesc de pe document, prin `actFigures` al purtatorului.
+      totals: {
+        netKg: snapshot.netKg,
+        value: snapshot.value,
+        netPay: snapshot.netPay,
+        tax: snapshot.tax
+      }
+    }
   });
 
   writeReceiptsState(state);
@@ -1841,29 +2169,7 @@ async function assignActNumber(id, options = {}) {
   // Mitigarea nu elimina cursa (pentru asta e nevoie de alocare atomica in baza), dar o
   // face VIZIBILA: fortam scrierea, recitim din KV si verificam. Daca numarul nu s-a
   // persistat sau apare de doua ori, aruncam — mai bine fara act decat cu numar dublat.
-  const atribuit = receipt.actNumber;
-  await flushPendingWrites();
-  if (USE_SUPABASE && kvBackend) {
-    let persistat = null;
-    try {
-      persistat = await kvBackend.loadKv("receipts", null);
-    } catch (err) {
-      throw new Error(
-        "Nu am putut confirma salvarea numarului de act. Nu tipari actul: reincearca."
-      );
-    }
-    const cuNumar = ((persistat && persistat.receipts) || []).filter(
-      (item) =>
-        Number(item.actNumber || 0) === atribuit &&
-        Number(item.actCompanyId || 0) === Number(receipt.actCompanyId || 0)
-    );
-    if (cuNumar.length !== 1 || Number(cuNumar[0].id) !== Number(receipt.id)) {
-      throw new Error(
-        `Numarul ${atribuit} nu s-a inregistrat corect (o alta operatie a scris in acelasi timp). Nu tipari actul: reincearca.`
-      );
-    }
-    receiptsCache = persistat;
-  }
+  await assertActNumberPersisted(numar, companie, lista, sursaNumar);
   return receipt;
 }
 
@@ -4131,6 +4437,9 @@ async function updateReceiptStatusWithAudit(id, status, payload = {}) {
 
   assertStatusChangePermission(receipt.status, status, payload.actorRole);
   assertReceiptStatusTransition(receipt.status, status);
+  if (status === "Anulat") {
+    assertNoIssuedAct(receipt, "anula");
+  }
   receipt.status = status;
   receipt.updatedAt = new Date().toISOString();
 
@@ -4174,6 +4483,7 @@ async function updateReceiptSupplier(id, partnerId, changedBy) {
   if (!receipt) {
     throw new Error("Receptia nu a fost gasita.");
   }
+  assertNoIssuedAct(receipt, "schimba furnizorul");
 
   const config = readConfigState();
   const partner = (config.partners || []).find((item) => item.id === Number(partnerId));
@@ -4338,6 +4648,11 @@ async function correctReceiptTerms(id, payload = {}) {
   if (receipt.termCorrections.length > 20) {
     receipt.termCorrections = receipt.termCorrections.slice(-20);
   }
+  marcheazaDivergentaAct(
+    receipt,
+    `Conditii corectate (${newFlag ? "plata pe masa cu apa" : "plata pe masa fara apa"}, ` +
+    `pret ${newPrice} lei/kg): ${reason}`
+  );
   receipt.updatedAt = now;
 
   createAuditEntry(state, {
@@ -4419,6 +4734,7 @@ async function updateReceiptAmount(id, amount, changedBy, note) {
     note: comment
   });
   receipt.amountNote = comment; // ultima justificare, pentru afisare rapida
+  marcheazaDivergentaAct(receipt, `Suma corectata manual la ${value.toFixed(2)} lei: ${comment}`);
   receipt.updatedAt = now;
 
   createAuditEntry(state, {
@@ -4495,6 +4811,19 @@ function reassignPartnerReferences(oldId, newId, changedBy) {
   const newName = String(target.name || "");
 
   const state = readReceiptsState();
+  // O receptie cu act EMIS nu-si schimba furnizorul nici prin fuziune de parteneri. Garda
+  // exista pe `updateReceiptSupplier`, dar acest drum o ocolea: dupa fuziune, `actFigures`
+  // pastra numele si IDNP-ul partenerului A, iar receptia arata partenerul B — document si
+  // registru pe doi furnizori diferiti, sub acelasi numar de act.
+  const cuActEmis = (state.receipts || []).filter(
+    (r) => Number(r.supplierId) === from && Number(r.actNumber || 0) > 0
+  );
+  if (cuActEmis.length) {
+    throw new Error(
+      `Receptiile ${cuActEmis.map((r) => `#${r.id} (act ${r.actSeries || ""} ${r.actNumber})`).join(", ")} ` +
+      "au acte de achizitie emise. Fuziunea le-ar schimba furnizorul sub acelasi numar de act."
+    );
+  }
   const counts = {
     receipts: 0,
     transactions: 0,
@@ -4715,14 +5044,20 @@ async function reopenReceipt(id, payload = {}) {
   return receipt;
 }
 
-async function getStats() {
+// `receiptsGata` = receptiile DEJA calculate de apelant. `listReceipts` face alocarea FIFO a
+// platilor per partener (cu sortare per grup) si cloneaza fiecare receptie; rulata de doua ori
+// in aceeasi cerere, dubla degeaba cea mai scumpa agregare din aplicatie.
+async function getStats(receiptsGata) {
   const openingDocuments = await listOpeningDocuments();
-  const receipts = await listReceipts();
+  const receipts = Array.isArray(receiptsGata) ? receiptsGata : await listReceipts();
   const processings = await listProcessings();
   const transactions = await listTransactions();
   const deliveries = await listDeliveries();
   const complaints = await listComplaints();
-  const auditLogs = await listAuditLogs();
+  // NU `listAuditLogs()`: acela SORTEAZA tot jurnalul (zeci de mii de intrari, cu
+  // `new Date()` in comparator) pentru doua numere care se obtin cu o singura trecere —
+  // o treime din costul lui `getStats`. Sortarea e necesara doar la AFISAREA jurnalului.
+  const auditLogs = readReceiptsState().auditLogs || [];
   const partnerAdvances = await listPartnerAdvances();
   const transfers = await listTransfers();
   const stockCorrections = await listStockCorrections();
@@ -4956,6 +5291,40 @@ async function cancelTransfer(id, options = {}) {
 
 // Anulare receptie (admin/manager). Receptia anulata e deja exclusa din stoc.
 // Blocata daca are livrari active (altfel ar lasa stocul inconsistent).
+// Un act de achizitie EMIS e hartie semnata, cu numar, in dosarul fiscal. Orice operatie
+// care ar face documentul sa nu mai corespunda hartiei lasa numarul orfan: „Anulat" in
+// aplicatie (ascuns pe unele roluri) si o gaura in sir, imposibil de explicat la control.
+// Sursa UNICA: garda era scrisa doar in `cancelReceipt`, iar ruta de status o ocolea.
+// Cifrele actului sunt INGHEȚATE pe hartie, deci o corectie ulterioara nu le schimba — dar
+// atunci REGISTRUL pleaca de sub hartie: retinerea la sursa declarata pe act nu mai e cea din
+// evidenta. Nu se blocheaza (decizia utilizatorului, 06.10.2026): se MARCHEAZA, ca divergenta
+// sa fie vizibila si explicabila, nu descoperita la control.
+function marcheazaDivergentaAct(receipt, motiv) {
+  if (!(Number((receipt && receipt.actNumber) || 0) > 0)) return;
+  if (!Array.isArray(receipt.actDivergences)) receipt.actDivergences = [];
+  receipt.actDivergences.push({
+    at: new Date().toISOString(),
+    reason: String(motiv || "").trim().slice(0, 200),
+    actNumber: receipt.actNumber,
+    actSeries: receipt.actSeries || "",
+    // Cifrele de pe hartie, ca sa se vada fata de ce a divergat registrul.
+    actValue: Number((receipt.actFigures && receipt.actFigures.value) || 0),
+    actNetPay: Number((receipt.actFigures && receipt.actFigures.netPay) || 0)
+  });
+  // Pe document se pastreaza ultimele 20; istoricul complet rămâne in audit.
+  if (receipt.actDivergences.length > 20) {
+    receipt.actDivergences = receipt.actDivergences.slice(-20);
+  }
+}
+
+function assertNoIssuedAct(receipt, operatie) {
+  if (Number((receipt && receipt.actNumber) || 0) > 0) {
+    throw new Error(
+      `Pe aceasta receptie s-a emis actul ${receipt.actSeries || ""} ${receipt.actNumber}. Nu se poate ${operatie}: storneaza actul intai.`
+    );
+  }
+}
+
 async function cancelReceipt(id, options = {}) {
   const state = readReceiptsState();
   const receipt = state.receipts.find((item) => item.id === Number(id));
@@ -4965,14 +5334,7 @@ async function cancelReceipt(id, options = {}) {
   if (receipt.status === "Anulat") {
     return receipt;
   }
-  // Un act de achizitie EMIS e hartie semnata, cu numar, in dosarul fiscal. Anularea
-  // receptiei ar lasa numarul orfan: document „Anulat" in aplicatie (ascuns pe unele roluri)
-  // si o gaura in sir, imposibil de explicat la control. Se storneaza actul pe hartie intai.
-  if (Number(receipt.actNumber || 0) > 0) {
-    throw new Error(
-      `Pe aceasta receptie s-a emis actul ${receipt.actSeries || ""} ${receipt.actNumber}. Nu se poate anula: storneaza actul intai.`
-    );
-  }
+  assertNoIssuedAct(receipt, "anula");
   const reason = String(options.reason || "").trim();
   if (!reason) {
     throw new Error("Motivul anularii este obligatoriu.");
@@ -5304,6 +5666,104 @@ async function listStockCorrections() {
   );
 }
 
+// Praful din cilindri: resturi de cateva kg, pozitive sau negative, rămase din rotunjiri si
+// din documente retroactive. Nu sunt marfa, dar colorează ecranul in roșu si nu se pot inchide
+// decat una cu una.
+//
+// Se asaza la ZERO prin ACEEASI corectie de inventar ca manual (`createStockCorrection`):
+// fiecare rand primeste urma in audit si intra in coloana „Corectii inventar" in AMBELE
+// ecrane. Nu se scrie direct in stoc — regula 8 cere ca orice pierdere sa fie recunoscuta.
+function stockDustThresholdKg() {
+  const din = Number((readConfigState().systemSettings || {}).stockDustThresholdKg);
+  return Number.isFinite(din) && din > 0 && din <= 50 ? din : 5;
+}
+
+async function clearStockDust(payload = {}) {
+  const currentUser = payload.currentUser || {};
+  if (normalizeRoleCode(currentUser.roleCode) !== "admin") {
+    throw forbiddenError("Doar administratorul poate corecta stocul.");
+  }
+  // ABSENT => valoarea implicita. Dar un 0 TRIMIS explicit nu are voie sa cada pe 5: ar
+  // insemna „n-am cerut nimic" si ar curata totusi. Aceeasi capcana ca la `countedQuantity`.
+  const pragBrut = payload.thresholdKg;
+  const prag =
+    pragBrut === undefined || pragBrut === null || String(pragBrut).trim() === ""
+      ? stockDustThresholdKg()
+      : Number(String(pragBrut).replace(",", ".").trim());
+  if (!Number.isFinite(prag) || prag <= 0 || prag > 50) {
+    throw new Error("Pragul trebuie sa fie un numar intre 0 si 50 kg.");
+  }
+  const reason = requiredText(payload.changeReason || payload.reason, "Motivul corectiei");
+
+  // Sumarul se calculeaza O SINGURA data si se injecteaza in fiecare corectie. Inainte,
+  // fiecare rand il recalcula complet (~77 ms la 3 ani de date): 160 de rânduri insemnau
+  // ~25-40 s pe platforma, adica timeout si LOT PIERDUT dupa ce calculul se facuse.
+  const state = readReceiptsState();
+  const summary = stockSummaryFromState(state);
+  const praf = (summary.byLocation || []).filter((line) => {
+    const kg = Math.abs(Number(line.quantity || 0) * 1000);
+    return kg > 0 && kg < prag;
+  });
+
+  // Plafon per apel. Motivul e CPU, nu scrierile: salvarile se coaleseaza pe cheie, deci N
+  // corectii dau O scriere. Dar fiecare corectie era o agregare completa peste tot blobul —
+  // de aceea sumarul se calculeaza o data si se injecteaza. Plafonul rămâne ca plasa de
+  // siguranta: pe serverless un timeout la jumatate ar lasa operatia partial aplicata, cu
+  // raspunsul pierdut (datele rămân curate, fiecare rand e o corectie auditata separat).
+  const MAX_PER_APEL = 100;
+  const deFacut = praf.slice(0, MAX_PER_APEL);
+  const rest = Math.max(praf.length - deFacut.length, 0);
+
+  const corectate = [];
+  const sarite = [];
+  const perechiFacute = new Set();
+  for (const line of deFacut) {
+    // Produsul se potriveste case-insensitive la corectie, dar randurile de stoc se grupeaza
+    // pe denumirea exacta. „Grau" si „grau" in aceeasi locatie rezolva la ACELASI rand
+    // canonic: primul se corecteaza, al doilea ar gasi delta 0 si ar aborta tot lotul.
+    const cheie = `${String(line.location || "").trim().toLowerCase()}::${String(line.product || "").trim().toLowerCase()}`;
+    if (perechiFacute.has(cheie)) continue;
+    perechiFacute.add(cheie);
+    // Secvential, cu sumarul injectat si scrierea amanata: o singura trecere peste stoc si o
+    // singura scriere de blob la final, in loc de N recalculari si N rescrieri.
+    // Un rand care cade NU are voie sa abandoneze lotul: cele dinainte sunt deja corectate,
+    // iar o aruncare le-ar lasa aplicate fara ca omul sa afle ce s-a facut.
+    let corectie = null;
+    try {
+      corectie = await createStockCorrection({
+        location: line.location,
+        product: line.product,
+        countedQuantity: 0,
+        changeReason: `${reason} (rest sub ${prag} kg)`,
+        currentUser,
+        changedBy: payload.changedBy,
+        summary,
+        deferWrite: true
+      });
+    } catch (error) {
+      sarite.push({
+        location: line.location,
+        product: line.product,
+        error: error.message || "corectie eșuata"
+      });
+      continue;
+    }
+    corectate.push({
+      location: line.location,
+      product: line.product,
+      kg: Math.round(Number(line.quantity || 0) * 1000 * 1000) / 1000,
+      correctionId: corectie && corectie.id
+    });
+  }
+  // O singura scriere, la final. ATENTIE: daca vreodata `createStockCorrection` ajunge sa
+  // faca I/O real (un log, o verificare in baza), debounce-ul s-ar declansa la mijlocul
+  // buclei si s-ar trece la N rescrieri ale blobului intreg.
+  if (corectate.length) {
+    writeReceiptsState(state);
+  }
+  return { thresholdKg: prag, cleared: corectate, skipped: sarite, remaining: rest };
+}
+
 async function createStockCorrection(payload = {}) {
   const state = readReceiptsState();
   const currentUser = payload.currentUser || {};
@@ -5338,7 +5798,12 @@ async function createStockCorrection(payload = {}) {
   // locatie+produs nu exista, o greseala de scriere ar crea stoc fantoma in loc sa corecteze
   // randul real. Potrivirea pe produs e case-insensitive (ca la locatie), iar valorile
   // canonice se preiau din stoc, ca sa se potriveasca sigur la recalcul.
-  const summary = stockSummaryFromState(state);
+  // Sumarul se poate INJECTA: la curatarea in masa, recalculul complet al stocului per rand
+  // costa ~77 ms, deci 160 de rânduri ar depasi limita de 30 s a platformei si tot lotul s-ar
+  // pierde DUPA ce calculul s-a facut. Corectia e un offset constant per pereche
+  // locatie+produs, iar randurile curatate sunt perechi distincte — acelasi sumar e valabil
+  // pentru toate.
+  const summary = payload.summary || stockSummaryFromState(state);
   const line = summary.byLocation.find(
     (i) =>
       sameLocation(i.location, location) &&
@@ -5405,7 +5870,11 @@ async function createStockCorrection(payload = {}) {
     newValue: { location: canonicalLocation, product: canonicalProduct, quantity: counted, delta }
   });
 
-  writeReceiptsState(state);
+  // `deferWrite`: apelantul scrie o singura data, la final. O scriere per rand ar rescrie
+  // blobul intreg de N ori.
+  if (payload.deferWrite !== true) {
+    writeReceiptsState(state);
+  }
   return correction;
 }
 
@@ -5486,7 +5955,12 @@ async function updateUserPasswordById(userId, password) {
   user.passwordSalt = passwordRecord.salt;
   user.passwordHash = passwordRecord.hash;
   user.requirePasswordChange = false;
-  user.updatedAt = new Date().toISOString();
+  // Parola schimbata => sesiunile emise INAINTE nu mai sunt valabile. Tokenul e stateless,
+  // deci singura cale de a-l invalida e sa stim de cand incolo nu mai e bun (verificat in
+  // `attachCurrentUser`). Fara asta, cineva cu tokenul furat il folosea pana la expirare,
+  // desi parola fusese deja schimbata.
+  user.sessionsRevokedAt = new Date().toISOString();
+  user.updatedAt = user.sessionsRevokedAt;
   writeConfigState(state);
   return sanitizeUserForClient(user);
 }
@@ -5640,7 +6114,7 @@ async function createConfigEntry(entity, payload) {
   const passwordRecord =
     entity === "users"
       ? createPasswordRecord(
-          normalized.password || defaultUserPassword,
+          normalized.password || defaultUserPasswordValue(),
           { mode: passwordExplicit ? "strict" : "lenient" }
         )
       : null;
@@ -5778,9 +6252,19 @@ async function updateConfigEntry(entity, id, payload) {
   }
 
   const adminResetPassword = entity === "users" && normalized.password;
+  // Dezactivarea, schimbarea rolului sau resetarea parolei de catre admin taie sesiunile
+  // existente. Altfel un cont dezactivat sau retrogradat pastra drepturile vechi pana la
+  // expirarea tokenului — pana la 12 ore.
+  const taieSesiuni =
+    entity === "users" &&
+    (adminResetPassword ||
+      normalized.active === false ||
+      (normalized.roleCode !== undefined &&
+        normalizeRoleCode(normalized.roleCode) !== normalizeRoleCode(existing.roleCode)));
 
   Object.assign(existing, normalized, {
-    updatedAt: new Date().toISOString()
+    updatedAt: new Date().toISOString(),
+    ...(taieSesiuni ? { sessionsRevokedAt: new Date().toISOString() } : {})
   });
 
   if (adminResetPassword) {
@@ -5841,7 +6325,16 @@ async function updateSystemSettings(payload) {
     closeOfDayHour: sanitizeNumber(payload.closeOfDayHour ?? state.systemSettings.closeOfDayHour),
     reportChannel: String(payload.reportChannel || state.systemSettings.reportChannel).trim(),
     reportAudience: normalizeReportAudience(payload.reportAudience || state.systemSettings.reportAudience),
-    defaultCurrency: String(payload.defaultCurrency || state.systemSettings.defaultCurrency).trim()
+    defaultCurrency: String(payload.defaultCurrency || state.systemSettings.defaultCurrency).trim(),
+    // `systemSettings` se reconstruieste din lista, deci un camp nemenționat aici se PIERDE
+    // la prima salvare de setari. Pragul se pastreaza, iar o valoare in afara intervalului
+    // (0, 50] e ignorata — nu scrie peste o setare buna cu una invalida.
+    stockDustThresholdKg: (() => {
+      const cerut = Number(payload.stockDustThresholdKg);
+      if (Number.isFinite(cerut) && cerut > 0 && cerut <= 50) return cerut;
+      const curent = Number(state.systemSettings.stockDustThresholdKg);
+      return Number.isFinite(curent) && curent > 0 && curent <= 50 ? curent : 5;
+    })()
   };
   writeConfigState(state);
   const receiptsState = readReceiptsState();
@@ -5972,6 +6465,234 @@ function toCsvField(value) {
     return `"${str.replace(/"/g, '""')}"`;
   }
   return str;
+}
+
+// ============================================================================
+// EXPORT PENTRU 1C — act de achizitie (recepții de la persoane fizice)
+//
+// Varianta „intermediara": contabilul incarca fisierul in 1C prin prelucrarea obisnuita de
+// import. NU generam direct `ФайлОбмена`: acolo 1C potriveste obiectele dupa GUID
+// (`СинхронизироватьПоИдентификатору`), iar GUID-uri inventate de noi ar CREA furnizori si
+// produse duplicate la fiecare import.
+//
+// Coloanele oglindesc documentul `ПрихНалоговаяНакладная` / `ВидОперации = АктЗакупки`:
+// numarul si data actului, contrapartida cu codul fiscal, nomenclatorul, cantitatea, pretul,
+// valoarea, cota si impozitul reținut, suma de plata, depozitul.
+//
+// Impozitul: in 1C se ia din ORDINUL DE PLATA (`РасходныйКассовый`, campul `Нал05`), nu de pe
+// act. Il punem totusi in export, ca sa poata fi confruntat — pe exemplul real,
+// 8090,43 lei x 6% = 485,43, exact cat scrie in ordinul de plata.
+//
+// CIFRELE: pe un act EMIS se exporta cele INGHEȚATE la emitere (`actFigures`), nu recalculul
+// de acum. Altfel exportul ar contrazice hartia semnata si dosarul.
+const EXPORT_1C_COLUMNS = [
+  "Seria act", "Nr. act", "Data act", "Furnizor", "Cod fiscal / IDNP",
+  "Produs", "Cantitate (kg)", "Unitate", "Pret (lei/kg)", "Valoare (lei)",
+  "Cota impozit (%)", "Impozit retinut (lei)", "Spre plata (lei)",
+  "Depozit", "Temei", "Nr. recepție", "Observatii export"
+];
+
+async function exportPurchaseActsFor1c(options = {}) {
+  const state = readReceiptsState();
+  const config = readConfigState();
+  const from = String(options.from || "").trim();
+  const to = String(options.to || "").trim();
+  const inInterval = (value) => {
+    const zi = String(value || "").slice(0, 10);
+    if (!zi) return false;
+    if (from && zi < from) return false;
+    if (to && zi > to) return false;
+    return true;
+  };
+
+  const randuri = [];
+  for (const receipt of state.receipts || []) {
+    // Doar acte EMISE: un act neemis nu are numar, deci nu are ce cauta in contabilitate.
+    if (!(Number(receipt.actNumber || 0) > 0)) continue;
+    if (!isReceiptInStock(receipt)) continue;
+    if (!inInterval(receipt.actIssuedAt || receipt.receivedAt || receipt.createdAt)) continue;
+
+    // Captura sta pe PURTATOR; celelalte receptii ale actului au doar referinta. Se exporta
+    // o data per act, de pe purtator — altfel acelasi act ar aparea de N ori.
+    if (Number(receipt.actCarrierId || 0) > 0) continue;
+    const cifre = receipt.actFigures;
+    if (!cifre) continue;
+
+    const partener = (config.partners || []).find(
+      (item) => Number(item.id) === Number(cifre.supplierId || receipt.supplierId)
+    );
+    const cota = Number(receipt.withholdingPercent || 0);
+    // Codul fiscal e CHEIA de potrivire in 1C, nu o cifra de bani: aici conteaza sa fie
+    // ACELASI pe act si in nomenclatorul de furnizori, altfel 1C creeaza un furnizor nou si
+    // actul rămâne nelegat. Se exporta cel CURENT (cu care furnizorul intra in 1C), iar daca
+    // difera de cel inghetat pe act, se semnaleaza — hartia semnata are alt cod, deci actul
+    // ar trebui reemis.
+    const codCurent = String((partener && partener.idno) || "").trim();
+    const codInghetat = String(cifre.supplierIdno || "").trim();
+    const avertisment =
+      codInghetat && codCurent && codInghetat !== codCurent
+        ? `ATENTIE: pe actul semnat codul fiscal e ${codInghetat}, in nomenclator e ${codCurent}`
+        : !codCurent
+          ? "ATENTIE: furnizorul nu are cod fiscal in nomenclator — 1C nu il poate potrivi"
+          : "";
+
+    for (const rand of cifre.rows || []) {
+      const sursa = (state.receipts || []).find((r) => Number(r.id) === Number(rand.id)) || receipt;
+      const kg = Number(rand.netKg || 0);
+      const valoare = Number(rand.value || 0);
+      randuri.push({
+        "Seria act": cifre.series || receipt.actSeries || "",
+        "Nr. act": receipt.actNumber,
+        "Data act": String(rand.date || receipt.actIssuedAt || "").slice(0, 10),
+        Furnizor: cifre.supplierName || receipt.supplier || "",
+        "Cod fiscal / IDNP": codCurent || codInghetat,
+        Produs: rand.product || sursa.product || "",
+        "Cantitate (kg)": kg.toFixed(3).replace(/\.?0+$/, ""),
+        Unitate: "kg",
+        // Pretul se DERIVA din valoare si cantitate, ca pe act: „cantitate x pret = valoare"
+        // trebuie sa fie adevarat si in export, nu doar pe hartie.
+        "Pret (lei/kg)": kg > 0 ? (valoare / kg).toFixed(4) : "",
+        "Valoare (lei)": valoare.toFixed(2),
+        "Cota impozit (%)": cota ? cota.toFixed(0) : "",
+        "Impozit retinut (lei)": (Number(rand.value || 0) - Number(rand.netPay || 0)).toFixed(2),
+        "Spre plata (lei)": Number(rand.netPay || 0).toFixed(2),
+        Depozit: sursa.location || "",
+        Temei: sursa.note || "",
+        "Nr. recepție": rand.id,
+        "Observatii export": avertisment
+      });
+    }
+  }
+
+  // Ordine de dosar: pe numar de act, crescator.
+  randuri.sort((a, b) => Number(a["Nr. act"]) - Number(b["Nr. act"]));
+  return { columns: EXPORT_1C_COLUMNS, rows: randuri };
+}
+
+// ============================================================================
+// EXPORT PENTRU 1C — furnizori (`СправочникСсылка.Контрагenty`)
+//
+// Se incarca in 1C INAINTEA actelor: asa fiecare act gaseste furnizorul deja existent, deci
+// nu rămâne niciun camp gol si nu se creeaza dubluri.
+//
+// Cheia de potrivire e CODUL FISCAL (`ФискКод` in 1C — IDNP la persoane fizice), nu
+// denumirea: o diferenta de scriere („Anghelus" / „Anghelus Ruslan") ar crea un al doilea
+// furnizor. Un furnizor fara cod fiscal NU se exporta — ar intra in 1C nepotrivit cu nimic.
+//
+// Coloanele oglindesc exact ce are un contragent persoana fizica in exportul real din 1C:
+// `ФискКод`, `Наименование`, `НаименованиеПолное`, `ВидКонтрагента` (ЧастноеЛицо),
+// `ЮрАдрес`, `НеРезидент`, telefoane.
+const EXPORT_1C_SUPPLIER_COLUMNS = [
+  "Cod fiscal / IDNP", "Denumire", "Denumire completa", "Tip contraparte",
+  "Adresa juridica", "Telefon", "Nerezident", "Banca", "IBAN", "Profil fiscal"
+];
+
+async function exportSuppliersFor1c(options = {}) {
+  const state = readReceiptsState();
+  const config = readConfigState();
+  const from = String(options.from || "").trim();
+  const to = String(options.to || "").trim();
+  const doarDinActe = options.onlyFromActs !== false;
+  // DOAR FURNIZORII NOI: cei care nu au fost inca marcati ca incarcati in 1C. Aplicatia nu
+  // poate STI ce e in 1C, deci marcajul il pune omul, dupa un import reusit — altfel un
+  // import eșuat ar face furnizorii sa dispara din export si actele n-ar mai gasi pe nimeni.
+  const doarNoi = options.onlyNew !== false;
+
+  // Furnizorii care apar pe ACTELE din perioada: exact cei de care 1C are nevoie ca sa
+  // poata primi actele. Fara perioada, toti furnizorii cu cod fiscal.
+  let idUri = null;
+  if (doarDinActe) {
+    idUri = new Set();
+    for (const receipt of state.receipts || []) {
+      if (!(Number(receipt.actNumber || 0) > 0)) continue;
+      if (Number(receipt.actCarrierId || 0) > 0) continue;
+      const zi = String(receipt.actIssuedAt || receipt.createdAt || "").slice(0, 10);
+      if (from && zi < from) continue;
+      if (to && zi > to) continue;
+      const id = Number((receipt.actFigures && receipt.actFigures.supplierId) || receipt.supplierId);
+      if (id) idUri.add(id);
+    }
+  }
+
+  const profile = config.fiscalProfiles || [];
+  const randuri = [];
+  for (const p of config.partners || []) {
+    if (idUri && !idUri.has(Number(p.id))) continue;
+    if (!String(p.role || "").match(/furnizor|ambele/i)) continue;
+    if (doarNoi && String(p.exported1cAt || "").trim()) continue;
+    const cod = String(p.idno || "").trim();
+    // Fara cod fiscal nu are cu ce sa fie potrivit in 1C: ar intra ca furnizor nou si ar
+    // produce exact dublura pe care exportul o evita.
+    if (!cod) continue;
+
+    const prof = profile.find(
+      (f) => String(f.name || "").trim().toLowerCase() === String(p.fiscalProfile || "").trim().toLowerCase()
+    );
+    // Persoana fizica = cea la care se retine impozit la sursa (acelasi criteriu ca pe act).
+    const persoanaFizica = Number((prof || {}).withholdingPercent || 0) > 0;
+
+    randuri.push({
+      "Cod fiscal / IDNP": cod,
+      Denumire: String(p.name || "").trim(),
+      "Denumire completa": String(p.name || "").trim(),
+      "Tip contraparte": persoanaFizica ? "ЧастноеЛицо" : "ЮридическоеЛицо",
+      "Adresa juridica": String(p.address || "").trim(),
+      Telefon: String(p.phone || "").trim(),
+      Nerezident: "false",
+      Banca: String(p.bankName || "").trim(),
+      IBAN: String(p.iban || "").trim(),
+      "Profil fiscal": String(p.fiscalProfile || "").trim(),
+      _id: p.id
+    });
+  }
+
+  randuri.sort((a, b) => a.Denumire.localeCompare(b.Denumire, "ro", { sensitivity: "base" }));
+  return { columns: EXPORT_1C_SUPPLIER_COLUMNS, rows: randuri };
+}
+
+// Marcheaza furnizorii ca INCARCATI in 1C. Se apeleaza DUPA un import reusit, de catre om:
+// aplicatia nu are cum sa afle singura daca 1C i-a primit.
+// De atunci nu mai apar in exportul de furnizori noi, deci nu se mai creeaza dubluri.
+async function markSuppliersExported1c(payload = {}) {
+  const currentUser = payload.currentUser || {};
+  if (!CAN_EDIT_BILLING_ROLES.includes(normalizeRoleCode(currentUser.roleCode))) {
+    throw forbiddenError("Doar contabilul, managerul sau administratorul pot marca furnizorii.");
+  }
+  const brute = Array.isArray(payload.partnerIds) ? payload.partnerIds : [];
+  if (!brute.length || brute.some((v) => typeof v !== "number" && typeof v !== "string")) {
+    throw new Error("Lista de furnizori e invalida.");
+  }
+  const idUri = [...new Set(brute.map(Number))].filter((n) => Number.isInteger(n) && n > 0);
+  if (!idUri.length) {
+    throw new Error("Lista de furnizori e invalida.");
+  }
+
+  const config = readConfigState();
+  const acum = new Date().toISOString();
+  const marcati = [];
+  for (const p of config.partners || []) {
+    if (!idUri.includes(Number(p.id))) continue;
+    if (String(p.exported1cAt || "").trim()) continue; // deja marcat, nu se rescrie data
+    p.exported1cAt = acum;
+    marcati.push({ id: p.id, name: p.name, idno: p.idno });
+  }
+  if (!marcati.length) {
+    return { marked: [] };
+  }
+  writeConfigState(config);
+
+  const state = readReceiptsState();
+  createAuditEntry(state, {
+    entityType: "partner",
+    entityId: marcati[0].id,
+    action: "suppliers-marked-1c",
+    reason: `Marcati ca incarcati in 1C: ${marcati.map((m) => m.name).join(", ")}`,
+    user: payload.changedBy || "dashboard",
+    oldValue: { exported1cAt: null },
+    newValue: { exported1cAt: acum, partners: marcati }
+  });
+  writeReceiptsState(state);
+  return { marked: marcati };
 }
 
 async function exportResourceAsCsv(resource, roleCode) {
@@ -6112,6 +6833,9 @@ module.exports = {
   createTransfer,
   createUser,
   updateEntityNote,
+  exportPurchaseActsFor1c,
+  exportSuppliersFor1c,
+  markSuppliersExported1c,
   exportResourceAsCsv,
   findUserByUsername,
   getConfig,
@@ -6140,6 +6864,7 @@ module.exports = {
   listUsers,
   reopenReceipt,
   runMigrationIfNeeded,
+  clearStockDust,
   createStockCorrection,
   isDeliveryPendingStockExit,
   listStockCorrections,

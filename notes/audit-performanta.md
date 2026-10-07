@@ -208,6 +208,21 @@ const [receipts, stats] = await Promise.all([listReceipts(), getStats()]);
 
 **Soluție:** pasează `receipts` deja calculate în `getStats(receipts)`; scoate `listAuditLogs()` din `getStats` (folosită doar pentru `totalAuditLogs`/`recentAuditLogs`, calculabile cu un singur pass fără sortare).
 
+
+**✅ REZOLVAT** (06.10.2026) — `getStats(receipts)` primește recepțiile deja calculate. Măsurat pe 8.000 de recepții / 4.000 de tranzacții: 69 ms → 35 ms (1,96×).
+---
+
+## H6. `formatNumber` construia un `Intl.NumberFormat` la FIECARE apel
+
+**Unde:** `public/app.js` — `formatNumber`, `moneyRo`, `actNum`
+
+Se cheamă de câteva ori pe FIECARE rând al tabelelor (recepții, livrări, rapoarte) și la
+fiecare tastă în formularele cu calcul live.
+
+**✅ REZOLVAT** (06.10.2026) — formatterele sunt la nivel de modul (`actNum` are un cache mic,
+fiindcă precizia variază între 2 și 6 zecimale). Măsurat pe 200.000 de apeluri:
+3.035 ms → 51 ms (**59,6×**).
+
 ---
 
 # MEDIUM

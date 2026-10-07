@@ -13,7 +13,7 @@ const {
 } = require("./automation-handlers");
 const { startCloseOfDayScheduler } = require("./close-of-day");
 const { startCriticalAlertMonitor } = require("./critical-alerts");
-const { attachCurrentUser, getActorLabel, requireAuth, requireRoles } = require("./auth");
+const { attachCurrentUser, getActorLabel, requireAuth, requireRoles, setUserLookup } = require("./auth");
 const {
   changePasswordHandler,
   loginHandler,
@@ -73,6 +73,7 @@ const {
 } = require("./complaint-handlers");
 const { listAuditLogsHandler } = require("./audit-handlers");
 const {
+  clearStockDustHandler,
   createStockCorrectionHandler,
   listStockCorrectionsHandler
 } = require("./stock-correction-handlers");
@@ -82,6 +83,9 @@ const {
   listOpeningDocumentsHandler
 } = require("./opening-handlers");
 const {
+  exportPurchaseActs1cHandler,
+  exportSuppliers1cHandler,
+  markSuppliers1cHandler,
   exportResourceHandler,
   getDashboardHandler,
   getDeliveryDefaultsHandler,
@@ -120,6 +124,10 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json({ limit: "1mb" }));
+// `auth.js` nu poate cere `local-storage` (acela il cere pe el). Injectam cautarea contului
+// ca sesiunea sa fie verificata pe CONT la fiecare cerere, nu doar pe token.
+setUserLookup((username) => storage.findUserByUsername(username));
+
 app.use("/api", attachCurrentUser);
 app.use(express.static(path.join(process.cwd(), "public")));
 
@@ -455,6 +463,10 @@ app.get(
 );
 app.post("/api/stock-corrections", requireRoles(["admin"]), createStockCorrectionHandler);
 
+// Curatarea resturilor sub prag: fiecare rand trece prin aceeasi corectie de inventar,
+// deci rămâne urma. Doar admin, ca orice rescriere de stoc.
+app.post("/api/stock-corrections/clear-dust", requireRoles(["admin"]), clearStockDustHandler);
+
 // Transfer de produs intre cilindri (mutare stoc).
 app.get(
   "/api/transfers",
@@ -702,6 +714,31 @@ app.get(
   getDashboardHandler
 );
 
+app.get(
+  "/api/exports/purchase-acts-1c",
+  requireRoles(["accountant", "accountant-sef", "admin"]),
+  exportPurchaseActs1cHandler
+);
+
+// Furnizorii de pe actele din perioada. Se incarca in 1C INAINTEA actelor, ca fiecare act
+// sa gaseasca furnizorul existent — fara cimpuri goale si fara dubluri.
+app.get(
+  "/api/exports/suppliers-1c",
+  requireRoles(["accountant", "accountant-sef", "admin"]),
+  exportSuppliers1cHandler
+);
+
+// Marcheaza furnizorii ca incarcati in 1C — apasat de om DUPA un import reusit. Aplicatia nu
+// poate sti singura daca 1C i-a primit, iar un marcaj automat pe descarcare i-ar scoate din
+// export chiar daca importul a cazut.
+app.post(
+  "/api/exports/suppliers-1c/mark",
+  requireRoles(["accountant", "accountant-sef", "manager", "admin"]),
+  markSuppliers1cHandler
+);
+
+// Exportul generic (CSV de lucru). Ruta de mai sus e DEASUPRA, altfel „purchase-acts-1c" ar
+// fi prins de `:resource` si ar da „resursa necunoscuta".
 app.get(
   "/api/exports/:resource",
   requireRoles(["manager", "accountant", "accountant-sef", "admin", "control"]),

@@ -757,6 +757,7 @@
                     <th>Apă (kg)</th>
                     <th>Cantitate</th>
                     <th>Locatie</th>
+                    <th class="col-fin" title="Numarul actului de achizitie emis pe aceasta receptie">Act nr.</th>
                     <th class="col-fin">Valoare</th>
                     <th class="col-fin">Achitat</th>
                     <th class="col-fin">Rest</th>
@@ -1068,6 +1069,12 @@
           </div>
           <div class="stock-summary" id="stock-summary"></div>
           <p class="stock-deficit-warning" id="stock-deficit-warning" hidden></p>
+          <div class="report-actions" id="stock-dust-wrap" hidden style="margin:6px 0">
+            <button type="button" id="stock-dust-btn" class="cell-btn">
+              🧹 Curăță resturile sub 5 kg
+            </button>
+            <span class="field-hint" id="stock-dust-hint"></span>
+          </div>
           <div class="table-wrap">
             <table>
               <thead>
@@ -1958,8 +1965,11 @@
 
             <details class="report-accordion">
               <summary>Plati si incasari pe zi</summary>
+              <div class="report-actions" style="margin:6px 0">
+                <button type="button" class="table-print-btn" data-table="daily-report-transactions-table" data-title="Plăți și încasări pe zi">🖨 Tipărește tabelul</button>
+              </div>
               <div class="table-wrap">
-                <table>
+                <table id="daily-report-transactions-table">
                   <thead>
                     <tr>
                       <th>ID</th>
@@ -1978,8 +1988,11 @@
 
             <details class="report-accordion">
               <summary>Reclamatii pe zi</summary>
+              <div class="report-actions" style="margin:6px 0">
+                <button type="button" class="table-print-btn" data-table="daily-report-complaints-table" data-title="Reclamații pe zi">🖨 Tipărește tabelul</button>
+              </div>
               <div class="table-wrap">
-                <table>
+                <table id="daily-report-complaints-table">
                   <thead>
                     <tr>
                       <th>ID</th>
@@ -1997,8 +2010,11 @@
 
             <details class="report-accordion" id="daily-report-canceled-accordion">
               <summary>Operatiuni anulate si retururi <span id="daily-report-canceled-count" class="muted-count"></span></summary>
+              <div class="report-actions" style="margin:6px 0">
+                <button type="button" class="table-print-btn" data-table="daily-report-canceled-table" data-title="Operațiuni anulate și retururi">🖨 Tipărește tabelul</button>
+              </div>
               <div class="table-wrap">
-                <table>
+                <table id="daily-report-canceled-table">
                   <thead>
                     <tr>
                       <th>Tip</th>
@@ -2020,6 +2036,38 @@
 
         <section class="panel reports-panel" data-access="reports" data-view="rapoarte">
           <div class="report-accordion-list">
+            <details class="report-accordion" id="export-1c-accordion" data-access="finance">
+              <summary>Export pentru 1C · acte de achiziție</summary>
+              <p class="field-hint" style="margin:6px 0">
+                Fișier CSV cu actele de achiziție emise, pentru încărcare în 1C
+                (<i>Акт закупки</i>). Se exportă cifrele îngheţate la emitere, deci coincid cu
+                hârtia semnată. Impozitul e inclus pentru verificare — în 1C el se ia din
+                ordinul de plată.
+              </p>
+              <div class="split">
+                <label>De la<input type="date" id="export-1c-from" /></label>
+                <label>Până la<input type="date" id="export-1c-to" /></label>
+              </div>
+              <div class="report-actions" style="margin:6px 0">
+                <button type="button" id="export-1c-suppliers-btn" class="cell-btn">1 · Furnizori noi</button>
+                <button type="button" id="export-1c-mark-btn" class="cell-btn" hidden>✓ Am încărcat în 1C</button>
+                <button type="button" id="export-1c-btn" class="cell-btn cell-btn-primary">2 · Acte de achiziție</button>
+                <span class="field-hint" id="export-1c-hint"></span>
+              </div>
+              <p class="field-hint" style="margin:2px 0 6px">
+                <b>Ordinea contează.</b> „Furnizori noi" scoate doar furnizorii care nu au
+                fost încă încărcați în 1C. După ce îi importezi acolo, apasă
+                <b>„Am încărcat în 1C"</b> — de atunci nu mai apar în export, deci nu se
+                creează dubluri. Apoi descarcă <b>actele</b>.
+              </p>
+              <p class="field-hint" style="margin:2px 0 6px">
+                Potrivirea în 1C se face după <b>codul fiscal / IDNP</b>, nu după denumire —
+                un furnizor fără cod fiscal nu se exportă, fiindcă 1C nu l-ar putea lega de
+                nimic. Marcajul se apasă de tine, nu automat la descărcare: dacă importul în
+                1C cade, furnizorii trebuie să rămână în export.
+              </p>
+            </details>
+
             <details class="report-accordion" id="losses-report-accordion">
               <summary>Pierderi cantitative</summary>
               <p class="field-hint" style="margin-top:6px">Fluxul cantității pe produs: primit → procesare → livrat, cu diferența necontabilizată</p>

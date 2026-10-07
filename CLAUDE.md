@@ -29,7 +29,9 @@ npm run dev          # aplicația WEB pe http://localhost:3000
   `transaction`, `opening`, `report`, `stock`, `user`, `config`, `audit`, `security`, `automation`.
 - `src/local-storage.js` — magazia de date în memorie + starea implicită (`defaultReceiptsState`) + `nextId()`.
 - `src/supabase-state-kv.js`, `src/supabase-storage.js`, `src/storage.js` — persistența.
-- `src/auth.js`, `src/security.js`, `src/permissions.js` — autentificare (parole scrypt), roluri, drepturi.
+- `src/auth.js`, `src/permissions.js` — autentificare (parole scrypt), roluri, drepturi.
+  (`src/security.js` a fost ȘTERS: cod mort, cu o parolă implicită în clar și o a doua
+  implementare de sesiuni care putea fi recablată din greșeală.)
 - `public/app.js` — tot frontend-ul (randare tabele, formulare, calcule afișate).
 - `public/qr.js` — generator de coduri QR, fără dependențe (vezi regula 10).
 
@@ -40,9 +42,17 @@ npm run dev          # aplicația WEB pe http://localhost:3000
 
 ## ⚠️ Reguli de business care se sparg ușor (OBLIGATORIU de citit)
 
-### 1. Unități: TONE intern, KG la formular
+### 1. Unități: TONE intern, KG la formular — și KILOGRAME ÎNTREGI
 - Stocul / cilindrii / procesarea se țin intern în **TONE**.
 - Formularele (recepție/livrare/procesare) primesc **KG**; frontend-ul împarte la 1000.
+- **Cerealele se socotesc în kilograme ÎNTREGI.** Cântarul lucrează în kg, deci masa brută e
+  mereu un număr întreg de kg. Pierderile (apă, impurități) se **rotunjesc la kg în
+  `computeReceiptEstimate`, înainte de scăderea din brut** — astfel cantitatea netă, cea care
+  intră în cilindru și cea pe care se calculează banii, iese întreagă. Fără asta rămâneau cozi
+  de 0,6 kg care apăreau ca „−1 kg" într-un ecran și „0" în altul, pe aceeași realitate.
+  Formula e oglindită în `getReceiptEstimate` din `public/app.js` — se schimbă în AMBELE locuri.
+- Regula **nu repară retroactiv** datele existente: fracțiunile deja intrate în stoc se închid
+  cu o corecție de inventar (regula 8).
 
 ### 2. Prețul la facturare e DUAL, după monedă
 - **MDL** → `priceLei` = **lei / KG**. Total = `kg × priceLei`.
@@ -188,6 +198,20 @@ introducă. Îl creează în status **`Proiect`**.
   Nr. 47 din Cilindru 2 a făcut ca recepțiile de soia din gropile de primire (sept. 2026) să
   apară în Cilindru 2. Marfa se mută între locații **doar** prin transfer sau procesare.
   **Nu reintroduce cascada.**
+- **Praful** (resturi sub 5 kg, pozitive sau negative, din rotunjiri și din documente
+  retroactive) se poate așeza la zero în bloc, din butonul „Curăță resturile" din Stoc.
+  Fiecare rând trece prin **aceeași** `createStockCorrection` ca manual — deci motiv
+  obligatoriu, urmă în audit și intrare în coloana „Corecții inventar" în ambele ecrane.
+  **Nu scrie direct în stoc:** orice pierdere e recunoscută. Corecțiile se fac **secvențial**
+  — în paralel, ultima scriere ar șterge celelalte. Butonul apare doar când există ce curățat,
+  doar pentru admin. Un prag `0` trimis explicit e RESPINS (nu cade pe valoarea implicită).
+  Pragul stă în `systemSettings.stockDustThresholdKg` (implicit 5), nu scris în cod: era
+  duplicat în backend și în frontend — exact tipul de divergență care a produs bugul de
+  1000× la facturare. **`updateSystemSettings` reconstruiește obiectul din listă**, deci
+  orice câmp nemenționat acolo se pierde la prima salvare de setări.
+  Un rând care cade nu abandonează lotul (se raportează în `skipped`), iar rândurile care
+  rezolvă la aceeași pereche canonică („Grau" / „grau") se sar — altfel al doilea găsea
+  delta 0 și opera tot lotul.
 - **Nu ascunde un rând negativ.** Se afișează tot ce nu e zero. Un minus ascuns rămâne fără
   butonul „Corectează" — vizibil în „Mișcarea stocului", imposibil de închis din „Stoc".
 
@@ -359,7 +383,24 @@ Actul de achiziție e document fiscal: numărul lui ajunge în dosarul de hârti
   lăsa găuri în registrul fiecăreia: „PAT 915", „AGR 916", „PAT 917" — în dosarul PAT lipsește
   916. Firma e **obligatorie**, nu se ghicește: un fallback „prima firmă activă" îngheța tăcit
   seria altei firme decât cea pe care omul credea că emite, fără cale de corecție.
-- ⚠️ **Unicitatea nu e garantată de cod, doar verificată.** Persistența e un blob JSON unic
+- **Alocare ATOMICĂ în PostgreSQL**, când migrarea `migrations/001-numerotare-atomica-acte.sql`
+  e aplicată: advisory lock pe firmă + cheie primară `(company_id, number)` în tabelul
+  `purchase_act_numbers`. Duplicatul devine **imposibil**, nu doar detectat. `allocateActNumber`
+  din `src/supabase-state-kv.js` întoarce `null` dacă funcția nu există (migrarea nu e rulată),
+  iar codul **cade pe derivarea din blob** — deci aplicația merge și înainte de migrare.
+  Mecanismul folosit se consemnează pe document (`actNumberSource`) și în audit (`numberSource`):
+  „postgres" sau „blob". Orice ALTĂ eroare de alocare se propagă — o alocare eșuată nu are voie
+  să cadă tăcut pe metoda mai slabă.
+- **`ACT_NUMBERS_PG=1`** se setează DUPĂ ce migrarea e aplicată și verificată. De atunci,
+  derivarea din blob nu mai e acceptată ca rezervă: o alocare care nu trece prin Postgres
+  cade **zgomotos**. Fără comutator, un `PGRST202` tranzitoriu (cache de schemă vechi —
+  PostgREST folosește același cod și pentru „funcția nu există") ar emite un număr din blob,
+  deja rezervat în Postgres. Exact duplicatul pe care migrarea îl previne.
+- Migrarea ține un **marcaj de nivel** (`purchase_act_watermark`), monoton crescător.
+  Alocarea ia `greatest(max(number), watermark) + 1`, deci un `delete` pe registru — curățare
+  de test, restaurare, „am șters rândul greșit" — **nu poate reporni** numerotarea peste
+  numere deja tipărite și semnate.
+- ⚠️ **Fără migrare, unicitatea nu e garantată de cod, doar verificată.** Persistența e un blob JSON unic
   scris cu upsert necondiționat (fără versiune, fără compare-and-set) și cu debounce: o
   scriere concurentă poate reîncărca blobul de DINAINTE de atribuire și îl poate suprascrie —
   hârtia iese cu 914, datele nu mai știu de el, actul următor ia din nou 914. De aceea
@@ -385,13 +426,130 @@ Actul de achiziție e document fiscal: numărul lui ajunge în dosarul de hârti
   ar consuma numere pe achiziții de la firme și ar lăsa găuri în șir.
 - Doar `CAN_ISSUE_ACTS_ROLES` (contabil, contabil-șef, admin) emit acte. Urmă în audit
   (`receipt-act-number`). Refuzat pe o recepție care nu e în stoc — ar fi hârtie fără marfă.
-- Un act care acoperă **mai multe recepții** consumă UN număr, atribuit celei mai vechi:
-  actul e un singur document.
+- Un act care acoperă **mai multe recepții** consumă UN număr, dar **îl primesc toate**.
+  Marcat doar pe cea mai veche, una dintre celelalte tipărită ulterior individual apărea
+  nenumerotată și **ardea un număr nou** pentru marfă deja acoperită de hârtia 914 — dublă
+  invizibilă. Reemiterea pe oricare dintre ele întoarce același număr. Un act acoperă
+  recepțiile **unui singur furnizor** (verificat în handler pe `supplierId`).
+- **Cifrele actului se îngheață la emitere** (`actFigures`: kg, valoare, reținere, net, pe
+  purtător) — **și rândurile, nu doar totalurile** (`actFigures.rows`: id, produs, kg,
+  valoare, net). Fără asta, o corecție ulterioară de preț sau de bifă făcea ca retipărirea
+  ACELUIAȘI număr să arate alte cifre decât hârtia semnată — exact riscul de care actul se
+  apăra deja pe cota de impozit. Îngheţând doar totalurile, actul se contrazicea **pe aceeași
+  hârtie**: rând 35.756,10 sub un total de 17.878,05, pe un formular care afirmă „5 = 3 × 4".
+  Denumirea produsului intră și ea în captură: nomenclatorul se poate redenumi după emitere. Se păstrează primitivele; prețul se derivă din ele la
+  tipărire, ca să nu existe a doua regulă de rotunjire. **Codul QR poartă aceleași cifre**
+  înghețate: altfel codul scanat ar contrazice hârtia de lângă el. Un act cu alte cifre
+  cere număr nou.
+- Captura stă **o singură dată, pe purtător**; celelalte recepții ale actului primesc doar
+  `actCarrierId`. Scrisă pe toate, un act de 50 de recepții îngroșa blobul cu **364 KB** —
+  iar blobul se descarcă la fiecare cerere. Ținută doar pe purtător **fără referință**,
+  tipărirea individuală a oricăreia dintre celelalte cădea pe recalcul și scotea aceeași
+  serie și același număr cu alte cifre. Referința închide ambele: tipărirea rezolvă captura
+  prin purtător (din selecție sau din `receiptsCache`) și dă actul **întreg**.
+- În audit se păstrează doar **totalurile** + `receiptIds`, nu captura întreagă: altfel mai
+  era o copie completă în `auditLogs`, în același blob.
+- Captura îngheață și **datele** (rubrica „din / от" intră și în QR), **firma emitentă** și
+  **numele furnizorului**: firma se reselectează în „Documente tipar" (antetul firmei B cu
+  seria firmei A), iar furnizorul se putea schimba după emitere. De aceea
+  `updateReceiptSupplier` refuză pe o recepție cu act emis.
+- **Emiterea amestecată e refuzată**: dacă o parte din selecție e deja pe un act și restul nu,
+  cererea cade cu mesaj explicit. Altfel actul vechi se reactiva cu alt conținut sub același
+  număr, iar marfa nouă rămânea pe niciun act.
+- O reîncercare după o scriere parțială **repară** marcajele lipsă pe toate recepțiile actului;
+  nu le ignoră, altfel cele nemarcate ardeau un număr nou mai târziu.
+- Garda „act emis" e o **sursă unică** (`assertNoIssuedAct`), apelată din `cancelReceipt`,
+  din `updateReceiptStatusWithAudit` (statusul „Anulat" o ocolea) și din
+  `updateReceiptSupplier`.
+- `actFigures` e în `FINANCIAL_RECEIPT_FIELDS`: conține valoarea, reținerea și netul, pe
+  fiecare rând — exact datele pentru care se șterg `price` și `preliminaryMerchandiseValue`.
+- Lista de recepții e **tipizată** (doar numere/șiruri numerice, întregi pozitivi) și plafonată
+  la 50, în ambele straturi: `Number(true)` e 1 și `Number([7])` e 7, deci fără verificarea de
+  tip un boolean marchează o recepție la întâmplare.
+- Rândul recepției arată coloana **„Act nr."** (serie + număr, cu data emiterii în tooltip),
+  ca registrul din aplicație să poată fi confruntat cu dosarul de hârtie.
 - Seria e **per firmă** (`companies[].series`), nu globală — firma vine din cerere, seria se
   rezolvă pe server.
 - La tipărire, fereastra se deschide **înainte** de `await` (cererea numărului). După un
   `await`, `window.open` e blocat de blocatorul de pop-up și contabilul rămâne fără document.
   Orice ieșire devreme trebuie să închidă fereastra deja deschisă.
+
+### 10b. Corecțiile de după emiterea actului se MARCHEAZĂ, nu se blochează
+Cifrele actului sunt îngheţate, deci hârtia rămâne valabilă — dar atunci **registrul pleacă de
+sub ea**: reținerea la sursă declarată pe act nu mai e cea din evidență. Decizia utilizatorului
+(06.10.2026): **avertisment, nu blocare** — contabilul trebuie să poată corecta.
+- `marcheazaDivergentaAct()` scrie în `receipt.actDivergences` ce s-a schimbat, când, de ce și
+  cifrele care sunt pe hârtie. Apelată din `updateReceiptAmount` și din `correctReceiptTerms`.
+- **Se și VEDE**, altfel decizia „avertisment, nu blocare" rămâne fără compensație: badge
+  `≠ registru` lângă numărul actului în tabelul Recepții, plus un rând în „Detalii recepție"
+  cu cifrele de pe hârtie și motivul. Scrisă dar nerandată, marcarea nu ajuta pe nimeni.
+- Ultimele 20 pe document; istoricul complet rămâne în audit. `actDivergences` e în
+  `FINANCIAL_RECEIPT_FIELDS` — conține sume.
+
+### 11. Serviciile se taxează DOAR pe procentul peste normă
+`cleaningServiceTotal = brut × excesImpurități × tarif`, `dryingServiceTotal = brut ×
+excesUmiditate × tarif`. Dacă marfa e în normă, serviciul e **0**.
+- Backend-ul ignora complet `excessImpurity` și taxa toată cantitatea: la 100 t, tarif 10 și
+  3% exces, ecranul arăta **3.000** lei, iar documentul salva **1.000**. Mai rău, taxa
+  curățarea și când impuritățile erau SUB normă. Reparat 06.10.2026.
+- Formula e oglindită în `getReceiptEstimate` din `public/app.js`. AMBELE locuri.
+
+### 12. Sesiunea se verifică pe CONT, nu doar pe token
+Tokenul dovedește că omul s-a autentificat **cândva**. Rolul, drepturile și starea „activ" se
+citesc de pe cont la **fiecare cerere** (`attachCurrentUser`).
+- Înainte, un cont dezactivat sau retrogradat păstra drepturile vechi până la expirarea
+  tokenului — până la 12 ore — iar o parolă schimbată nu tăia sesiunile existente.
+- `auth.js` NU poate cere `local-storage` (acela îl cere pe el). Căutarea contului se
+  **injectează** din `server.js` prin `setUserLookup`. Fără ea se cade pe token, ca înainte;
+  o eroare la citirea contului **nu** acordă acces (fail-closed).
+- `sessionsRevokedAt` pe cont invalidează tokenurile emise înainte. Se setează la schimbarea
+  parolei, la dezactivare și la schimbarea rolului. Ieșirea de pe un dispozitiv rămâne
+  per-dispozitiv (ștergerea cookie-ului) — nu te scoate și din birou.
+- **Parola inițială nu e o constantă în cod.** Repo-ul e public: o valoare scrisă acolo e
+  cunoscută de oricine și funcționează pe orice cont care nu și-a schimbat parola.
+  - În mediu **publicat** (`STORAGE_DRIVER=supabase`), `DEFAULT_USER_PASSWORD` e
+    **obligatorie** — se cade zgomotos, ca la `SESSION_SECRET`. Nu se generează și nu se
+    loghează nimic: parola ar ajunge în logurile platformei, cu retenție.
+  - **Local**, se generează una aleatoare și se scrie în consolă, cu o **cifră garantată**:
+    politica strictă cere una, iar din 12 caractere base64url una din opt parole nu avea
+    niciuna — și pornirea cădea exact pe calea de recuperare.
+  - Adminul de pornire se creează cu `requirePasswordChange: true`. Fără asta,
+    `ensureUserSecurityState` îl lăsa pe `false` la următoarea citire (hash-ul exista deja),
+    deci credențialul rămânea valabil nelimitat.
+- **Schimbarea parolei re-emite tokenul.** Revocarea taie sesiunile emise înainte, inclusiv
+  cea curentă: fără token nou, omul primea 401 imediat după ce își schimba parola — iar pe un
+  cont cu `requirePasswordChange` asta se întâmpla la FIECARE primă intrare.
+
+### 13. Export pentru 1C (acte de achiziție + furnizori)
+Varianta **intermediară**: CSV pe care contabilul îl încarcă în 1C. NU generăm direct
+`ФайлОбмена` — acolo 1C potrivește obiectele după **GUID**
+(`СинхронизироватьПоИдентификатору`), iar GUID-uri inventate de noi ar **crea furnizori și
+produse duplicate** la fiecare import.
+- **Ordinea contează:** întâi **furnizorii**, apoi **actele**. Altfel actele n-au cu ce să se
+  lege și rămân cu furnizorul gol — un act fără contraparte nu se poate contabiliza.
+- Se exportă **doar furnizorii NOI** (fără `exported1cAt`). Marcajul îl pune **omul**, după un
+  import reușit (`POST /api/exports/suppliers-1c/mark`) — nu automat la descărcare: dacă
+  importul în 1C cade, furnizorii trebuie să rămână în export. `?includeExported=1` îi aduce
+  înapoi pe toți, pentru reîncărcare.
+- **Cheia de potrivire e codul fiscal** (`ФискКод` în 1C; IDNP la persoane fizice), nu
+  denumirea — o diferență de scriere ar crea un al doilea furnizor. Un furnizor **fără cod
+  fiscal nu se exportă**: ar intra în 1C nepotrivit cu nimic.
+- Pe act, codul fiscal exportat e cel **CURENT** (cu care furnizorul intră în 1C), nu cel
+  îngheţat: aici e o cheie de identitate, nu o cifră de bani. Dacă diferă de cel de pe hârtia
+  semnată, coloana **„Observatii export"** o spune explicit — actul ar trebui reemis.
+- **Cifrele** sunt cele **îngheţate la emitere** (`actFigures`), nu recalculul de acum: altfel
+  exportul ar contrazice hârtia semnată. Se exportă doar actele EMISE, **o dată per act**
+  (captura stă pe purtător, deci un act pe N recepții dă N rânduri, nu N acte).
+- Verificat pe exportul real din 1C (`РКО`): `Сумма 8090.43`, `Нал05 485.43` — exact 6%, deci
+  suma e brută și impozitul se reține din ea. Exportul respectă aceeași aritmetică; există
+  test că `cantitate × preț = valoare` și `valoare − impozit = spre plată`.
+- **Impozitul** în 1C se ia din **ordinul de plată** (`РасходныйКассовый`, câmpul `Нал05`), nu
+  de pe act. E inclus în export doar pentru verificare.
+- CSV: separator `;`, BOM UTF-8 (se deschide corect în Excel pe setări ro/ru), zecimala
+  **PUNCT** — ca 1C să nu confunde separatorul de coloană cu cel zecimal. Un singur loc scrie
+  CSV-ul (`trimiteCsv1c`), ca setările să nu divergeze între cele două exporturi.
+- Ruta de export specific e înregistrată **înaintea** celei generice `/api/exports/:resource`,
+  altfel ar fi prinsă de ea.
 
 ## Deploy
 - **Push pe `main` → Vercel publică automat** pe agroprofit-plus.vercel.app (integrare Git activă).

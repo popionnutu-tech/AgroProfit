@@ -124,6 +124,188 @@ const transferMessageEl = document.getElementById("transfer-message");
 const transfersBodyEl = document.getElementById("transfers-body");
 let transfersCache = [];
 const stocksBodyEl = document.getElementById("stocks-body");
+const stockDustWrap = document.getElementById("stock-dust-wrap");
+const stockDustBtn = document.getElementById("stock-dust-btn");
+const stockDustHintEl = document.getElementById("stock-dust-hint");
+
+// Export pentru 1C: acte de achizitie pe perioada. Descarcarea se face prin navigare, nu
+// prin `fetch` + blob: raspunsul are deja `Content-Disposition`, iar cookie-ul de sesiune
+// merge la fel. Asa nu ținem in memorie un fisier care poate fi mare.
+function descarcaExport1c(ruta, eticheta) {
+  const from = (document.getElementById("export-1c-from") || {}).value || "";
+  const to = (document.getElementById("export-1c-to") || {}).value || "";
+  if (from && to && from > to) {
+    window.alert("Perioada e inversată: data de început e după cea de sfârșit.");
+    return;
+  }
+  const q = new URLSearchParams();
+  if (from) q.set("from", from);
+  if (to) q.set("to", to);
+  const hint = document.getElementById("export-1c-hint");
+  if (hint) {
+    hint.textContent = from || to
+      ? `${eticheta}: perioada ${from || "început"} … ${to || "azi"}.`
+      : `${eticheta}: toate înregistrările.`;
+  }
+  window.location.href = `${ruta}${q.toString() ? "?" + q : ""}`;
+}
+
+const export1cBtn = document.getElementById("export-1c-btn");
+if (export1cBtn) {
+  export1cBtn.addEventListener("click", () =>
+    descarcaExport1c("/api/exports/purchase-acts-1c", "Acte de achiziție")
+  );
+}
+
+const export1cSuppliersBtn = document.getElementById("export-1c-suppliers-btn");
+const export1cMarkBtn = document.getElementById("export-1c-mark-btn");
+// Furnizorii descarcati ultima data: se tin ca sa poata fi marcati DUPA importul in 1C.
+let furnizoriDescarcati1c = [];
+
+if (export1cSuppliersBtn) {
+  // Se descarca PRIMUL: doar furnizorii NOI de pe actele din perioada. Aici folosim `fetch`,
+  // nu navigare, fiindca avem nevoie de id-urile din antet ca sa putem marca exact ce s-a
+  // descarcat — altfel am marca si furnizori care n-au intrat in fisier.
+  export1cSuppliersBtn.addEventListener("click", async () => {
+    const from = (document.getElementById("export-1c-from") || {}).value || "";
+    const to = (document.getElementById("export-1c-to") || {}).value || "";
+    const hint = document.getElementById("export-1c-hint");
+    if (from && to && from > to) {
+      window.alert("Perioada e inversată: data de început e după cea de sfârșit.");
+      return;
+    }
+    const q = new URLSearchParams();
+    if (from) q.set("from", from);
+    if (to) q.set("to", to);
+    export1cSuppliersBtn.disabled = true;
+    try {
+      const res = await fetch(`/api/exports/suppliers-1c${q.toString() ? "?" + q : ""}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Nu am putut descărca furnizorii.");
+      }
+      const text = await res.text();
+      furnizoriDescarcati1c = String(res.headers.get("X-Supplier-Ids") || "")
+        .split(",")
+        .map(Number)
+        .filter(Boolean);
+
+      // Doar antetul => niciun furnizor nou. Nu descarcam un fisier gol.
+      if (!furnizoriDescarcati1c.length) {
+        if (hint) hint.textContent = "Niciun furnizor nou în perioada aleasă — treci direct la acte.";
+        if (export1cMarkBtn) export1cMarkBtn.hidden = true;
+        return;
+      }
+
+      const url = URL.createObjectURL(new Blob([text], { type: "text/csv;charset=utf-8" }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `furnizori-1c-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      if (hint) {
+        hint.textContent =
+          `${furnizoriDescarcati1c.length} furnizori noi descărcați. ` +
+          "După ce îi încarci în 1C, apasă „Am încărcat în 1C”.";
+      }
+      if (export1cMarkBtn) export1cMarkBtn.hidden = false;
+    } catch (err) {
+      window.alert(err.message);
+    } finally {
+      export1cSuppliersBtn.disabled = false;
+    }
+  });
+}
+
+if (export1cMarkBtn) {
+  export1cMarkBtn.addEventListener("click", async () => {
+    if (!furnizoriDescarcati1c.length) return;
+    const ok = window.confirm(
+      `Se marchează ${furnizoriDescarcati1c.length} furnizori ca încărcați în 1C.\n` +
+      "De atunci nu mai apar în export. Apasă OK doar dacă importul în 1C a reușit."
+    );
+    if (!ok) return;
+    export1cMarkBtn.disabled = true;
+    try {
+      const res = await fetch("/api/exports/suppliers-1c/mark", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ partnerIds: furnizoriDescarcati1c })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Nu am putut marca furnizorii.");
+      const hint = document.getElementById("export-1c-hint");
+      if (hint) {
+        hint.textContent = `${(data.marked || []).length} furnizori marcați. Treci la acte.`;
+      }
+      furnizoriDescarcati1c = [];
+      export1cMarkBtn.hidden = true;
+    } catch (err) {
+      window.alert(err.message);
+    } finally {
+      export1cMarkBtn.disabled = false;
+    }
+  });
+}
+
+// Curatarea resturilor: fiecare rand se asaza la ZERO prin aceeasi corectie de inventar ca
+// manual, deci cu motiv, urma in audit si intrare in coloana „Corectii inventar" in ambele
+// ecrane. Nu scrie direct in stoc (regula 8: orice pierdere e RECUNOSCUTA).
+if (stockDustBtn) {
+  stockDustBtn.addEventListener("click", async () => {
+    const cate = Number(stockDustBtn.dataset.count || 0);
+    const prag = Number(stockDustBtn.dataset.threshold || 5);
+    if (!cate) return;
+    const motiv = window.prompt(
+      `Se vor așeza la zero ${cate} ${cate === 1 ? "rând" : "rânduri"} cu rest sub ${prag} kg.\n` +
+      "Fiecare intră ca pierdere recunoscută, cu urmă în audit.\n\n" +
+      "Motivul corectării (obligatoriu):",
+      "Curățare resturi din rotunjiri"
+    );
+    if (motiv === null) return;
+    if (!String(motiv).trim()) {
+      window.alert("Motivul este obligatoriu.");
+      return;
+    }
+    stockDustBtn.disabled = true;
+    try {
+      const res = await fetch("/api/stock-corrections/clear-dust", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ thresholdKg: prag, changeReason: motiv })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Nu am putut curăța resturile.");
+      const n = (data.cleared || []).length;
+      window.alert(
+        n
+          ? `Gata: ${n} ${n === 1 ? "rând așezat" : "rânduri așezate"} la zero.\n` +
+            (data.cleared || [])
+              .map((c) => `${c.product} / ${c.location}: ${formatNumber(c.kg)} kg → 0`)
+              .join("\n")
+          : "Nu a fost nimic de curățat."
+      );
+      if ((data.skipped || []).length) {
+        window.alert(
+          "Rânduri care nu s-au putut corecta:\n" +
+          data.skipped.map((x) => `${x.product} / ${x.location}: ${x.error}`).join("\n")
+        );
+      }
+      if (Number(data.remaining) > 0) {
+        window.alert(
+          `Au rămas ${data.remaining} rânduri (plafon de ${(data.cleared || []).length} pe o ` +
+          "apăsare, ca operația să nu rămână pe jumătate). Apasă din nou."
+        );
+      }
+      await loadStocks();
+    } catch (err) {
+      window.alert(err.message);
+    } finally {
+      stockDustBtn.disabled = false;
+    }
+  });
+}
 const stockSummaryEl = document.getElementById("stock-summary");
 const silosGridEl = document.getElementById("silos-grid");
 const receiptStatusFilterEl = document.getElementById("receipt-status-filter");
@@ -252,15 +434,19 @@ const currency = new Intl.NumberFormat("ro-RO", {
   maximumFractionDigits: 2
 });
 
+// Formatterul se construieste O SINGURA data, la nivel de modul — ca `currency` de mai sus.
+// `new Intl.NumberFormat` la fiecare apel costa de ~45x mai mult decat formatarea, iar
+// `formatNumber` se cheama de cateva ori pe FIECARE rand al tabelelor (recepții, livrări,
+// rapoarte) si la fiecare tasta in formularele cu calcul live.
+const numberFormatter = new Intl.NumberFormat("ro-RO", { maximumFractionDigits: 2 });
+
 function formatNumber(value) {
   let n = Number(value || 0);
   // Evita afisarea "-0": normalizeaza zero negativ si negativele mici care se rotunjesc la zero.
   if (Object.is(n, -0) || (n < 0 && n > -0.005)) {
     n = 0;
   }
-  return new Intl.NumberFormat("ro-RO", {
-    maximumFractionDigits: 2
-  }).format(n);
+  return numberFormatter.format(n);
 }
 
 // Valoarea e stocata intern in tone. O afisam in kg DOAR daca inregistrarea a fost
@@ -1309,6 +1495,32 @@ function renderStockSummary(summary) {
   const negativeRows = stockRows.filter((item) => Number(item.quantity || 0) < 0);
   // Corecția de inventar e a adminului: el așază stocul la ce a numărat fizic în cilindru.
   const canCorrectStock = currentSessionUser?.roleCode === "admin";
+  // Praful: resturi de cateva kg, din rotunjiri si din documente retroactive. Butonul apare
+  // DOAR cand exista ce curatat — altfel e un buton care nu face nimic.
+  // Pragul vine din nomenclator (`systemSettings`), nu scris aici: duplicat in doua locuri,
+  // era exact tipul de divergenta care a produs bug-ul de 1000x la facturare.
+  const PRAG_PRAF_KG = Number(currentConfig?.systemSettings?.stockDustThresholdKg) || 5;
+  const praf = stockRows.filter((item) => {
+    const kg = Math.abs(Number(item.quantity || 0) * 1000);
+    return kg > 0 && kg < PRAG_PRAF_KG;
+  });
+  if (stockDustWrap) {
+    stockDustWrap.hidden = !(canCorrectStock && praf.length > 0);
+    if (stockDustHintEl && praf.length) {
+      stockDustHintEl.textContent =
+        `${praf.length} ${praf.length === 1 ? "rând" : "rânduri"} cu rest sub ${PRAG_PRAF_KG} kg: ` +
+        praf
+          .slice(0, 6)
+          .map((i) => `${i.product} / ${i.location} (${formatNumber(i.quantity * 1000)} kg)`)
+          .join("; ") +
+        (praf.length > 6 ? ` și încă ${praf.length - 6}` : "");
+    }
+  }
+  if (stockDustBtn) {
+    stockDustBtn.dataset.count = String(praf.length);
+    stockDustBtn.dataset.threshold = String(PRAG_PRAF_KG);
+  }
+
   stocksBodyEl.innerHTML = stockRows
     .map(
       (item) => `
@@ -2129,6 +2341,19 @@ function renderReceipts(receipts) {
           <td title="Apă eliminată la recepție (din umiditatea în exces)">${isPendingWeighing || !(Number(item.estimatedWaterLoss) > 0) ? "—" : formatNumber(Math.round(Number(item.estimatedWaterLoss) * 1000)) + " kg"}${item.payOnGrossQuantity === true ? ` <span class="status-badge badge-warn" title="${bi("Plata s-a făcut pe masa cu apă, uscarea nu s-a taxat. În stoc a intrat masa fără apă.")}">${bi("plătit cu apă")}</span>` : ""}</td>
           <td>${qtyCell}</td>
           <td>${item.location || "-"}</td>
+          <td class="col-fin" title="${escapeComboHtml(Number(item.actNumber) > 0 ? `Act emis la ${formatDateShort(item.actIssuedAt)}` : "Actul nu a fost emis")}">${
+            Number(item.actNumber) > 0
+              ? `<b>${escapeComboHtml(String(item.actSeries || ""))} ${escapeComboHtml(String(item.actNumber))}</b>${
+                  (item.actDivergences || []).length
+                    ? ` <span class="status-badge badge-warn" title="${escapeComboHtml(
+                        `Registrul a fost corectat după emiterea actului (${item.actDivergences.length} ` +
+                        `${item.actDivergences.length === 1 ? "corectare" : "corectări"}). ` +
+                        "Hârtia semnată păstrează cifrele de la emitere — vezi Detalii."
+                      )}">≠ registru</span>`
+                    : ""
+                }`
+              : "—"
+          }</td>
           <td class="col-fin">${currency.format(valoare)}${canEditAmount && !isCanceled ? ` <button type="button" class="cell-btn change-amount-btn" data-action="adjust-amount" data-id="${item.id}" title="Ajustează valoarea recepției">✎</button>` : ""}${canCorrectTerms && !isCanceled && !isPendingWeighing && item.status !== "Inchis" && item.status !== "Proiect" ? ` <button type="button" class="cell-btn change-amount-btn" data-action="correct-terms" data-id="${item.id}" title="Corectează condițiile: plata pe masa cu umiditate și/sau prețul">⚖</button>` : ""}${Array.isArray(item.termCorrections) && item.termCorrections.length ? ` <span class="status-badge badge-warn" title="Condițiile au fost corectate de ${escapeComboHtml(item.termCorrections[item.termCorrections.length - 1].by || "")} — vezi Detalii">corectat</span>` : ""}</td>
           <td class="col-fin">${achitat > 0 ? currency.format(achitat) : "-"}</td>
           <td class="col-fin"><b>${rest > 0 ? currency.format(rest) : "0"}</b></td>
@@ -2444,6 +2669,7 @@ function renderReceiptTotals(rows) {
       <td>${waterKg > 0 ? "<b>" + formatNumber(waterKg) + " kg</b>" : "—"}</td>
       <td>${qtyCell}</td>
       <td></td>
+      <td class="col-fin"></td>
       <td class="col-fin"><b>${currency.format(totalPay)}</b></td>
       <td class="col-fin">${currency.format(totalPaid)}</td>
       <td class="col-fin"><b>${currency.format(totalRest)}</b></td>
@@ -4775,8 +5001,11 @@ function getReceiptEstimate() {
   const impurityNorm = Number(selectedProduct?.impurityNorm || 0);
   const excessHumidity = Math.max(humidity - humidityNorm, 0);
   const excessImpurity = Math.max(impurity - impurityNorm, 0);
-  const estimatedWaterLoss = quantity * (excessHumidity / 100);
-  const estimatedImpurityLoss = quantity * (excessImpurity / 100);
+  // Cerealele se socotesc in KILOGRAME INTREGI — oglinda regulii din backend
+  // (`computeReceiptEstimate`). Se schimba in AMBELE locuri.
+  const laKg = (tone) => Math.round(Number(tone) * 1000) / 1000 + 0;
+  const estimatedWaterLoss = laKg(quantity * (excessHumidity / 100));
+  const estimatedImpurityLoss = laKg(quantity * (excessImpurity / 100));
   const provisionalNetQuantity = Math.max(
     quantity - estimatedWaterLoss - estimatedImpurityLoss,
     0
@@ -6477,8 +6706,14 @@ function fillHeaderCompanySelects() {
   });
 }
 
+// Formatter la nivel de modul: `moneyRo` se cheama pe fiecare rand al documentelor tiparite.
+const moneyFormatter = new Intl.NumberFormat("ro-RO", {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2
+});
+
 function moneyRo(n) {
-  return new Intl.NumberFormat("ro-RO", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(n) || 0);
+  return moneyFormatter.format(Number(n) || 0);
 }
 
 function buildStatementPrintHtml(data, company) {
@@ -6759,8 +6994,23 @@ function actPriceDecimals(price, netKg, value) {
   return 6;
 }
 
+// `dec` variaza (2..6 zecimale pe pretul derivat), deci formatterele se tin intr-un cache
+// mic — se construiesc cel mult de cateva ori, nu la fiecare celula a actului.
+const actFormatters = new Map();
+
+function actFormatter(dec) {
+  const cheie = Number(dec) || 0;
+  if (!actFormatters.has(cheie)) {
+    actFormatters.set(
+      cheie,
+      new Intl.NumberFormat("ro-RO", { minimumFractionDigits: cheie, maximumFractionDigits: cheie })
+    );
+  }
+  return actFormatters.get(cheie);
+}
+
 function actNum(n, dec) {
-  return new Intl.NumberFormat("ro-RO", { minimumFractionDigits: dec, maximumFractionDigits: dec })
+  return actFormatter(dec)
     .format(Number(n) || 0)
     .replace(/\./g, " ");
 }
@@ -6825,40 +7075,162 @@ function actQrPayload({ company, partner, series, nr, dateText, rows, value, tax
   return text.slice(0, 213);
 }
 
-// Numarul actului de achizitie, cerut de la server. La un act care acopera mai multe
-// receptii, numarul se atribuie celei mai VECHI: actul e un singur document, deci consuma
-// un singur numar, iar sirul rămâne compact fata de dosarul de hartie.
-// Daca serverul refuza (achizitie de la firma, receptie nelivrabila, rol fara drept), actul
-// se tipareste cu linia goala, ca inainte — numarul nu e o conditie ca hartia sa fie valida.
-async function ensureActNumber(receipts, company) {
-  const purtator = [...receipts]
+// Numarul actului de achizitie. Decide pe UN SINGUR act si spune clar ce urmeaza:
+//   { status: "ok", act }      -> se tipareste cu numarul si cifrele INGHEȚATE
+//   { status: "fara-numar" }   -> legitim fara numar (achizitie de la firma): linia goala
+//   { status: "abort" }        -> NU se tipareste; motivul a fost deja afisat
+//
+// Garzile de pe server nu se vad din interfata daca aici se iese din scurt: inainte se lua
+// `actNumber` de la o receptie si `actFigures` de la ALTA, deci se putea tipari numarul
+// actului A peste conținutul actului B.
+async function ensureActNumber(receipts, company, partner) {
+  const lista = (receipts || []).filter(Boolean);
+  if (!lista.length) return { status: "abort" };
+  const purtator = [...lista]
     .sort((a, b) => new Date(a.receivedAt || a.createdAt) - new Date(b.receivedAt || b.createdAt))[0];
-  if (!purtator) return null;
-  if (Number(purtator.actNumber || 0) > 0) {
-    return { actNumber: purtator.actNumber, actSeries: purtator.actSeries || "" };
+
+  const acoperite = lista.filter((r) => Number(r.actNumber || 0) > 0);
+  if (acoperite.length) {
+    // TOATE receptiile cu numar trebuie sa fie pe ACELASI act.
+    const chei = new Set(
+      acoperite.map((r) => `${Number(r.actCompanyId || 0)}:${Number(r.actNumber)}`)
+    );
+    if (chei.size > 1) {
+      alert(
+        "Selecția conține recepții de pe acte diferite: " +
+        acoperite.map((r) => `#${r.id} → ${r.actSeries || ""} ${r.actNumber}`).join(", ") +
+        ". Tipărește fiecare act separat."
+      );
+      return { status: "abort" };
+    }
+    const emisa = acoperite[0];
+    // Captura sta pe PURTATOR. Celelalte receptii ale actului au doar o referinta
+    // (`actCarrierId`), ca blobul sa nu purte N copii ale aceleiasi capturi. Daca selectia
+    // nu include purtatorul, il luam din cache.
+    const cuCifre =
+      acoperite.find((r) => r.actFigures) ||
+      (receiptsCache || []).find(
+        (r) =>
+          r &&
+          r.actFigures &&
+          acoperite.some((a) => Number(a.actCarrierId || 0) === Number(r.id))
+      ) ||
+      null;
+    if (!cuCifre) {
+      // Numar fara captura = act emis inainte ca cifrele sa fie inghetate. Tiparit, ar scoate
+      // aceeasi serie si acelasi numar cu cifrele de azi.
+      alert(
+        `Actul ${emisa.actSeries || ""} ${emisa.actNumber} a fost emis fără captura cifrelor. ` +
+        "Nu se poate retipări identic — folosește hârtia din dosar."
+      );
+      return { status: "abort" };
+    }
+    // Selectia trebuie sa fie o PARTE din actul emis, nu un amestec cu marfa noua: altfel
+    // actul vechi s-ar tipari cu alt conținut, iar marfa noua ar rămâne pe niciun act.
+    // Garda exista si pe server, dar aici nu se mai ajunge la el.
+    const aleActului = (cuCifre.actFigures.receiptIds || []).map(Number);
+    const strain = lista.find((r) => !aleActului.includes(Number(r.id)));
+    if (strain) {
+      alert(
+        `Recepțiile ${aleActului.join(", ")} sunt deja pe actul ${emisa.actSeries || ""} ${emisa.actNumber}, ` +
+        `iar #${strain.id} nu. Emite un act separat pentru ea sau restrânge perioada.`
+      );
+      return { status: "abort" };
+    }
+    return {
+      status: "ok",
+      act: {
+        actNumber: emisa.actNumber,
+        actSeries: emisa.actSeries || "",
+        actFigures: cuCifre.actFigures
+      }
+    };
   }
+
+  // Actul de achizitie se intocmeste doar la cumpararea de la PERSOANE FIZICE. Pentru firme
+  // nu se consuma numar — nu e eroare, e documentul fara rubrica de numar completata.
+  if (!(partnerWithholdingPercent(partner || {}) > 0)) {
+    return { status: "fara-numar" };
+  }
+
   try {
     const res = await fetch(`/api/receipts/${purtator.id}/act-number`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ companyId: company?.id })
+      body: JSON.stringify({
+        companyId: company?.id,
+        // TOATE receptiile acoperite de aceasta hartie primesc numarul.
+        receiptIds: lista.map((r) => r.id)
+      })
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      alert(err.error || "Nu am putut obține numărul actului. Încearcă din nou.");
+      return { status: "abort" };
+    }
     const data = await res.json();
-    // Se pune si pe cache, ca o reimprimare imediata sa nu mai ceara serverul.
-    purtator.actNumber = data.actNumber;
-    purtator.actSeries = data.actSeries;
-    return { actNumber: data.actNumber, actSeries: data.actSeries };
+    if (!data.actFigures) {
+      alert("Numărul s-a atribuit, dar cifrele actului nu s-au înregistrat. Nu tipări: reîncearcă.");
+      return { status: "abort" };
+    }
+    // Cache: cifrele pe TOATE, ca serverul. Puse doar pe purtator, tiparirea imediata de pe
+    // alt rand dadea alerta falsa „emis fara captura" si apoi un act fara numar.
+    for (const r of lista) {
+      r.actNumber = data.actNumber;
+      r.actSeries = data.actSeries;
+      r.actFigures = data.actFigures;
+    }
+    return {
+      status: "ok",
+      act: { actNumber: data.actNumber, actSeries: data.actSeries, actFigures: data.actFigures }
+    };
   } catch (err) {
     console.error("Nu am putut obtine numarul actului:", err);
-    return null;
+    alert("Nu am putut obține numărul actului (eroare de rețea). Nu s-a tipărit nimic.");
+    return { status: "abort" };
   }
 }
 
 function buildPurchaseActHtml(receipts, partner, company, act) {
-  const p = partner || {};
-  const co = company || DEFAULT_COMPANY;
-  const rows = (receipts || []).filter(Boolean).map((r) => ({ r, ...actReceiptFigures(r) }));
+  const inghetatFirma = act && act.actFigures ? act.actFigures : null;
+  // Pe un act emis, firma si furnizorul sunt cei de la EMITERE: altfel reselectarea unei alte
+  // firme in „Documente tipar" scotea antetul firmei B cu seria si numarul firmei A, iar
+  // redenumirea furnizorului schimba numele vanzatorului de pe hartia deja semnata.
+  // Antetul si identitatea partilor vin din CAPTURA, nu din nomenclatorul de acum.
+  // `resolveCompany` nu se foloseste aici: la dezactivarea firmei emitente ar cadea pe prima
+  // firma activa — alt emitent sub acelasi numar. Captura e completa, deci nu e nevoie.
+  const firmaInghetata = inghetatFirma && inghetatFirma.company ? inghetatFirma.company : null;
+  const p = inghetatFirma && inghetatFirma.supplierName
+    ? {
+        ...(partner || {}),
+        name: inghetatFirma.supplierName,
+        // Rubrica legala a formularului: IDNP + adresa. Se citeau LIVE, deci completarea
+        // IDNP-ului dupa semnare schimba hartia retiparita.
+        idno: inghetatFirma.supplierIdno || (partner || {}).idno || "",
+        address: inghetatFirma.supplierAddress || (partner || {}).address || ""
+      }
+    : partner || {};
+  const co = firmaInghetata
+    ? { ...DEFAULT_COMPANY, ...firmaInghetata, series: inghetatFirma.series || "" }
+    : company || DEFAULT_COMPANY;
+  // Pe un act DEJA EMIS randurile vin din cifrele INGHEȚATE atunci, nu din recalculul de
+  // acum: altfel, dupa o corectie de suma, actul se contrazicea pe aceeasi hartie — rand
+  // 35.756,10 sub un total de 17.878,05, pe un formular care afirma „5 = 3 x 4".
+  const inghetatIn = act && act.actFigures ? act.actFigures : null;
+  const rows = inghetatIn && Array.isArray(inghetatIn.rows) && inghetatIn.rows.length
+    ? inghetatIn.rows.map((snap) => {
+        const r = (receipts || []).find((x) => x && Number(x.id) === Number(snap.id)) || { id: snap.id };
+        const netKg = Number(snap.netKg) || 0;
+        const value = Number(snap.value) || 0;
+        return {
+          // Denumirea se ia din captura: nomenclatorul se poate redenumi dupa emitere.
+          r: { ...r, product: snap.product || r.product },
+          netKg,
+          value,
+          price: netKg > 0 && value > 0 ? actDerivePrice(value, netKg) : 0
+        };
+      })
+    : (receipts || []).filter(Boolean).map((r) => ({ r, ...actReceiptFigures(r) }));
   const value = Number(rows.reduce((s, x) => s + x.value, 0).toFixed(2));
   const taxPercent = partnerWithholdingPercent(p);
   // „Total de plata" = datoria INREGISTRATA pe document, nu o recalculare din cota de azi.
@@ -6874,10 +7246,21 @@ function buildPurchaseActHtml(receipts, partner, company, act) {
     return sum + (stored > 0 ? stored : x.value - (x.value * taxPercent) / 100);
   }, 0).toFixed(2));
   const tax = Math.max(Number((value - netPay).toFixed(2)), 0);
+  // Pe un act DEJA EMIS se tiparesc cifrele inghetate atunci, nu recalculul de acum: o
+  // corectie ulterioara de pret sau de bifa ar face ca aceeasi serie si acelasi numar sa
+  // arate alte cifre decat hartia semnata. Actul nou cere numar nou.
+  const inghetat = inghetatIn;
+  const valueTiparit = inghetat ? Number(inghetat.value) : value;
+  const netPayTiparit = inghetat ? Number(inghetat.netPay) : netPay;
+  const taxTiparit = inghetat ? Number(inghetat.tax) : tax;
+  const kgTiparit = inghetat ? Number(inghetat.netKg) : rows.reduce((s, x) => s + x.netKg, 0);
   const nr = act && Number(act.actNumber) > 0 ? String(act.actNumber) : "____";
   const seria = (act && act.actSeries) || co.series || co.shortName || "";
-  const words = escapeComboHtml(numberToWordsRo(value));
-  const dates = rows.map((x) => x.r.receivedAt || x.r.createdAt).filter(Boolean).sort();
+  const words = escapeComboHtml(numberToWordsRo(valueTiparit));
+  const dates = (inghetatIn && Array.isArray(inghetatIn.rows)
+    ? inghetatIn.rows.map((r) => r.date)
+    : rows.map((x) => x.r.receivedAt || x.r.createdAt)
+  ).filter(Boolean).sort();
   const dateText = dates.length
     ? (dates[0] === dates[dates.length - 1]
       ? formatDateShort(dates[0])
@@ -6898,7 +7281,7 @@ function buildPurchaseActHtml(receipts, partner, company, act) {
     try {
       const matrix = qrMatrix(actQrPayload({
         company: co, partner: p, series: seria, nr,
-        dateText, rows, value, tax, netPay
+        dateText, rows, value: valueTiparit, tax: taxTiparit, netPay: netPayTiparit
       }));
       return matrix ? qrSvg(matrix, 96) : "";
     } catch (err) {
@@ -6935,7 +7318,7 @@ function buildPurchaseActHtml(receipts, partner, company, act) {
       <td style="width:45%;vertical-align:top;font-size:11px;">
         <div class="of-b">Primit în baza contractului</div>
         <div class="of-ru">Принято в счет договора</div>
-        <div style="margin-top:10px;"><span class="of-b">nr.</span> ${ln("", 70)} <span class="of-b">din</span> ${ln("", 90)}</div>
+        <div style="margin-top:10px;"><span class="of-b">nr.</span> ${ln(nr, 70)} <span class="of-b">din</span> ${ln(dateText, 90)}</div>
         <div class="of-ru">№ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; от</div>
       </td>
     </tr></table>
@@ -6998,7 +7381,7 @@ function buildPurchaseActHtml(receipts, partner, company, act) {
       <tbody>${bodyRows}${emptyRow}
       </tbody>
       <tfoot>
-        <tr><td class="of-b">Total / Итого</td><td class="of-c of-b">X</td><td class="of-c of-b">X</td><td class="of-c of-b">X</td><td class="of-r of-b">${actNum(value, 2)}</td></tr>
+        <tr><td class="of-b">Total / Итого</td><td class="of-c of-b">X</td><td class="of-c of-b">X</td><td class="of-c of-b">X</td><td class="of-r of-b">${actNum(valueTiparit, 2)}</td></tr>
       </tfoot>
     </table>
 
@@ -7015,11 +7398,11 @@ function buildPurchaseActHtml(receipts, partner, company, act) {
     <table style="width:100%;border-collapse:collapse;margin-top:6px;"><tr>
       <td style="width:22%;vertical-align:bottom;"><span class="of-b">la buget</span><div class="of-ru">в бюджет</div></td>
       <td style="vertical-align:bottom;">
-        <div style="border-bottom:1px solid #000;padding-bottom:1px;">${escapeComboHtml(numberToWordsRo(tax))}</div>
+        <div style="border-bottom:1px solid #000;padding-bottom:1px;">${escapeComboHtml(numberToWordsRo(taxTiparit))}</div>
         ${cap("în litere", "прописью")}
       </td>
       <td style="width:170px;vertical-align:bottom;padding-left:10px;">
-        <div style="border-bottom:1px solid #000;text-align:center;padding-bottom:1px;">${actNum(tax, 2)}</div>
+        <div style="border-bottom:1px solid #000;text-align:center;padding-bottom:1px;">${actNum(taxTiparit, 2)}</div>
         ${cap("în cifre", "цифрами")}
       </td>
     </tr></table>
@@ -7037,11 +7420,11 @@ function buildPurchaseActHtml(receipts, partner, company, act) {
     <table style="width:100%;border-collapse:collapse;margin-top:10px;"><tr>
       <td style="width:22%;vertical-align:bottom;"><span class="of-b">Total de plata</span><div class="of-ru">Общая сумма к оплате</div></td>
       <td style="vertical-align:bottom;">
-        <div style="border-bottom:1px solid #000;padding-bottom:1px;">${escapeComboHtml(numberToWordsRo(netPay))}</div>
+        <div style="border-bottom:1px solid #000;padding-bottom:1px;">${escapeComboHtml(numberToWordsRo(netPayTiparit))}</div>
         ${cap("în litere", "прописью")}
       </td>
       <td style="width:170px;vertical-align:bottom;padding-left:10px;">
-        <div style="border-bottom:1px solid #000;text-align:center;padding-bottom:1px;">${actNum(netPay, 2)}</div>
+        <div style="border-bottom:1px solid #000;text-align:center;padding-bottom:1px;">${actNum(netPayTiparit, 2)}</div>
         ${cap("în cifre", "цифрами")}
       </td>
     </tr></table>
@@ -7250,8 +7633,18 @@ async function printAccountingDocument(docType, refId, companyId) {
         .sort((a, b) => new Date(a.receivedAt || a.createdAt) - new Date(b.receivedAt || b.createdAt));
       if (!receipts.length) { alert("Nu există recepții pentru acest furnizor în perioada aleasă."); return; }
       const win = window.open("", "_blank");
-      const act = await ensureActNumber(receipts, company);
-      openOfficialDocWindow(buildPurchaseActHtml(receipts, partner, company, act), `Act de achizitie ${partner.name}`, win);
+      const rezultat = await ensureActNumber(receipts, company, partner);
+      if (rezultat.status === "abort") {
+        // Motivul a fost deja afisat. NU se tipareste: altfel ar ieși o a doua hartie
+        // semnabila pe aceiasi bani, cu „Nr. ____" si cifrele de azi.
+        if (win) win.close();
+        return;
+      }
+      openOfficialDocWindow(
+        buildPurchaseActHtml(receipts, partner, company, rezultat.act),
+        `Act de achizitie ${partner.name}`,
+        win
+      );
     } else if (docType === "paymentOrder") {
       const tx = (transactionsCache || []).find((t) => Number(t.id) === Number(refId));
       if (!tx) { alert("Plata nu a fost găsită."); return; }
@@ -7895,8 +8288,9 @@ async function printDeliveryDocument(deliveryId, docType) {
     if (!isReceiptInStock(actReceipt)) {
       return renunta(`Recepția #${actReceipt.id} nu e în stoc (${actReceipt.status}). Actul de achiziție s-ar emite pe marfă care n-a intrat.`);
     }
-    const act = await ensureActNumber([actReceipt], actCompany);
-    html = buildPurchaseActHtml([actReceipt], actPartner, actCompany, act);
+    const rezultat = await ensureActNumber([actReceipt], actCompany, actPartner);
+    if (rezultat.status === "abort") return renunta();
+    html = buildPurchaseActHtml([actReceipt], actPartner, actCompany, rezultat.act);
     title = `Act achizitie ${actPartner.name}`;
   }
   else if (docType === "certificate") { html = buildCertificatePrintHtml(delivery); title = `Certificat calitate ${delivery.id}`; }
@@ -8182,8 +8576,16 @@ bodyEl?.addEventListener("click", async (event) => {
       return;
     }
     const win = window.open("", "_blank");
-    const act = await ensureActNumber([receipt], company);
-    openOfficialDocWindow(buildPurchaseActHtml([receipt], partner, company, act), `Act de achizitie ${partner.name}`, win);
+    const rezultat = await ensureActNumber([receipt], company, partner);
+    if (rezultat.status === "abort") {
+      if (win) win.close();
+      return;
+    }
+    openOfficialDocWindow(
+      buildPurchaseActHtml([receipt], partner, company, rezultat.act),
+      `Act de achizitie ${partner.name}`,
+      win
+    );
   }
   // Ordinul de plata NU se emite de aici: el iese dintr-o PLATA inregistrata, din ecranul
   // Financiar (`printAccountingDocument("paymentOrder")`). Sintetizat din restul de plata, ar
@@ -8476,6 +8878,13 @@ function openReceiptDetails(id) {
         ${rdRow("Ultima plată", formatDateShort(item.lastPaymentDate))}
         ${item.amountNote ? rdRow("Corectare valoare", escapeComboHtml(item.amountNote)) : ""}
         ${item.payOnGrossQuantity === true ? rdRow("Bază de plată", "Masa CU apă (uscarea nu s-a taxat)") : ""}
+        ${(Array.isArray(item.actDivergences) ? item.actDivergences : []).map((d) => rdRow(
+          "⚠ Registru ≠ act " + escapeComboHtml(String(d.actSeries || "")) + " " + escapeComboHtml(String(d.actNumber || "")),
+          escapeComboHtml(
+            `${formatDateShort(d.at)} · pe hârtie: ${formatNumber(d.actValue)} lei ` +
+            `(net ${formatNumber(d.actNetPay)} lei) · ${d.reason || ""}`
+          )
+        )).join("")}
         ${(Array.isArray(item.termCorrections) ? item.termCorrections : []).map((c) => rdRow(
           "Corectare condiții · " + formatDateShort(c.at),
           escapeComboHtml(
