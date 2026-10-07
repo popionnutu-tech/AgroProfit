@@ -168,7 +168,9 @@ function randeazaExport1c() {
       '<tr><td colspan="5" class="muted-count">Nimic de încărcat — toate documentele sunt deja marcate.</td></tr>';
     return;
   }
-  body.innerHTML = export1cItems
+  const MAX_RANDURI = 500;
+  const randate = export1cItems.slice(0, MAX_RANDURI);
+  body.innerHTML = randate
     .map(
       (it) => `
         <tr>
@@ -181,7 +183,11 @@ function randeazaExport1c() {
             : "—"}</td>
         </tr>`
     )
-    .join("");
+    .join("") +
+    (export1cItems.length > randate.length
+      ? `<tr><td colspan="5" class="muted-count">Se afișează primele ${randate.length} din ` +
+        `${export1cItems.length}. Restrânge perioada sau încarcă în tranșe.</td></tr>`
+      : "");
 }
 
 async function incarcaLista1c() {
@@ -206,7 +212,11 @@ async function incarcaLista1c() {
           : "")
     );
   } catch (err) {
-    window.alert(err.message);
+    // Lipsa de drepturi nu e o eroare de raportat cu alert: panoul e ascuns oricum pentru
+    // rolurile fara `finance`, iar un alert ar aparea si pe ecranul de login.
+    export1cItems = [];
+    randeazaExport1c();
+    export1cHint(err.message);
   }
 }
 
@@ -247,7 +257,11 @@ if (document.getElementById("export-1c-body")) {
       // `fetch`, nu navigare: avem nevoie de raspuns ca sa putem descarca exact selectia.
       descarca.disabled = true;
       try {
-        const res = await fetch(`${def.ruta}?ids=${ids.join(",")}&includeExported=1`);
+        const res = await fetch(`${def.ruta}?includeExported=1`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids })
+        });
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
           throw new Error(err.error || "Nu am putut descărca.");
@@ -285,14 +299,23 @@ if (document.getElementById("export-1c-body")) {
     );
     if (!ok) return;
     try {
-      const res = await fetch("/api/exports/1c/mark", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ kind: export1cTip, ids, reset })
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Nu am putut marca documentele.");
-      export1cHint(`${(data.changed || []).length} documente actualizate.`);
+      // Transe de 500, cat accepta serverul: la „bifeaza tot" pe mii de documente, un singur
+      // apel cadea, iar omul ar fi re-descarcat si re-importat.
+      const LOT = 500;
+      let total = 0;
+      for (let i = 0; i < ids.length; i += LOT) {
+        const lot = ids.slice(i, i + LOT);
+        const res = await fetch("/api/exports/1c/mark", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ kind: export1cTip, ids: lot, reset })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "Nu am putut marca documentele.");
+        total += (data.changed || []).length;
+        export1cHint(`${total} din ${ids.length} documente actualizate…`);
+      }
+      export1cHint(`${total} documente actualizate.`);
       await incarcaLista1c();
     } catch (err) {
       window.alert(err.message);
@@ -326,7 +349,7 @@ if (document.getElementById("export-1c-body")) {
         window.alert(
           `Potrivire gata.\n\n` +
             `${(data.matched || []).length} furnizori există deja în 1C — marcați.\n` +
-            `${lipsa.length} NU sunt în 1C și trebuie încărcați:\n` +
+            `${data.missingTotal ?? lipsa.length} NU sunt în 1C și trebuie încărcați:\n` +
             lipsa.slice(0, 15).map((m) => `  ${m.name} (${m.idno})`).join("\n") +
             (lipsa.length > 15 ? `\n  …și încă ${lipsa.length - 15}` : "")
         );
@@ -340,7 +363,15 @@ if (document.getElementById("export-1c-body")) {
     });
   }
 
-  incarcaLista1c();
+  // NU la incarcarea paginii: `#export-1c-body` exista static in HTML, iar `data-access`
+  // doar il ASCUNDE — deci apelul pleca inainte de login, pentru orice rol, si 401/403
+  // deschidea un alert pe ecranul de autentificare. Se incarca la deschiderea acordeonului.
+  const acordeon = document.getElementById("export-1c-accordion");
+  if (acordeon) {
+    acordeon.addEventListener("toggle", () => {
+      if (acordeon.open && canAccess("finance")) incarcaLista1c();
+    });
+  }
 }
 
 // Curatarea resturilor: fiecare rand se asaza la ZERO prin aceeasi corectie de inventar ca

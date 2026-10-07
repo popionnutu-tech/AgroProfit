@@ -581,8 +581,40 @@ leagă de furnizor și de contul contabil, iar actul justifică datoria.
   În 1C impozitul vine din ordinul de plată, deci trebuie să fie ACELAȘI cu cel de pe act; o
   cotă schimbată între timp le-ar face să nu coincidă, iar contabilitatea ar arăta altceva
   decât hârtia semnată. Divergența se semnalează în „Observatii export".
-- **Storno** (tranzacție anulată) și **realocarea de avans** (`source: "advance-applied"`) NU
-  intră în export: prima nu mai e o plată, a doua nu e bani noi și ar dubla plata.
+- **Nu se inventează cifre.** Brutul se reconstituie DOAR când e sigur: plată în **numerar**,
+  legată de **o** recepție, **integral atribuită** ei (fără avans, fără stingere FIFO a altor
+  recepții cu alte cote), cu cota îngheţată pe acea recepție. În orice alt caz coloanele de
+  brut/impozit rămân **goale** și rândul poartă un avertisment — mai bine o celulă goală decât
+  un impozit care nu s-a reținut. Cazurile prinse așa: supraplată cu avans, barter
+  (`Servicii`), transfer bancar, plată pe sold inițial, plată care stinge mai multe recepții.
+- Se exportă **banul care a ieșit** (`t.amount`), nu `appliedAmount` — acela e **plafonat** la
+  datoria recepției referite, iar surplusul devine avans; pe o plată „una pentru toate
+  recepțiile" (fluxul normal) exportul ar fi scos mai puțin decât a ieșit din casă, iar contul
+  241.1 ar fi rămas umflat cu diferența. `||`, nu `??`: un `appliedAmount` de 0 nu e o plată de 0.
+- **Storno** (tranzacție anulată), **realocarea de avans** (`advance-applied`) și **ajustările
+  din reclamații** (`complaint-adjustment`) NU intră: prima nu mai e o plată, a doua nu e bani
+  noi, a treia poate avea ca partener CLIENTUL, nu furnizorul.
+- Un document **modificat după încărcare** (`updatedAt > exported1cAt`) e semnalat în
+  „Observatii export": altfel 1C păstrează o cifră care nu mai există la noi.
+- **CSV injection:** o celulă care începe cu `= + - @`, TAB sau CR e interpretată de Excel ca
+  **formulă**, iar ghilimelele nu protejează. Nota recepției e scrisă de OPERATOR și ajunge în
+  coloana „Temei" — deci privilegiul cel mai mic ar putea executa ceva pe stația contabilului.
+  Se neutralizează cu prefix `'`, **doar** pe valorile care nu sunt numere (altfel s-ar strica
+  negativele citite de 1C). Aceeași regulă în `trimiteCsv1c` și în `toCsvField`.
+- Exporturile CSV sunt în **`.gitignore`** (`/*.csv`): conțin IDNP-uri, adrese, telefoane,
+  IBAN-uri și sume pentru persoane fizice, iar hook-ul de auto-commit face `git add -A` pe un
+  repo **public**.
+- Drepturi: `CAN_EXPORT_1C_ROLES` (contabil, contabil-șef, admin) — listă **proprie**, nu
+  `CAN_EDIT_BILLING_ROLES`. Managerul are drepturi de facturare dar nu vede exportul; ar fi
+  putut marca documente pe care nu le citește, scoțându-le din coadă sau readucându-le.
+- **Performanță:** indecși pe id construiți O DATĂ (`find` în buclă făcea exportul pătratic —
+  753 ms vs 5 ms la 3 ani). Selecția merge prin **POST cu `ids` în corp**: în URL, mii de ids
+  depășesc limita de antet a platformei. Plafon de **500** pe ambele capete (export și
+  marcare), marcarea în tranșe, tabelul randează maximum 500 de rânduri.
+- Lista nu se încarcă la **deschiderea paginii**: `#export-1c-body` există static în HTML, iar
+  `data-access` doar îl **ascunde** — deci cererea pleca înainte de login, pentru orice rol, și
+  un 401 deschidea un `alert` pe ecranul de autentificare. Se încarcă la deschiderea
+  acordeonului, cu gardă de rol; lipsa de drepturi se arată în hint, nu cu alert.
 
 ## Deploy
 - **Push pe `main` → Vercel publică automat** pe agroprofit-plus.vercel.app (integrare Git activă).

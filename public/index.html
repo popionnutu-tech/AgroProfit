@@ -2514,6 +2514,17 @@
               </div>
               <input name="reportAudience" placeholder="Destinatari raport" required />
               <input name="defaultCurrency" placeholder="Moneda" required />
+              <p class="field-hint" style="margin:6px 0 2px">
+                Conturi contabile pentru exportul în 1C și pragul resturilor de stoc:
+              </p>
+              <div class="split">
+                <label>Cont casă<input name="account1cCash" placeholder="241.1" /></label>
+                <label>Cont furnizor<input name="account1cSupplier" placeholder="544.32" /></label>
+              </div>
+              <div class="split">
+                <label>Cont impozit<input name="account1cTax" placeholder="534.3" /></label>
+                <label>Prag resturi stoc (kg)<input name="stockDustThresholdKg" type="number" min="1" max="50" step="1" placeholder="5" /></label>
+              </div>
               <button type="submit">Salveaza setari</button>
               <p class="form-message" id="settings-message"></p>
             </form>

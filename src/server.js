@@ -89,7 +89,6 @@ const {
   matchSuppliers1cHandler,
   setExported1cHandler,
   exportSuppliers1cHandler,
-  markSuppliers1cHandler,
   exportResourceHandler,
   getDashboardHandler,
   getDeliveryDefaultsHandler,
@@ -718,7 +717,9 @@ app.get(
   getDashboardHandler
 );
 
-app.get(
+// GET pentru descarcarea simpla (pe perioada); POST cand se trimite o SELECTIE de ids:
+// in URL, mii de ids depasesc limita de antet a platformei.
+app.all(
   "/api/exports/purchase-acts-1c",
   requireRoles(["accountant", "accountant-sef", "admin"]),
   exportPurchaseActs1cHandler
@@ -726,14 +727,18 @@ app.get(
 
 // Furnizorii de pe actele din perioada. Se incarca in 1C INAINTEA actelor, ca fiecare act
 // sa gaseasca furnizorul existent — fara cimpuri goale si fara dubluri.
-app.get(
+// GET pentru descarcarea simpla (pe perioada); POST cand se trimite o SELECTIE de ids:
+// in URL, mii de ids depasesc limita de antet a platformei.
+app.all(
   "/api/exports/suppliers-1c",
   requireRoles(["accountant", "accountant-sef", "admin"]),
   exportSuppliers1cHandler
 );
 
 // Ordine de plata. Se incarca in 1C DUPA acte.
-app.get(
+// GET pentru descarcarea simpla (pe perioada); POST cand se trimite o SELECTIE de ids:
+// in URL, mii de ids depasesc limita de antet a platformei.
+app.all(
   "/api/exports/payments-1c",
   requireRoles(["accountant", "accountant-sef", "admin"]),
   exportPayments1cHandler
@@ -748,9 +753,10 @@ app.get(
 
 // Marcheaza / anuleaza marcajul „incarcat in 1C" pe furnizori, acte sau plati.
 // Anularea serveste reincarcarii unui document corectat.
+// Aceleasi roluri ca exportul: cine marcheaza trebuie sa poata si CITI documentele.
 app.post(
   "/api/exports/1c/mark",
-  requireRoles(["accountant", "accountant-sef", "manager", "admin"]),
+  requireRoles(["accountant", "accountant-sef", "admin"]),
   setExported1cHandler
 );
 
@@ -762,14 +768,9 @@ app.post(
   matchSuppliers1cHandler
 );
 
-// Marcheaza furnizorii ca incarcati in 1C — apasat de om DUPA un import reusit. Aplicatia nu
-// poate sti singura daca 1C i-a primit, iar un marcaj automat pe descarcare i-ar scoate din
-// export chiar daca importul a cazut.
-app.post(
-  "/api/exports/suppliers-1c/mark",
-  requireRoles(["accountant", "accountant-sef", "manager", "admin"]),
-  markSuppliers1cHandler
-);
+// Ruta veche de marcare a furnizorilor a fost SCOASA: duplica `POST /api/exports/1c/mark`
+// cu `kind=suppliers`, prin a doua functie de storage, cu propria validare. Doua cai pentru
+// aceeasi actiune inseamna ca o inasprire pe una lasa cealalta deschisa.
 
 // Exportul generic (CSV de lucru). Ruta de mai sus e DEASUPRA, altfel „purchase-acts-1c" ar
 // fi prins de `:resource` si ar da „resursa necunoscuta".

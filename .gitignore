@@ -44,6 +44,12 @@ SECURITY-AUDIT-*.md
 /*.webp
 /*.tif
 /*.tiff
+# Exporturile pentru 1C: contin IDNP-uri, adrese, telefoane, IBAN-uri, sume si impozitul
+# retinut pentru PERSOANE FIZICE. Hook-ul de auto-commit face `git add -A`, iar repo-ul e
+# public: un fisier salvat in radacina + prima modificare de cod = publicat ireversibil.
+/*.csv
+/*.CSV
+
 # Loc dedicat pentru documentele primite de la furnizori, daca e nevoie sa stea in folder.
 /scanuri/
 /documente/

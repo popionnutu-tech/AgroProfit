@@ -234,7 +234,7 @@ test("ordinul de plata: suma e BRUTA, impozitul se retine din ea", async () => {
 
     const brut = Number(p["Suma bruta (lei)"]);
     const impozit = Number(p["Impozit retinut (lei)"]);
-    const numerar = Number(p["De plata in numerar (lei)"]);
+    const numerar = Number(p["Suma plata (lei)"]);
 
     // Ca in ordinul de plata real: brut − impozit = numerar, iar impozitul e 6% din brut.
     assert.ok(Math.abs(brut - impozit - numerar) < 0.02, `${brut} - ${impozit} != ${numerar}`);
@@ -321,8 +321,10 @@ test("cota se ia de pe RECEPTIE, nu din nomenclatorul de acum", async () => {
     const brut = Number(p["Suma bruta (lei)"]);
     assert.ok(Math.abs(brut - Number(r.preliminaryMerchandiseValue)) < 0.02,
       "brutul din plata nu coincide cu valoarea de pe act");
-    // Si divergenta se semnaleaza, ca sa nu treaca neobservata.
-    assert.match(p["Observatii export"], /cota de pe receptie e 6%, in nomenclator e 12%/);
+    // Nu se mai compara cu nomenclatorul: cota VINE de pe receptie prin construcție, iar
+    // reconstituirea se face DOAR cand plata e integral atribuita acelei receptii. Deci
+    // rândul e curat, fara avertismente.
+    assert.equal(p["Observatii export"], "");
   });
 });
 
@@ -444,5 +446,223 @@ test("potrivirea de pornire cu lista din 1C marcheaza doar ce exista acolo", asy
     const out = await storage.exportSuppliersFor1c({ onlyFromActs: false });
     assert.equal(out.rows.length, 1);
     assert.equal(out.rows[0]["Cod fiscal / IDNP"], "2009999999999");
+  });
+});
+
+// Cazurile pe care agentul le-a reprodus: exportul inventa cifre pe care nu le putea sti.
+// Regula noua: se reconstituie brutul DOAR cand e sigur; altfel celulele rămân goale si
+// randul poarta un avertisment. Mai bine o celula goala decat un impozit care nu s-a reținut.
+
+async function platesteSiExporta(storage, extra = {}) {
+  await receptieEmisa(storage);
+  const r = (await storage.listReceipts())[0];
+  const t = await storage.createTransaction({
+    referenceType: "receipt", receiptId: r.id, partnerId: 1,
+    partner: "Anghelus Ruslan", direction: "payment",
+    amount: Number(r.amountToPay), ...extra
+  });
+  return { r, t, rand: (await storage.exportPaymentsFor1c({})).rows[0] };
+}
+
+test("SUPRAPLATA: se exporta banul care a ieșit, nu suma atribuita", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    await receptieEmisa(storage);
+    const r = (await storage.listReceipts())[0];
+    const net = Number(r.amountToPay);
+    // Se plateste 5.000 lei in plus: surplusul devine avans.
+    await storage.createTransaction({
+      referenceType: "receipt", receiptId: r.id, partnerId: 1,
+      partner: "Anghelus Ruslan", direction: "payment", amount: net + 5000
+    });
+    const p = (await storage.exportPaymentsFor1c({})).rows[0];
+    // Suma exportata = ce a ieșit din casa, nu `appliedAmount` (plafonat la datorie).
+    assert.equal(Number(p["Suma plata (lei)"]).toFixed(2), (net + 5000).toFixed(2));
+    // Si NU se inventeaza brut/impozit pe o plata care include avans.
+    assert.equal(p["Suma bruta (lei)"], "");
+    assert.equal(p["Impozit retinut (lei)"], "");
+    assert.match(p["Observatii export"], /include un avans de 5000\.00 lei/);
+  });
+});
+
+test("BARTER si TRANSFER nu intra pe contul de casa si nu primesc impozit inventat", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    for (const tip of ["Servicii", "Transfer"]) {
+      const out = await withTip(storage, tip);
+      assert.equal(out["Cont casa"], "", `${tip}: nu are ce caută pe contul de casa`);
+      assert.equal(out["Suma bruta (lei)"], "", `${tip}: brut inventat`);
+      assert.equal(out["Impozit retinut (lei)"], "", `${tip}: impozit inventat`);
+      assert.match(out["Observatii export"], new RegExp(`plata e „${tip}"`));
+      assert.equal(out["Tip plata"], tip);
+    }
+  });
+
+  async function withTip(storage, tip) {
+    const est = computeReceiptEstimate({
+      quantity: 1, price: 6, humidity: 14, impurity: 2,
+      product: { humidityNorm: 14, impurityNorm: 2 },
+      tariffs: TARIFFS, fiscalProfile: { withholdingPercent: 6 }
+    });
+    const idx = tip === "Servicii" ? 5 : 6;
+    const r = await storage.createReceipt({
+      supplier: "Anghelus Ruslan", supplierId: 1, product: `P${idx}`, productId: idx,
+      quantity: 1, grossQuantity: 1, unit: "tone", price: 6,
+      location: `Cilindru ${idx}`, locationId: idx, ...est
+    });
+    const lst = (await storage.listReceipts()).find((x) => x.id === r.id);
+    const t = await storage.createTransaction({
+      referenceType: "receipt", receiptId: r.id, partnerId: 1,
+      partner: "Anghelus Ruslan", direction: "payment",
+      amount: Number(lst.amountToPay), paymentType: tip
+    });
+    return (await storage.exportPaymentsFor1c({ transactionIds: [t.id] })).rows[0];
+  }
+});
+
+test("plata pe SOLD INITIAL nu primeste impozit reconstituit", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    await receptieEmisa(storage);
+    const t = await storage.createTransaction({
+      referenceType: "opening-debt", openingDebtId: "x1", partnerId: 1,
+      partner: "Anghelus Ruslan", direction: "payment", amount: 10000
+    });
+    const p = (await storage.exportPaymentsFor1c({ transactionIds: [t.id] })).rows[0];
+    assert.equal(Number(p["Suma plata (lei)"]).toFixed(2), "10000.00");
+    assert.equal(p["Suma bruta (lei)"], "", "s-a inventat un brut pe o datorie initiala");
+    assert.equal(p["Impozit retinut (lei)"], "");
+    assert.match(p["Observatii export"], /nu e legata de o receptie/);
+  });
+});
+
+test("ajustarea din reclamatii NU e o plata catre furnizor", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    await receptieEmisa(storage);
+    await storage.createTransaction({
+      referenceType: "delivery", deliveryId: null, partnerId: 2,
+      partner: "Cumparator SRL", direction: "payment", amount: 500,
+      source: "complaint-adjustment"
+    });
+    assert.equal((await storage.exportPaymentsFor1c({})).rows.length, 0,
+      "o ajustare de factura a ajuns in ordinele de plata");
+  });
+});
+
+test("documentul modificat DUPA incarcare e semnalat", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const CONT = { currentUser: { roleCode: "accountant" }, changedBy: "contabil" };
+    const { t } = await platesteSiExporta(storage);
+    await storage.setExported1c({ ...CONT, kind: "payments", ids: [t.id] });
+
+    await new Promise((r) => setTimeout(r, 5));
+    await storage.updateTransaction(t.id, {
+      note: "corectat", changeReason: "corectie", changedBy: "admin"
+    });
+
+    const p = (await storage.exportPaymentsFor1c({ transactionIds: [t.id] })).rows[0];
+    assert.match(p["Observatii export"], /MODIFICAT dupa incarcarea in 1C/);
+  });
+});
+
+test("injectia de formule in CSV e neutralizata", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    // Nota receptiei e scrisa de OPERATOR si ajunge in coloana „Temei".
+    const est = computeReceiptEstimate({
+      quantity: 1, price: 6, humidity: 14, impurity: 2,
+      product: { humidityNorm: 14, impurityNorm: 2 },
+      tariffs: TARIFFS, fiscalProfile: { withholdingPercent: 6 }
+    });
+    await storage.updateConfigEntry("partners", 1, {
+      name: "Anghelus Ruslan", idno: "0960612543420", role: "furnizor",
+      fiscalProfile: "Persoana fizica", changeReason: "t", changedBy: "admin"
+    });
+    const r = await storage.createReceipt({
+      supplier: "Anghelus Ruslan", supplierId: 1, product: "Grau", productId: 9,
+      quantity: 1, grossQuantity: 1, unit: "tone", price: 6,
+      location: "Cilindru 9", locationId: 9,
+      note: '=cmd|\' /C calc\'!A0', ...est
+    });
+    await storage.assignActNumber([r.id], PF);
+
+    const { rows } = await storage.exportPurchaseActsFor1c({});
+    assert.match(rows[0].Temei, /^=cmd/, "nota se pastreaza in date neschimbata");
+
+    // Verificam NEUTRALIZAREA la scriere, prin acelasi cod care produce fisierul.
+    const { exportPurchaseActs1cHandler } = load("src/report-extensions-handlers.js");
+    let corp = "";
+    const res = {
+      setHeader() {}, status() { return res; },
+      end(t) { corp = t; }
+    };
+    await exportPurchaseActs1cHandler({ query: {}, currentUser: { roleCode: "admin" } }, res);
+
+    // Celula periculoasa primeste prefix `'`, deci Excel o trateaza ca TEXT.
+    assert.ok(corp.includes("'=cmd"), "formula nu a fost neutralizata");
+    assert.ok(!/;=cmd/.test(corp), "o celula mai incepe direct cu =");
+    // Numerele NU se strica: raman numere pentru 1C.
+    assert.match(corp, /;1000;kg;/);
+  });
+});
+
+test("selectia e plafonata la 500, pe ambele capete", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const CONT = { currentUser: { roleCode: "accountant" }, changedBy: "contabil" };
+    // Magazia refuza peste 500 — altfel omul descarca mai mult decat poate marca,
+    // iar la marcare ar re-descarca si re-importa.
+    await assert.rejects(
+      () => storage.setExported1c({
+        ...CONT, kind: "receipts",
+        ids: Array.from({ length: 501 }, (_, i) => i + 1)
+      }),
+      /max 500/
+    );
+    // Si handlerul de export, pe acelasi plafon.
+    const { exportPurchaseActs1cHandler } = load("src/report-extensions-handlers.js");
+    let cod = 0;
+    const res = { setHeader() {}, status(c) { cod = c; return res; }, json() {}, end() {} };
+    await exportPurchaseActs1cHandler(
+      { query: {}, body: { ids: Array.from({ length: 501 }, (_, i) => i + 1) },
+        currentUser: { roleCode: "admin" } },
+      res
+    );
+    assert.equal(cod, 400, "exportul trebuia sa refuze peste 500");
+  });
+});
+
+test("marcarea nu lasa rolurile fara export sa atinga documentele", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    await receptieEmisa(storage);
+    const id = (await storage.listPending1c({ kind: "receipts" }))[0].id;
+    // `manager` are drepturi de facturare, dar NU poate citi exportul: nu trebuie sa poata
+    // nici marca documente pe care nu le vede.
+    for (const rol of ["manager", "operator", "control"]) {
+      await assert.rejects(
+        () => storage.setExported1c({
+          currentUser: { roleCode: rol }, kind: "receipts", ids: [id], changedBy: rol
+        }),
+        /contabilul sau administratorul/i,
+        `rolul ${rol} nu trebuia sa poata marca`
+      );
+    }
+  });
+});
+
+test("un `kind` din prototip nu trece garda", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    const CONT = { currentUser: { roleCode: "accountant" }, changedBy: "contabil" };
+    for (const rau of ["__proto__", "constructor", "toString", "altceva"]) {
+      await assert.rejects(
+        () => storage.setExported1c({ ...CONT, kind: rau, ids: [1] }),
+        /Tip necunoscut/,
+        `kind="${rau}" nu trebuia acceptat`
+      );
+    }
   });
 });

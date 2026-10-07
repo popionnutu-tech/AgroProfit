@@ -6481,7 +6481,13 @@ async function getDashboardSnapshot(dateValue = new Date().toISOString().slice(0
 
 function toCsvField(value) {
   if (value === null || value === undefined) return "";
-  const str = String(value);
+  let str = String(value);
+  // Injectie de formule in Excel: o celula care incepe cu `= + - @`, TAB sau CR e
+  // interpretata ca FORMULA. Se neutralizeaza doar ce nu e numar, ca sa nu se strice
+  // valorile negative. Aceeasi regula ca in `trimiteCsv1c`.
+  if (str && !/^-?\d+(?:[.,]\d+)?$/.test(str.trim()) && /^[=+\-@\t\r]/.test(str)) {
+    str = `'${str}`;
+  }
   if (/[",\n\r]/.test(str)) {
     return `"${str.replace(/"/g, '""')}"`;
   }
@@ -6533,6 +6539,10 @@ async function exportPurchaseActsFor1c(options = {}) {
     return true;
   };
 
+  // Index pe id, construit O DATA: `find` in bucla facea exportul patratic (753 ms la 3 ani,
+  // 5 ms cu index — acelasi tipar deja folosit corect in `listReceipts`).
+  const receptiiPeId = new Map((state.receipts || []).map((r) => [Number(r.id), r]));
+
   const randuri = [];
   for (const receipt of state.receipts || []) {
     // Doar acte EMISE: un act neemis nu are numar, deci nu are ce cauta in contabilitate.
@@ -6570,7 +6580,7 @@ async function exportPurchaseActsFor1c(options = {}) {
           : "";
 
     for (const rand of cifre.rows || []) {
-      const sursa = (state.receipts || []).find((r) => Number(r.id) === Number(rand.id)) || receipt;
+      const sursa = receptiiPeId.get(Number(rand.id)) || receipt;
       const kg = Number(rand.netKg || 0);
       const valoare = Number(rand.value || 0);
       randuri.push({
@@ -6705,8 +6715,8 @@ async function exportSuppliersFor1c(options = {}) {
 // Plata se leaga de FURNIZOR si de contul contabil (asa lucreaza 1C). Numarul actului intra
 // in „Temei", ca sa se poata confrunta cu dosarul — in 1C plata nu refera documentul direct.
 const EXPORT_1C_PAYMENT_COLUMNS = [
-  "Nr. plata", "Data", "Furnizor", "Cod fiscal / IDNP",
-  "Suma bruta (lei)", "Cota impozit (%)", "Impozit retinut (lei)", "De plata in numerar (lei)",
+  "Nr. plata", "Data", "Tip plata", "Furnizor", "Cod fiscal / IDNP",
+  "Suma plata (lei)", "Suma bruta (lei)", "Cota impozit (%)", "Impozit retinut (lei)",
   "Cont casa", "Cont furnizor", "Cont impozit",
   "Temei", "Acte acoperite", "Observatii export"
 ];
@@ -6724,6 +6734,12 @@ function conturi1c() {
   };
 }
 
+// Tranzactii care NU sunt plati catre furnizor si nu au ce caută intr-un ordin de casa.
+const SURSE_PLATA_EXCLUSE = new Set([
+  "advance-applied",      // realocare de avans: nu sunt bani noi, ar dubla plata
+  "complaint-adjustment"  // ajustare de factura pe o reclamatie; partenerul poate fi CLIENTUL
+]);
+
 async function exportPaymentsFor1c(options = {}) {
   const state = readReceiptsState();
   const config = readConfigState();
@@ -6735,13 +6751,16 @@ async function exportPaymentsFor1c(options = {}) {
     ? new Set(options.transactionIds.map(Number))
     : null;
 
+  // Indecsi construiti O DATA: doua `find` liniare per tranzactie faceau exportul patratic
+  // (931 ms la 3 ani, 10 ms cu indecsi).
+  const parteneriPeId = new Map((config.partners || []).map((p) => [Number(p.id), p]));
+  const receptiiPeId = new Map((state.receipts || []).map((r) => [Number(r.id), r]));
+
   const randuri = [];
   for (const t of state.transactions || []) {
-    // Doar PLATI catre furnizori, confirmate. Storno-ul (anulat) nu e o plata.
     if (t.direction !== "payment") continue;
     if (!isActiveTransaction(t)) continue;
-    // Realocarea unui avans nu e bani noi — ar dubla plata in contabilitate.
-    if (t.source === "advance-applied") continue;
+    if (SURSE_PLATA_EXCLUSE.has(String(t.source || ""))) continue;
     const zi = String(t.createdAt || "").slice(0, 10);
     if (!zi) continue;
     if (selectie) {
@@ -6752,63 +6771,106 @@ async function exportPaymentsFor1c(options = {}) {
       if (to && zi > to) continue;
     }
 
-    const partener = (config.partners || []).find(
-      (p) => Number(p.id) === Number(t.supplierId || t.partnerId)
-    );
-    const receptie = (state.receipts || []).find((r) => Number(r.id) === Number(t.receiptId));
+    const partener = parteneriPeId.get(Number(t.partnerId));
+    const receptie = receptiiPeId.get(Number(t.receiptId));
 
-    // Cota se ia de pe RECEPTIE, inghetata la intrarea marfii — nu din nomenclatorul de
-    // acum. In 1C impozitul vine din ordinul de plata, deci trebuie sa fie ACELASI cu cel
-    // de pe act; o cota schimbata in nomenclator intre timp le-ar face sa nu coincida, iar
-    // contabilitatea ar arăta altceva decat hartia semnata.
-    const prof = (config.fiscalProfiles || []).find(
-      (f) => String(f.name || "").trim().toLowerCase() ===
-        String((partener || {}).fiscalProfile || "").trim().toLowerCase()
-    );
+    // BANUL CARE A IESIT, nu suma atribuita: `appliedAmount` e PLAFONAT la datoria recepției
+    // referite, iar surplusul devine avans. Pe o plata „una pentru toate receptiile" (fluxul
+    // normal), exportul ar fi scos mai putin decat a ieșit din casa, iar 241.1 ar fi rămas
+    // umflat cu diferenta. `||`, nu `??`: un `appliedAmount` de 0 nu inseamna plata de 0.
+    const platit = Number(t.amount || 0);
+    const atribuit = Number(t.appliedAmount || 0);
+    const avans = Number(t.advanceAmount || 0);
+    const tipPlata = String(t.paymentType || "").trim() || "Numerar";
+
+    // RECONSTITUIREA BRUTULUI se face DOAR cand e sigur:
+    //  - plata e in NUMERAR (un ordin de casa; transferul si barterul nu ies din 241.1);
+    //  - e legata de O receptie, integral atribuita ei (fara avans, fara stingere FIFO a
+    //    altor receptii cu alte cote);
+    //  - cota e cea INGHEȚATA pe acea receptie.
+    // In orice alt caz NU se inventeaza cifre: coloanele rămân goale si rândul poarta un
+    // avertisment, ca omul sa completeze manual. Mai bine o celula goala decat un impozit
+    // care nu s-a reținut.
+    const avertismente = [];
+    const esteNumerar = /numerar/i.test(tipPlata);
     const cotaReceptie = Number((receptie || {}).withholdingPercent);
-    const cota = Number.isFinite(cotaReceptie) && cotaReceptie > 0
-      ? cotaReceptie
-      : Number((prof || {}).withholdingPercent || 0);
+    const integralPeReceptie =
+      Boolean(receptie) &&
+      String(t.referenceType || "") === "receipt" &&
+      avans <= 0 &&
+      Math.abs(atribuit - platit) < 0.005;
+    const sigur =
+      esteNumerar && integralPeReceptie && Number.isFinite(cotaReceptie) && cotaReceptie > 0;
 
-    // Suma din registru e cea PLATITA efectiv. `Сумма` din 1C e brutul, iar impozitul se
-    // retine din el — deci brutul se reconstituie: plata / (1 - cota).
-    const platit = Number(t.appliedAmount ?? t.amount ?? 0);
-    const brut = cota > 0 && cota < 100 ? platit / (1 - cota / 100) : platit;
-    const impozit = Number((brut - platit).toFixed(2));
+    let brut = "";
+    let impozit = "";
+    let cotaAfisata = "";
+    if (sigur) {
+      const b = platit / (1 - cotaReceptie / 100);
+      brut = b.toFixed(2);
+      impozit = (b - platit).toFixed(2);
+      // Cota se afiseaza intreaga doar daca E intreaga: 6,5% rotunjit la „7" ar face ca 1C
+      // sa recalculeze altceva decat brutul exportat.
+      cotaAfisata = Number.isInteger(cotaReceptie)
+        ? cotaReceptie.toFixed(0)
+        : String(cotaReceptie);
+    } else {
+      if (!esteNumerar) {
+        avertismente.push(
+          `plata e „${tipPlata}", nu numerar — nu intra pe contul de casa; verifica documentul si contul`
+        );
+      }
+      if (String(t.referenceType || "") !== "receipt") {
+        avertismente.push(
+          `plata nu e legata de o receptie (${t.referenceType || "fara referinta"}) — impozitul se completeaza manual`
+        );
+      } else if (!receptie) {
+        avertismente.push("receptia referita nu a fost gasita — impozitul se completeaza manual");
+      } else if (avans > 0) {
+        avertismente.push(
+          `plata include un avans de ${avans.toFixed(2)} lei — brutul si impozitul se completeaza manual`
+        );
+      } else if (Math.abs(atribuit - platit) >= 0.005) {
+        avertismente.push(
+          `plata stinge mai multe receptii (atribuit ${atribuit.toFixed(2)} din ${platit.toFixed(2)} lei) — ` +
+          "cotele pot diferi, impozitul se completeaza manual"
+        );
+      } else if (!(cotaReceptie > 0)) {
+        avertismente.push("receptia nu are cota de retinere — verifica profilul fiscal");
+      }
+    }
 
-    // Actele acoperite: ce document din dosar justifica plata.
+    // Documentul din dosar care justifica plata.
     const acte = receptie && Number(receptie.actNumber || 0) > 0
       ? `${receptie.actSeries || ""} ${receptie.actNumber}`.trim()
       : "";
-
-    const cod = String((partener || {}).idno || "").trim();
-    const avertismente = [];
-    if (!cod) avertismente.push("furnizorul nu are cod fiscal — 1C nu il poate potrivi");
-    if (!acte && t.referenceType === "receipt") {
+    if (!acte && String(t.referenceType || "") === "receipt") {
       avertismente.push("plata nu are act de achizitie emis");
     }
-    if (cota <= 0 && t.referenceType === "receipt") {
-      avertismente.push("furnizorul nu are cota de retinere — verifica profilul fiscal");
-    }
-    const cotaProfil = Number((prof || {}).withholdingPercent || 0);
-    if (cota > 0 && cotaProfil > 0 && cota !== cotaProfil) {
-      avertismente.push(
-        `cota de pe receptie e ${cota}%, in nomenclator e ${cotaProfil}% — se foloseste cea de pe receptie`
-      );
+
+    const cod = String((partener || {}).idno || "").trim();
+    if (!cod) avertismente.push("furnizorul nu are cod fiscal — 1C nu il poate potrivi");
+
+    // Document schimbat DUPA ce a fost incarcat in 1C: contabilul trebuie sa afle, altfel
+    // 1C pastreaza o cifra care nu mai exista la noi.
+    const marcat = String(t.exported1cAt || "").trim();
+    if (marcat && String(t.updatedAt || "") > marcat) {
+      avertismente.push("MODIFICAT dupa incarcarea in 1C — verifica si corecteaza acolo");
     }
 
     randuri.push({
       "Nr. plata": t.id,
       Data: zi,
+      "Tip plata": tipPlata,
       Furnizor: String(t.partner || (partener || {}).name || "").trim(),
       "Cod fiscal / IDNP": cod,
-      "Suma bruta (lei)": Number(brut).toFixed(2),
-      "Cota impozit (%)": cota ? cota.toFixed(0) : "",
-      "Impozit retinut (lei)": impozit.toFixed(2),
-      "De plata in numerar (lei)": platit.toFixed(2),
-      "Cont casa": conturi.casa,
+      "Suma plata (lei)": platit.toFixed(2),
+      "Suma bruta (lei)": brut,
+      "Cota impozit (%)": cotaAfisata,
+      "Impozit retinut (lei)": impozit,
+      "Cont casa": esteNumerar ? conturi.casa : "",
       "Cont furnizor": conturi.furnizor,
-      "Cont impozit": conturi.impozit,
+      "Cont impozit": sigur ? conturi.impozit : "",
       Temei: String(t.note || "plata cereale").trim(),
       "Acte acoperite": acte,
       "Observatii export": avertismente.join("; "),
@@ -6831,14 +6893,25 @@ async function exportPaymentsFor1c(options = {}) {
 // Marcajul il pune OMUL, dupa un import reusit: aplicatia nu are cum sa afle daca 1C a
 // primit documentele, iar un marcaj automat pe descarcare le-ar scoate din export chiar
 // daca importul a cazut.
-const TIPURI_1C = {
+// Lista PROPRIE, nu `CAN_EDIT_BILLING_ROLES`: marcajul decide ce ajunge in contabilitate,
+// deci cine il pune trebuie sa poata si CITI exportul. Managerul are drepturi de facturare
+// dar nu are acces la export — ar fi putut marca documente pe care nu le vede, scotandu-le
+// implicit din export (sa nu ajunga niciodata in 1C) sau readucandu-le (import dublu).
+// Reutilizarea listei de facturare ar insemna ca o viitoare largire a acelor drepturi
+// largeste TACIT si astea.
+const CAN_EXPORT_1C_ROLES = ["accountant", "accountant-sef", "admin"];
+
+// Harta fara prototip: `kind: "__proto__"` trecea garda `TIPURI_1C[tip]` (proprietatile de
+// pe prototip sunt truthy) si ajungea la o colectie inexistenta, raspunzand 200 in loc de
+// eroare.
+const TIPURI_1C = Object.assign(Object.create(null), {
   suppliers: { colectie: "partners", sursa: "config", eticheta: "furnizori" },
   receipts: { colectie: "receipts", sursa: "receipts", eticheta: "acte de achizitie" },
   payments: { colectie: "transactions", sursa: "receipts", eticheta: "ordine de plata" }
-};
+});
 
 function colectie1c(tip) {
-  const def = TIPURI_1C[tip];
+  const def = Object.prototype.hasOwnProperty.call(TIPURI_1C, tip) ? TIPURI_1C[tip] : null;
   if (!def) throw new Error(`Tip necunoscut pentru export 1C: ${tip}.`);
   const state = def.sursa === "config" ? readConfigState() : readReceiptsState();
   return { def, state, lista: state[def.colectie] || [] };
@@ -6861,26 +6934,34 @@ function idUri1c(brute, maxim = 500) {
 // trimis din nou in 1C. Separat de marcare, ca sa fie o actiune deliberata.
 async function setExported1c(payload = {}) {
   const currentUser = payload.currentUser || {};
-  if (!CAN_EDIT_BILLING_ROLES.includes(normalizeRoleCode(currentUser.roleCode))) {
-    throw forbiddenError("Doar contabilul, managerul sau administratorul pot marca documentele.");
+  if (!CAN_EXPORT_1C_ROLES.includes(normalizeRoleCode(currentUser.roleCode))) {
+    throw forbiddenError("Doar contabilul sau administratorul pot marca documentele pentru 1C.");
   }
   const { def, state, lista } = colectie1c(payload.kind);
   const idUri = idUri1c(payload.ids);
+  // `Set`, nu `includes`: 30.000 de tranzactii x 500 de id-uri = 15 milioane de comparatii.
+  const cautate = new Set(idUri);
   const reset = payload.reset === true;
   const acum = new Date().toISOString();
 
   const atinse = [];
   for (const item of lista) {
-    if (!idUri.includes(Number(item.id))) continue;
+    if (!cautate.has(Number(item.id))) continue;
     const marcat = String(item.exported1cAt || "").trim();
     if (reset) {
       if (!marcat) continue;
+      // Data primei incarcari se pastreaza in audit: altfel pista fiscala se pierde.
+      item.exported1cPrevAt = marcat;
       delete item.exported1cAt;
     } else {
       if (marcat) continue; // deja marcat — nu se rescrie data primului import
       item.exported1cAt = acum;
     }
-    atinse.push({ id: item.id, name: item.name || item.supplier || item.partner || "" });
+    atinse.push({
+      id: item.id,
+      name: item.name || item.supplier || item.partner || "",
+      prevAt: reset ? marcat : null
+    });
   }
   if (!atinse.length) return { changed: [] };
 
@@ -6894,7 +6975,7 @@ async function setExported1c(payload = {}) {
     reason: `${reset ? "Marcaj 1C ANULAT" : "Marcat ca incarcat in 1C"} (${def.eticheta}): ` +
       atinse.map((a) => `#${a.id} ${a.name}`).join(", ").slice(0, 400),
     user: payload.changedBy || "dashboard",
-    oldValue: { exported1cAt: reset ? "era marcat" : null },
+    oldValue: { exported1cAt: reset ? atinse.map((a) => a.prevAt).filter(Boolean)[0] || null : null },
     newValue: { exported1cAt: reset ? null : acum, count: atinse.length }
   });
   writeReceiptsState(receiptsState);
@@ -6978,8 +7059,8 @@ function currencyLike(n) {
 // furnizori decat aplicatia; cei din 1C care nu-s la noi nu ne interesează.
 async function markSuppliersByFiscalCodes(payload = {}) {
   const currentUser = payload.currentUser || {};
-  if (!CAN_EDIT_BILLING_ROLES.includes(normalizeRoleCode(currentUser.roleCode))) {
-    throw forbiddenError("Doar contabilul, managerul sau administratorul pot marca furnizorii.");
+  if (!CAN_EXPORT_1C_ROLES.includes(normalizeRoleCode(currentUser.roleCode))) {
+    throw forbiddenError("Doar contabilul sau administratorul pot marca furnizorii pentru 1C.");
   }
   const brute = Array.isArray(payload.fiscalCodes) ? payload.fiscalCodes : [];
   if (!brute.length) throw new Error("Lista de coduri fiscale e goala.");
@@ -7021,15 +7102,17 @@ async function markSuppliersByFiscalCodes(payload = {}) {
     });
     writeReceiptsState(state);
   }
-  // `negasiti` = furnizorii NOȘTRI care nu sunt in 1C: exact cei de incarcat la primul export.
-  return { matched: marcati, missing: negasiti };
+  // `negasiti` = furnizorii NOȘTRI care nu sunt in 1C: exact cei de incarcat la primul
+  // export. Plafonat — interfata afiseaza oricum primele, iar lista completa se vede in
+  // tabelul de export.
+  return { matched: marcati, missing: negasiti.slice(0, 100), missingTotal: negasiti.length };
 }
 
 // Compatibilitate: numele vechi, folosit de ruta existenta.
 async function markSuppliersExported1c(payload = {}) {
   const currentUser = payload.currentUser || {};
-  if (!CAN_EDIT_BILLING_ROLES.includes(normalizeRoleCode(currentUser.roleCode))) {
-    throw forbiddenError("Doar contabilul, managerul sau administratorul pot marca furnizorii.");
+  if (!CAN_EXPORT_1C_ROLES.includes(normalizeRoleCode(currentUser.roleCode))) {
+    throw forbiddenError("Doar contabilul sau administratorul pot marca furnizorii pentru 1C.");
   }
   const brute = Array.isArray(payload.partnerIds) ? payload.partnerIds : [];
   if (!brute.length || brute.some((v) => typeof v !== "number" && typeof v !== "string")) {

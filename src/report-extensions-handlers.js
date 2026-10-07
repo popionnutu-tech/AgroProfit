@@ -59,23 +59,57 @@ async function getDashboardHandler(req, res) {
 // `;` ca separator si BOM UTF-8: asa se deschide corect in Excel pe setarile ro/ru, fara
 // „toate coloanele intr-una". Zecimala e PUNCT, ca 1C sa nu confunde separatorul de coloana
 // cu cel zecimal.
-function trimiteCsv1c(res, columns, rows, numeFisier) {
-  if (typeof res.setHeader === "function") {
-    const idUri = rows.map((r) => r._id).filter(Boolean);
-    if (idUri.length) res.setHeader("X-Document-Ids", idUri.join(","));
+// Acelasi plafon ca la marcare (`idUri1c`): altfel se descarca 600, se importa 600, iar
+// marcarea cade cu „prea multe documente" -> re-descarcare -> DUBLU import in 1C.
+const MAX_IDS_1C = 500;
+
+// Ids-urile vin din CORPUL cererii (POST) sau din query (GET, pentru compatibilitate).
+// In URL, „bifeaza tot" pe mii de documente depasea limita de antet a platformei si
+// descarcarea cadea cu 414/431 — exact cand omul avea nevoie de ea.
+function idsDinCerere(req) {
+  const dinCorp = (req.body || {}).ids;
+  if (Array.isArray(dinCorp)) return idsDinQuery(dinCorp.join(","));
+  return idsDinQuery((req.query || {}).ids);
+}
+
+function idsDinQuery(valoare) {
+  const ids = String(valoare || "").split(",").map(Number).filter(Boolean);
+  if (ids.length > MAX_IDS_1C) {
+    const e = new Error(
+      `Prea multe documente intr-o singura descarcare (max ${MAX_IDS_1C}). Restrange selectia.`
+    );
+    e.statusCode = 400;
+    throw e;
   }
+  return ids;
+}
+
+function trimiteCsv1c(res, columns, rows, numeFisier) {
+  // Antetul `X-Document-Ids` a fost SCOS: nimeni nu il citea (interfata are deja id-urile pe
+  // care le-a trimis), se repeta per RAND la actele multi-linie, si neplafonat putea depasi
+  // limita de antet a platformei — rupand descarcarea cu un 500 greu de explicat.
   rows = rows.map((r) => {
     const copie = { ...r };
     delete copie._id;
     return copie;
   });
-  const linie = (valori) =>
-    valori
-      .map((v) => {
-        const t = String(v === null || v === undefined ? "" : v);
-        return /[";\n\r]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
-      })
-      .join(";");
+  // INJECTIE DE FORMULE: o celula care incepe cu `= + - @`, TAB sau CR e interpretata de
+  // Excel ca FORMULA, iar ghilimelele nu protejeaza. Fisierul e construit explicit pentru
+  // Excel (BOM + `;`), deci va fi deschis acolo.
+  // Nota receptiei e scrisa de OPERATOR si ajunge in coloana „Temei" — adica privilegiul cel
+  // mai mic din sistem ar putea executa ceva pe statia contabilului
+  // (`=cmd|' /C calc'!A0`, `=WEBSERVICE(...)` pentru exfiltrare).
+  // Se neutralizeaza DOAR ce nu e numar: altfel s-ar strica valorile negative pe care 1C
+  // le citeste ca numere.
+  const celula = (v) => {
+    const t = String(v === null || v === undefined ? "" : v);
+    if (!t) return t;
+    const esteNumar = /^-?\d+(?:[.,]\d+)?$/.test(t.trim());
+    const periculos = /^[=+\-@\t\r]/.test(t);
+    const sigur = !esteNumar && periculos ? `'${t}` : t;
+    return /[";\n\r]/.test(sigur) ? `"${sigur.replace(/"/g, '""')}"` : sigur;
+  };
+  const linie = (valori) => valori.map(celula).join(";");
   const csv = [linie(columns), ...rows.map((r) => linie(columns.map((c) => r[c])))].join("\r\n");
   if (typeof res.setHeader === "function") {
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
@@ -93,12 +127,14 @@ async function exportPurchaseActs1cHandler(req, res) {
       from: q.from,
       to: q.to,
       onlyNew: !["1", "true"].includes(String(q.includeExported || "").toLowerCase()),
-      receiptIds: String(q.ids || "").split(",").map(Number).filter(Boolean)
+      receiptIds: idsDinCerere(req)
     });
     trimiteCsv1c(res, columns, rows, `acte-achizitie-1c-${new Date().toISOString().slice(0, 10)}.csv`);
   } catch (error) {
     console.error("Failed to export purchase acts for 1C:", error.message);
-    return sendJson(res, 400, { error: error.message || "Nu am putut exporta actele." });
+    return sendJson(res, error.statusCode || 400, {
+      error: error.message || "Nu am putut exporta actele."
+    });
   }
 }
 
@@ -111,12 +147,14 @@ async function exportPayments1cHandler(req, res) {
       from: q.from,
       to: q.to,
       onlyNew: !["1", "true"].includes(String(q.includeExported || "").toLowerCase()),
-      transactionIds: String(q.ids || "").split(",").map(Number).filter(Boolean)
+      transactionIds: idsDinCerere(req)
     });
     trimiteCsv1c(res, columns, rows, `ordine-plata-1c-${new Date().toISOString().slice(0, 10)}.csv`);
   } catch (error) {
     console.error("Failed to export payments for 1C:", error.message);
-    return sendJson(res, 400, { error: error.message || "Nu am putut exporta platile." });
+    return sendJson(res, error.statusCode || 400, {
+      error: error.message || "Nu am putut exporta platile."
+    });
   }
 }
 
@@ -130,12 +168,14 @@ async function exportSuppliers1cHandler(req, res) {
       onlyFromActs: !["1", "true"].includes(String((req.query || {}).all || "").toLowerCase()),
       // `?includeExported=1` -> si cei deja marcati (pentru reincarcare, daca importul a cazut).
       onlyNew: !["1", "true"].includes(String((req.query || {}).includeExported || "").toLowerCase()),
-      partnerIds: String((req.query || {}).ids || "").split(",").map(Number).filter(Boolean)
+      partnerIds: idsDinCerere(req)
     });
     trimiteCsv1c(res, columns, rows, `furnizori-1c-${new Date().toISOString().slice(0, 10)}.csv`);
   } catch (error) {
     console.error("Failed to export suppliers for 1C:", error.message);
-    return sendJson(res, 400, { error: error.message || "Nu am putut exporta furnizorii." });
+    return sendJson(res, error.statusCode || 400, {
+      error: error.message || "Nu am putut exporta furnizorii."
+    });
   }
 }
 
