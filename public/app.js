@@ -326,14 +326,61 @@ if (document.getElementById("export-1c-body")) {
   const btnUnmark = document.getElementById("export-1c-unmark-btn");
   if (btnUnmark) btnUnmark.addEventListener("click", () => marcheaza(true));
 
+  // Fisierul din 1C se citeste IN BROWSER: nomenclatorul are 11 MB, iar pe server n-ar avea
+  // ce caută — ne trebuie doar codurile fiscale. XML-ul 1C le tine in `<Свойство Имя="ФискКод">`;
+  // un fisier text/CSV e tratat ca lista de coduri.
+  function coduriDinText(text, numeFisier) {
+    const esteXml = /\.xml$/i.test(numeFisier || "") || /^\s*<\?xml/.test(text);
+    if (esteXml) {
+      const gasite = [];
+      const re = /Имя="ФискКод"[^>]*>\s*<Значение>([^<]*)<\/Значение>/g;
+      let m;
+      while ((m = re.exec(text))) {
+        const cod = String(m[1]).replace(/[^0-9]/g, "").trim();
+        if (cod) gasite.push(cod);
+      }
+      return gasite;
+    }
+    return text.split(/[\s,;]+/).map((c) => c.replace(/[^0-9]/g, "").trim()).filter(Boolean);
+  }
+
+  let coduri1cDinFisier = [];
+  const inputFisier = document.getElementById("export-1c-file");
+  if (inputFisier) {
+    inputFisier.addEventListener("change", async () => {
+      const hint = document.getElementById("export-1c-file-hint");
+      const f = inputFisier.files && inputFisier.files[0];
+      coduri1cDinFisier = [];
+      if (!f) return;
+      try {
+        const text = await f.text();
+        const brute = coduriDinText(text, f.name);
+        coduri1cDinFisier = [...new Set(brute)];
+        if (hint) {
+          hint.textContent = coduri1cDinFisier.length
+            ? `${coduri1cDinFisier.length} coduri fiscale unice găsite` +
+              (brute.length > coduri1cDinFisier.length
+                ? ` (din ${brute.length} intrări — restul sunt duplicate în 1C).`
+                : ".")
+            : "Nu am găsit coduri fiscale în fișier. Verifică dacă e exportul de contragenți.";
+        }
+      } catch (err) {
+        if (hint) hint.textContent = `Nu am putut citi fișierul: ${err.message}`;
+      }
+    });
+  }
+
   // Potrivirea DE PORNIRE cu lista din 1C. Se face o singura data.
   const btnMatch = document.getElementById("export-1c-match-btn");
   if (btnMatch) {
     btnMatch.addEventListener("click", async () => {
+      // Fisierul are prioritate; caseta rămâne pentru cazul cand se lipesc cateva coduri.
       const text = (document.getElementById("export-1c-codes") || {}).value || "";
-      const coduri = text.split(/[\s,;]+/).map((c) => c.trim()).filter(Boolean);
+      const coduri = coduri1cDinFisier.length
+        ? coduri1cDinFisier
+        : coduriDinText(text, "");
       if (!coduri.length) {
-        window.alert("Lipește codurile fiscale din exportul 1C.");
+        window.alert("Alege fișierul exportat din 1C sau lipește codurile fiscale.");
         return;
       }
       btnMatch.disabled = true;

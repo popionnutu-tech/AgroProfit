@@ -2085,12 +2085,18 @@
                 Se face <b>o singură dată</b> — de atunci marcajul zilnic funcționează singur.
               </p>
               <div class="split">
-                <label>Coduri fiscale din 1C (unul per rând sau separate prin virgulă)
+                <label>Fișierul exportat din 1C (nomenclatorul de contragenți)
+                  <input type="file" id="export-1c-file" accept=".xml,.txt,.csv" />
+                  <span class="field-hint" id="export-1c-file-hint">
+                    Alege fișierul — codurile fiscale se citesc automat, nu se încarcă nimic pe server.
+                  </span>
+                </label>
+                <label>…sau lipește codurile (unul per rând)
                   <textarea id="export-1c-codes" rows="3" placeholder="0960612543420&#10;2001234567890"></textarea>
                 </label>
-                <div style="align-self:end">
-                  <button type="button" id="export-1c-match-btn" class="cell-btn">Potrivește cu 1C</button>
-                </div>
+              </div>
+              <div class="report-actions" style="margin:6px 0">
+                <button type="button" id="export-1c-match-btn" class="cell-btn">Potrivește cu 1C</button>
               </div>
               <p class="field-hint" style="margin:2px 0 6px">
                 <b>Ordinea contează.</b> „Furnizori noi" scoate doar furnizorii care nu au
