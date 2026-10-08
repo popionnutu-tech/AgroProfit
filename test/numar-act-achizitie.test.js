@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const { withIsolatedWorkspace } = require("../test-support/isolated-runtime");
 
 // Actele de DINAINTE de 02.10.2026 rămân nenumerotate (au numere scrise de mana pe hartie).
-// Sirul porneste de la 914 — actul lui Cojocari Ana — si creste cu 1.
+// Sirul porneste de la 914 — actul lui Furnizor Testov — si creste cu 1.
 const START = 914;
 
 async function receptie(storage, nume) {
@@ -21,7 +21,7 @@ const PF = {
 test("primul act emis primeste 914, urmatorul 915", async () => {
   await withIsolatedWorkspace(async ({ load }) => {
     const storage = load("src/local-storage.js");
-    const a = await receptie(storage, "Cojocari Ana");
+    const a = await receptie(storage, "Furnizor Testov");
     const b = await receptie(storage, "Alt furnizor");
 
     const unu = await storage.assignActNumber([a.id], PF);
@@ -36,7 +36,7 @@ test("primul act emis primeste 914, urmatorul 915", async () => {
 test("reimprimarea da ACELASI numar, nu unul nou", async () => {
   await withIsolatedWorkspace(async ({ load }) => {
     const storage = load("src/local-storage.js");
-    const a = await receptie(storage, "Cojocari Ana");
+    const a = await receptie(storage, "Furnizor Testov");
     const prima = await storage.assignActNumber([a.id], PF);
     for (let i = 0; i < 5; i += 1) {
       const iar = await storage.assignActNumber([a.id], PF);
@@ -71,7 +71,7 @@ test("achizitia de la FIRMA nu consuma numar", async () => {
       /persoane fizice/i
     );
     // Sirul rămâne neatins: prima persoana fizica ia tot 914.
-    const pf = await receptie(storage, "Cojocari Ana");
+    const pf = await receptie(storage, "Furnizor Testov");
     assert.equal((await storage.assignActNumber([pf.id], PF)).actNumber, START);
   });
 });
@@ -79,7 +79,7 @@ test("achizitia de la FIRMA nu consuma numar", async () => {
 test("doar contabilul si adminul emit acte", async () => {
   await withIsolatedWorkspace(async ({ load }) => {
     const storage = load("src/local-storage.js");
-    const r = await receptie(storage, "Cojocari Ana");
+    const r = await receptie(storage, "Furnizor Testov");
     for (const rol of ["operator", "manager", "control"]) {
       await assert.rejects(
         () => storage.assignActNumber([r.id], { ...PF, actorRole: rol }),
@@ -97,7 +97,7 @@ test("doar contabilul si adminul emit acte", async () => {
 test("emiterea lasa urma in audit", async () => {
   await withIsolatedWorkspace(async ({ load }) => {
     const storage = load("src/local-storage.js");
-    const r = await receptie(storage, "Cojocari Ana");
+    const r = await receptie(storage, "Furnizor Testov");
     await storage.assignActNumber([r.id], PF);
     const logs = await storage.listAuditLogs();
     const intrare = logs.find((l) => l.action === "receipt-act-number");
@@ -111,7 +111,7 @@ test("nu se emite act pe o receptie care nu e in stoc", async () => {
   await withIsolatedWorkspace(async ({ load }) => {
     const storage = load("src/local-storage.js");
     const proiect = await storage.createReceipt({
-      supplier: "Cojocari Ana", supplierId: 1, product: "Floarea soarelui", productId: 1,
+      supplier: "Furnizor Testov", supplierId: 1, product: "Floarea soarelui", productId: 1,
       quantity: 2.907, unit: "tone", price: 6.15, location: "Cilindru 1", locationId: 1,
       isDraft: true, actorRole: "accountant"
     });
@@ -140,7 +140,7 @@ test("fiecare firma are propriul sir — fara gauri in registrul niciuneia", asy
 test("firma emitenta e obligatorie", async () => {
   await withIsolatedWorkspace(async ({ load }) => {
     const storage = load("src/local-storage.js");
-    const r = await receptie(storage, "Cojocari Ana");
+    const r = await receptie(storage, "Furnizor Testov");
     await assert.rejects(
       () => storage.assignActNumber([r.id], { ...PF, companyId: null }),
       /[Ff]irma emitenta/
@@ -151,7 +151,7 @@ test("firma emitenta e obligatorie", async () => {
 test("receptia cu act emis nu se poate anula", async () => {
   await withIsolatedWorkspace(async ({ load }) => {
     const storage = load("src/local-storage.js");
-    const r = await receptie(storage, "Cojocari Ana");
+    const r = await receptie(storage, "Furnizor Testov");
     await storage.assignActNumber([r.id], PF);
     await assert.rejects(
       () => storage.cancelReceipt(r.id, {
@@ -171,9 +171,9 @@ test("receptia cu act emis nu se poate anula", async () => {
 test("un act pe mai multe receptii consuma UN numar, dar il primesc toate", async () => {
   await withIsolatedWorkspace(async ({ load }) => {
     const storage = load("src/local-storage.js");
-    const a = await receptie(storage, "Cojocari Ana");
-    const b = await receptie(storage, "Cojocari Ana");
-    const c = await receptie(storage, "Cojocari Ana");
+    const a = await receptie(storage, "Furnizor Testov");
+    const b = await receptie(storage, "Furnizor Testov");
+    const c = await receptie(storage, "Furnizor Testov");
 
     const act = await storage.assignActNumber([a.id, b.id, c.id], PF);
     assert.equal(act.actNumber, START);
@@ -196,7 +196,7 @@ test("un act pe mai multe receptii consuma UN numar, dar il primesc toate", asyn
 test("cifrele actului se ingheata la emitere", async () => {
   await withIsolatedWorkspace(async ({ load }) => {
     const storage = load("src/local-storage.js");
-    const r = await receptie(storage, "Cojocari Ana");
+    const r = await receptie(storage, "Furnizor Testov");
     const emis = await storage.assignActNumber([r.id], PF);
 
     const cifre = emis.actFigures;
@@ -220,7 +220,7 @@ test("cifrele actului se ingheata la emitere", async () => {
 test("actul acopera un singur furnizor", async () => {
   await withIsolatedWorkspace(async ({ load }) => {
     const storage = load("src/local-storage.js");
-    const a = await receptie(storage, "Cojocari Ana");
+    const a = await receptie(storage, "Furnizor Testov");
     // Receptie a ALTUI furnizor (alt supplierId).
     const b = await storage.createReceipt({
       supplier: "Alt Om", supplierId: 2, product: "Floarea soarelui", productId: 1,
@@ -238,7 +238,7 @@ test("actul acopera un singur furnizor", async () => {
 test("si RANDURILE se ingheata: actul nu se contrazice pe aceeasi hartie", async () => {
   await withIsolatedWorkspace(async ({ load }) => {
     const storage = load("src/local-storage.js");
-    const r = await receptie(storage, "Cojocari Ana");
+    const r = await receptie(storage, "Furnizor Testov");
     const emis = await storage.assignActNumber([r.id], PF);
     const randuri = emis.actFigures.rows;
     assert.ok(Array.isArray(randuri) && randuri.length === 1, "lipsesc randurile inghetate");
@@ -266,8 +266,8 @@ test("si RANDURILE se ingheata: actul nu se contrazice pe aceeasi hartie", async
 test("randurile inghetate dau exact totalul, si pe act multi-receptie", async () => {
   await withIsolatedWorkspace(async ({ load }) => {
     const storage = load("src/local-storage.js");
-    const a = await receptie(storage, "Cojocari Ana");
-    const b = await receptie(storage, "Cojocari Ana");
+    const a = await receptie(storage, "Furnizor Testov");
+    const b = await receptie(storage, "Furnizor Testov");
     const emis = await storage.assignActNumber([a.id, b.id], PF);
     const f = emis.actFigures;
     assert.equal(f.rows.length, 2);
@@ -281,9 +281,9 @@ test("randurile inghetate dau exact totalul, si pe act multi-receptie", async ()
 test("reimprimarea de pe o receptie acoperita da actul INTREG", async () => {
   await withIsolatedWorkspace(async ({ load }) => {
     const storage = load("src/local-storage.js");
-    const a = await receptie(storage, "Cojocari Ana");
-    const b = await receptie(storage, "Cojocari Ana");
-    const c = await receptie(storage, "Cojocari Ana");
+    const a = await receptie(storage, "Furnizor Testov");
+    const b = await receptie(storage, "Furnizor Testov");
+    const c = await receptie(storage, "Furnizor Testov");
     const emis = await storage.assignActNumber([a.id, b.id, c.id], PF);
 
     // Captura sta o SINGURA data, pe purtator (altfel un act de 50 de receptii ingrosa
@@ -310,11 +310,11 @@ test("reimprimarea de pe o receptie acoperita da actul INTREG", async () => {
 test("emiterea AMESTECATA (acoperit + marfa noua) e refuzata", async () => {
   await withIsolatedWorkspace(async ({ load }) => {
     const storage = load("src/local-storage.js");
-    const a = await receptie(storage, "Cojocari Ana");
-    const b = await receptie(storage, "Cojocari Ana");
+    const a = await receptie(storage, "Furnizor Testov");
+    const b = await receptie(storage, "Furnizor Testov");
     await storage.assignActNumber([a.id, b.id], PF);
 
-    const noua = await receptie(storage, "Cojocari Ana");
+    const noua = await receptie(storage, "Furnizor Testov");
     await assert.rejects(
       () => storage.assignActNumber([b.id, noua.id], PF),
       /deja pe actul/i
@@ -329,10 +329,10 @@ test("emiterea AMESTECATA (acoperit + marfa noua) e refuzata", async () => {
 test("data si furnizorul se ingheata pe act", async () => {
   await withIsolatedWorkspace(async ({ load }) => {
     const storage = load("src/local-storage.js");
-    const r = await receptie(storage, "Cojocari Ana");
+    const r = await receptie(storage, "Furnizor Testov");
     const emis = await storage.assignActNumber([r.id], PF);
     assert.ok(emis.actFigures.rows[0].date, "lipseste data pe randul inghetat");
-    assert.equal(emis.actFigures.supplierName, "Cojocari Ana");
+    assert.equal(emis.actFigures.supplierName, "Furnizor Testov");
     assert.equal(emis.actFigures.companyId, 1);
     assert.equal(emis.actFigures.series, "AP");
   });
@@ -341,7 +341,7 @@ test("data si furnizorul se ingheata pe act", async () => {
 test("furnizorul nu se mai poate schimba dupa emiterea actului", async () => {
   await withIsolatedWorkspace(async ({ load }) => {
     const storage = load("src/local-storage.js");
-    const r = await receptie(storage, "Cojocari Ana");
+    const r = await receptie(storage, "Furnizor Testov");
     await storage.assignActNumber([r.id], PF);
     await assert.rejects(
       () => storage.updateReceiptSupplier(r.id, 2, "admin"),
@@ -353,7 +353,7 @@ test("furnizorul nu se mai poate schimba dupa emiterea actului", async () => {
 test("anularea prin ruta de STATUS e blocata la fel ca `cancelReceipt`", async () => {
   await withIsolatedWorkspace(async ({ load }) => {
     const storage = load("src/local-storage.js");
-    const r = await receptie(storage, "Cojocari Ana");
+    const r = await receptie(storage, "Furnizor Testov");
     await storage.assignActNumber([r.id], PF);
     await assert.rejects(
       () => storage.updateReceiptStatusWithAudit(r.id, "Anulat", {
@@ -367,7 +367,7 @@ test("anularea prin ruta de STATUS e blocata la fel ca `cancelReceipt`", async (
 test("lista de receptii e tipizata si plafonata", async () => {
   await withIsolatedWorkspace(async ({ load }) => {
     const storage = load("src/local-storage.js");
-    const r = await receptie(storage, "Cojocari Ana");
+    const r = await receptie(storage, "Furnizor Testov");
     for (const rea of [[true], [[r.id]], [-1], [0], [1.5], []]) {
       await assert.rejects(() => storage.assignActNumber(rea, PF), /invalida|niciuna/i,
         `intrarea ${JSON.stringify(rea)} nu trebuia acceptata`);
@@ -382,7 +382,7 @@ test("lista de receptii e tipizata si plafonata", async () => {
 test("numar dublat de o scriere pierduta NU mai trece la reincercare", async () => {
   await withIsolatedWorkspace(async ({ load }) => {
     const storage = load("src/local-storage.js");
-    const a = await receptie(storage, "Cojocari Ana");
+    const a = await receptie(storage, "Furnizor Testov");
     const b = await receptie(storage, "Alt furnizor");
     await storage.assignActNumber([a.id], PF);
     await storage.assignActNumber([b.id], PF);
@@ -411,10 +411,10 @@ test("numar dublat de o scriere pierduta NU mai trece la reincercare", async () 
 test("identitatea partilor si antetul firmei se ingheata", async () => {
   await withIsolatedWorkspace(async ({ load }) => {
     const storage = load("src/local-storage.js");
-    const r = await receptie(storage, "Cojocari Ana");
+    const r = await receptie(storage, "Furnizor Testov");
     const emis = await storage.assignActNumber([r.id], {
       ...PF,
-      supplier: { name: "Cojocari Ana", idno: "2001234567890", address: "s. Briceni" },
+      supplier: { name: "Furnizor Testov", idno: "2001234567890", address: "s. Briceni" },
       company: { name: "Firma SRL", idno: "1003600000000", address: "or. Briceni", admin: "Pop Nutu" }
     });
     const f = emis.actFigures;
@@ -429,7 +429,7 @@ test("identitatea partilor si antetul firmei se ingheata", async () => {
 test("fuziunea de parteneri e blocata pe receptii cu act emis", async () => {
   await withIsolatedWorkspace(async ({ load }) => {
     const storage = load("src/local-storage.js");
-    const r = await receptie(storage, "Cojocari Ana");
+    const r = await receptie(storage, "Furnizor Testov");
     await storage.assignActNumber([r.id], PF);
     assert.throws(
       () => storage.reassignPartnerReferences(1, 2, "admin"),
@@ -443,7 +443,7 @@ test("fuziunea de parteneri e blocata pe receptii cu act emis", async () => {
 test("fara migrare se cade pe derivarea din blob, fara sa se rupa nimic", async () => {
   await withIsolatedWorkspace(async ({ load }) => {
     const storage = load("src/local-storage.js");
-    const r = await receptie(storage, "Cojocari Ana");
+    const r = await receptie(storage, "Furnizor Testov");
     const emis = await storage.assignActNumber([r.id], PF);
     assert.equal(emis.actNumber, START);
     // Driverul local nu are alocare atomica -> sursa e „blob", consemnata pe document.
@@ -454,7 +454,7 @@ test("fara migrare se cade pe derivarea din blob, fara sa se rupa nimic", async 
 test("sursa numarului intra in audit, ca sa se vada pe ce mecanism s-a emis", async () => {
   await withIsolatedWorkspace(async ({ load }) => {
     const storage = load("src/local-storage.js");
-    const r = await receptie(storage, "Cojocari Ana");
+    const r = await receptie(storage, "Furnizor Testov");
     await storage.assignActNumber([r.id], PF);
     const logs = await storage.listAuditLogs();
     const intrare = logs.find((l) => l.action === "receipt-act-number");
@@ -467,7 +467,7 @@ test("captura nu se multiplica: o singura copie, restul doar referinta", async (
   await withIsolatedWorkspace(async ({ load }) => {
     const storage = load("src/local-storage.js");
     const multe = [];
-    for (let i = 0; i < 10; i += 1) multe.push(await receptie(storage, "Cojocari Ana"));
+    for (let i = 0; i < 10; i += 1) multe.push(await receptie(storage, "Furnizor Testov"));
     const emis = await storage.assignActNumber(multe.map((r) => r.id), PF);
 
     const toate = (await storage.listReceipts()).filter((r) =>
@@ -492,8 +492,8 @@ test("captura nu se multiplica: o singura copie, restul doar referinta", async (
 test("auditul emiterii pastreaza totalurile, nu captura intreaga", async () => {
   await withIsolatedWorkspace(async ({ load }) => {
     const storage = load("src/local-storage.js");
-    const a = await receptie(storage, "Cojocari Ana");
-    const b = await receptie(storage, "Cojocari Ana");
+    const a = await receptie(storage, "Furnizor Testov");
+    const b = await receptie(storage, "Furnizor Testov");
     const emis = await storage.assignActNumber([a.id, b.id], PF);
 
     const logs = await storage.listAuditLogs();
@@ -512,7 +512,7 @@ test("auditul emiterii pastreaza totalurile, nu captura intreaga", async () => {
 test("divergenta act-registru se inregistreaza la corectia de suma", async () => {
   await withIsolatedWorkspace(async ({ load }) => {
     const storage = load("src/local-storage.js");
-    const r = await receptie(storage, "Cojocari Ana");
+    const r = await receptie(storage, "Furnizor Testov");
     const emis = await storage.assignActNumber([r.id], PF);
     const peHartie = emis.actFigures.value;
 
@@ -532,7 +532,7 @@ test("divergenta act-registru se inregistreaza la corectia de suma", async () =>
 test("fara act emis nu se marcheaza nicio divergenta", async () => {
   await withIsolatedWorkspace(async ({ load }) => {
     const storage = load("src/local-storage.js");
-    const r = await receptie(storage, "Cojocari Ana");
+    const r = await receptie(storage, "Furnizor Testov");
     await storage.updateReceiptAmount(r.id, 1000, "admin", "corectie");
     const dupa = (await storage.listReceipts()).find((x) => x.id === r.id);
     assert.ok(!dupa.actDivergences, "s-a marcat o divergenta fara act emis");

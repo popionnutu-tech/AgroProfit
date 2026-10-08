@@ -5,7 +5,6 @@ const {
   setExported1c,
   exportPurchaseActsFor1c,
   exportSuppliersFor1c,
-  markSuppliersExported1c,
   exportResourceAsCsv,
   getDashboardSnapshot,
   getDeliveryDefaults,
@@ -68,20 +67,40 @@ const MAX_IDS_1C = 500;
 // descarcarea cadea cu 414/431 — exact cand omul avea nevoie de ea.
 function idsDinCerere(req) {
   const dinCorp = (req.body || {}).ids;
-  if (Array.isArray(dinCorp)) return idsDinQuery(dinCorp.join(","));
-  return idsDinQuery((req.query || {}).ids);
+  const brute = Array.isArray(dinCorp)
+    ? dinCorp
+    : String((req.query || {}).ids || "").split(",").filter((x) => x !== "");
+  return idUri1cStrict(brute);
 }
 
-function idsDinQuery(valoare) {
-  const ids = String(valoare || "").split(",").map(Number).filter(Boolean);
-  if (ids.length > MAX_IDS_1C) {
+// Elementele invalide se RESPING, nu se arunca tacut.
+//
+// Varianta veche (`.map(Number).filter(Boolean)`) lasa sa treaca `[[7]]` ca 7, elimina `0`
+// si inghitea `"7abc"` ca NaN. Nu era escaladare de drepturi — poti cere doar documente pe
+// care rolul ti le da oricum — dar era PIERDERE: contabilul bifa N documente, descarca N-k,
+// apoi apasa „Am incarcat in 1C" pe lista intreaga, iar cele k lipsa nu mai apareau
+// niciodata in export. CLAUDE.md regula 10 cere lista tipizata in AMBELE straturi; al doilea
+// strat (`idUri1c` din magazie) face exact asta, aici lipsea.
+function idUri1cStrict(brute) {
+  const arr = Array.isArray(brute) ? brute : [];
+  if (!arr.length) return [];
+  // Plafonul PRIMUL, inainte de orice lucru pe lista.
+  if (arr.length > MAX_IDS_1C) {
     const e = new Error(
       `Prea multe documente intr-o singura descarcare (max ${MAX_IDS_1C}). Restrange selectia.`
     );
     e.statusCode = 400;
     throw e;
   }
-  return ids;
+  const invalid = () => {
+    const e = new Error("Lista de documente e invalida.");
+    e.statusCode = 400;
+    return e;
+  };
+  if (arr.some((v) => typeof v !== "number" && typeof v !== "string")) throw invalid();
+  const idUri = [...new Set(arr.map((v) => Number(String(v).trim())))];
+  if (idUri.some((n) => !Number.isInteger(n) || n <= 0)) throw invalid();
+  return idUri;
 }
 
 function trimiteCsv1c(res, columns, rows, numeFisier) {
@@ -104,8 +123,11 @@ function trimiteCsv1c(res, columns, rows, numeFisier) {
   const celula = (v) => {
     const t = String(v === null || v === undefined ? "" : v);
     if (!t) return t;
-    const esteNumar = /^-?\d+(?:[.,]\d+)?$/.test(t.trim());
-    const periculos = /^[=+\-@\t\r]/.test(t);
+    // AMBELE teste pe valoarea trimuita: altfel „ =1+1" nu era nici numar, nici periculos,
+    // si scapa neneutralizat.
+    const curat = t.trim();
+    const esteNumar = /^-?\d+(?:[.,]\d+)?$/.test(curat);
+    const periculos = /^[=+\-@\t\r]/.test(curat);
     const sigur = !esteNumar && periculos ? `'${t}` : t;
     return /[";\n\r]/.test(sigur) ? `"${sigur.replace(/"/g, '""')}"` : sigur;
   };
@@ -199,34 +221,23 @@ async function exportResourceHandler(req, res, resource) {
   }
 }
 
-// Marcheaza furnizorii ca incarcati in 1C. Apelat de om DUPA un import reusit.
-async function markSuppliers1cHandler(req, res) {
-  try {
-    const rezultat = await markSuppliersExported1c({
-      partnerIds: (req.body || {}).partnerIds,
-      currentUser: req.currentUser || {},
-      changedBy: getActorLabel(req)
-    });
-    return sendJson(res, 200, { ok: true, ...rezultat });
-  } catch (error) {
-    console.error("Failed to mark suppliers as exported:", error.message);
-    return sendJson(res, error.statusCode || 400, {
-      error: error.message || "Nu am putut marca furnizorii."
-    });
-  }
-}
-
 // Ce e de incarcat in 1C, pentru bifare in interfata.
 async function listPending1cHandler(req, res) {
   try {
     const q = req.query || {};
-    const items = await listPending1c({
+    const toate = await listPending1c({
       kind: q.kind,
       from: q.from,
       to: q.to,
       includeExported: ["1", "true"].includes(String(q.includeExported || "").toLowerCase())
     });
-    return sendJson(res, 200, { ok: true, items });
+    // PLAFON PE SERVER, nu doar la randare. Descarcarea si marcarea accepta oricum maximum
+    // `MAX_IDS_1C` documente, iar interfata randeaza tot atatea — deci la 3 ani de date
+    // ~98% din raspuns nu era folosit niciodata (3,2 MB de JSON pentru 500 de randuri utile),
+    // si crestea nelimitat cu istoricul.
+    // `total` ramane, ca omul sa stie cate mai sunt dincolo de transa curenta.
+    const items = toate.slice(0, MAX_IDS_1C);
+    return sendJson(res, 200, { ok: true, items, total: toate.length });
   } catch (error) {
     console.error("Failed to list pending 1C documents:", error.message);
     return sendJson(res, 400, { error: error.message || "Nu am putut citi lista." });
@@ -276,9 +287,9 @@ module.exports = {
   matchSuppliers1cHandler,
   setExported1cHandler,
   exportPayments1cHandler,
-  markSuppliers1cHandler,
   exportPurchaseActs1cHandler,
   exportSuppliers1cHandler,
+  trimiteCsv1c,
   exportResourceHandler,
   getDashboardHandler,
   getDeliveryDefaultsHandler,

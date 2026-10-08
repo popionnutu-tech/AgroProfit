@@ -144,6 +144,7 @@ const EXPORT_1C_TIPURI = {
 };
 let export1cTip = "suppliers";
 let export1cItems = [];
+let export1cTotal = 0;
 
 function export1cHint(text) {
   const el = document.getElementById("export-1c-hint");
@@ -184,9 +185,9 @@ function randeazaExport1c() {
         </tr>`
     )
     .join("") +
-    (export1cItems.length > randate.length
+    (export1cTotal > randate.length
       ? `<tr><td colspan="5" class="muted-count">Se afișează primele ${randate.length} din ` +
-        `${export1cItems.length}. Restrânge perioada sau încarcă în tranșe.</td></tr>`
+        `${export1cTotal}. Marchează această tranșă, apoi lista se reîncarcă cu următoarea.</td></tr>`
       : "");
 }
 
@@ -203,18 +204,25 @@ async function incarcaLista1c() {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || "Nu am putut citi lista.");
     export1cItems = data.items || [];
+    // Serverul plafoneaza raspunsul: `total` spune cate sunt de fapt, ca omul sa stie ca
+    // mai are transe de facut dupa asta.
+    export1cTotal = Number(data.total || export1cItems.length);
     randeazaExport1c();
     const neincarcate = export1cItems.filter((i) => !i.exported1cAt).length;
     export1cHint(
       `${EXPORT_1C_TIPURI[export1cTip].eticheta}: ${neincarcate} de încărcat` +
         (export1cItems.length > neincarcate
           ? `, ${export1cItems.length - neincarcate} deja încărcate`
+          : "") +
+        (export1cTotal > export1cItems.length
+          ? `. În total ${export1cTotal} — se lucrează în tranșe de ${export1cItems.length}.`
           : "")
     );
   } catch (err) {
     // Lipsa de drepturi nu e o eroare de raportat cu alert: panoul e ascuns oricum pentru
     // rolurile fara `finance`, iar un alert ar aparea si pe ecranul de login.
     export1cItems = [];
+    export1cTotal = 0;
     randeazaExport1c();
     export1cHint(err.message);
   }

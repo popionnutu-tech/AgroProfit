@@ -415,7 +415,7 @@ Actul de achiziție e document fiscal: numărul lui ajunge în dosarul de hârti
   numerotare pe același document, printr-o rută deschisă și managerului, care ștampila un
   număr invizibil pe aceeași recepție. `paymentOrder` rămâne acolo.
 - `nextActNumber()` = `max(atribuite pe firmă) + 1`, cu plafon inferior `ACT_NUMBER_START = 914`
-  (actul lui Cojocari Ana din 02.10.2026, numerotat pe hârtie). **Derivat din date, nu
+  (actul din 02.10.2026, numerotat pe hârtie). **Derivat din date, nu
   dintr-un contor separat** — un contor se desincronizează la restaurare din backup sau la
   o scriere pierdută, iar un număr refolosit înseamnă două acte cu același număr în dosar.
 - Actele de **dinainte** de 02.10.2026 rămân nenumerotate în aplicație: au deja numere
@@ -565,6 +565,45 @@ produse duplicate** la fiecare import.
   CSV-ul (`trimiteCsv1c`), ca setările să nu divergeze între cele două exporturi.
 - Ruta de export specific e înregistrată **înaintea** celei generice `/api/exports/:resource`,
   altfel ar fi prinsă de ea.
+- **Lista pe care omul bifează și fișierul descărcat au UN SINGUR criteriu.**
+  `esteActExportabil1c()` / `estePlataExportabila1c()` / `dataAct1c()` — folosite ȘI de
+  `listPending1c`, ȘI de exporturi. Când criteriul era scris de două ori, cele două au
+  divergat: o tranzacție `complaint-adjustment` apărea în listă, se bifa, nu intra în CSV,
+  iar „Am încărcat în 1C" o marca — document scos din coadă fără să fi ajuns vreodată în 1C,
+  tăcut. Același tipar la acte (lista cerea doar `actNumber`, exportul cerea și `actFigures`).
+  Un criteriu nou se pune în predicat, nu în bucla de export. Există test care compară
+  lista cu rândurile fișierului.
+- **Suma afișată în listă e aceeași cu cea exportată**: `t.amount`, banul care a ieșit. Lista
+  arăta `appliedAmount` — plafonat la datoria recepției — deci pe o supraplată de 5.000 lei
+  tabelul arăta 7.605 și fișierul 12.605, iar contabilul compara cu 1C fără nicio explicație
+  pe ecran. Vezi și regula de mai sus despre `||` vs `??`.
+- **Tipul de plată LIPSĂ nu înseamnă numerar.** `paymentType` e opțional la creare, iar
+  presupunerea „gol = numerar" trecea plata pe ramura sigură și INVENTA brutul și impozitul
+  pe un document despre care nu se știe dacă a ieșit din casă — exact ce interzice regula
+  „nu se inventează cifre".
+- O plată legată de o **LIVRARE** nu intră în ordinele de plată: partenerul e CUMPĂRĂTORUL,
+  deci ar ajunge în 1C pe contul de datorie către furnizor (544.32) cu numele clientului.
+  Același motiv pentru care `complaint-adjustment` e exclusă.
+- **„Modificat după încărcare" se semnalează pe TOATE trei exporturile**
+  (`avertismentModificat1c`), nu doar la plăți, plus `actDivergences` pe acte: cifrele de pe
+  hârtie rămân îngheţate, dar registrul pleacă de sub ele, iar în 1C rămâne reținerea veche.
+- Lista de la `/api/exports/1c/pending` e **plafonată pe SERVER** la `MAX_IDS_1C`, cu `total`
+  separat. Descărcarea și marcarea acceptă oricum atâtea, iar interfața randa tot atâtea —
+  deci ~98% din răspuns nu era folosit niciodată (3,2 MB de JSON pentru 500 de rânduri utile)
+  și creștea nelimitat cu istoricul.
+- Id-urile se **RESPING** dacă sunt invalide, nu se aruncă tăcut (`idUri1cStrict`, oglinda
+  lui `idUri1c` din magazie). `.map(Number).filter(Boolean)` lăsa `[[7]]` să treacă drept 7
+  și înghițea `"7abc"`: contabilul bifa N documente, descărca N−k, apoi marca lista întreagă,
+  iar cele k lipsă nu mai apăreau niciodată în export.
+- Neutralizarea de formule testează **ambele condiții pe valoarea trimuită**, în
+  `trimiteCsv1c` ȘI în `toCsvField`: `" =1+1"` nu era nici număr, nici periculos, și scăpa.
+- **Date reale de persoane nu intră în repo** — nici în teste, nici în placeholder-e, nici în
+  comentarii. Repo-ul e PUBLIC: o pereche nume + IDNP publicată acolo nu se mai poate retrage
+  (clone, cache, indexare), iar un commit ulterior nu o șterge. Fixture-ele folosesc date
+  evident sintetice. `.gitignore` acoperă `*.csv` și `*.xml` **în tot proiectul**, nu doar în
+  rădăcină: nomenclatorul exportat din 1C (~11 MB, nume + cod fiscal pentru toți contragenții)
+  e exact fișierul pe care funcționalitatea cere utilizatorului să-l deschidă, iar hook-ul de
+  auto-commit face `git add -A`.
 
 **Ordine de plată** (`ДокументСсылка.РасходныйКассовый`) — pasul **3**, după acte: plata se
 leagă de furnizor și de contul contabil, iar actul justifică datoria.

@@ -38,7 +38,7 @@ comment on table public.purchase_act_numbers is
   'Registrul numerelor de act de achiziție. Cheia primară (company_id, number) face '
   'duplicatul imposibil. Seria e per firmă, deci fiecare firmă are propriul șir.';
 
--- Șirul pornește de la 914: actul lui Cojocari Ana din 02.10.2026, numerotat pe
+-- Șirul pornește de la 914: actul din 02.10.2026, numerotat pe
 -- hârtie. Actele de dinainte rămân nenumerotate în aplicație — au numere scrise
 -- de mână și nu se rescrie nimic semnat.
 -- Marcajul de nivel: cel mai mare număr emis vreodată pentru o firmă. Crește DOAR.

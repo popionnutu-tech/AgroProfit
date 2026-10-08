@@ -46,9 +46,17 @@ SECURITY-AUDIT-*.md
 /*.tiff
 # Exporturile pentru 1C: contin IDNP-uri, adrese, telefoane, IBAN-uri, sume si impozitul
 # retinut pentru PERSOANE FIZICE. Hook-ul de auto-commit face `git add -A`, iar repo-ul e
-# public: un fisier salvat in radacina + prima modificare de cod = publicat ireversibil.
-/*.csv
-/*.CSV
+# public: un fisier salvat oriunde in proiect + prima modificare de cod = publicat ireversibil.
+# FARA `/` initial: `/ *.csv` prindea doar radacina, deci `export-1c/furnizori.csv` se comitea.
+*.csv
+*.CSV
+
+# Nomenclatorul de contragenti EXPORTAT DIN 1C (~11 MB): nume + cod fiscal/IDNP pentru TOTI
+# contragentii, inclusiv istoricul. Functionalitatea noua cere utilizatorului sa deschida exact
+# acest fisier, deci el ajunge pe disc langa proiect. Niciun XML nu e urmarit in repo, deci
+# regula poate fi globala fara sa strice nimic.
+*.xml
+*.XML
 
 # Loc dedicat pentru documentele primite de la furnizori, daca e nevoie sa stea in folder.
 /scanuri/
