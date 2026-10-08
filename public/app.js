@@ -62,6 +62,9 @@ const grossWeightInput = document.getElementById("gross-weight-input");
 const tareWeightInput = document.getElementById("tare-weight-input");
 const netQtyHintEl = document.getElementById("net-qty-hint");
 const humidityInput = document.getElementById("humidity-input");
+const payOnGrossInput = document.getElementById("pay-on-gross-input");
+const payOnGrossWrap = document.getElementById("pay-on-gross-wrap");
+const payOnGrossHintEl = document.getElementById("pay-on-gross-hint");
 const impurityInput = document.getElementById("impurity-input");
 const fiscalProfileOptions = document.getElementById("fiscal-profile-options");
 const roleOptions = document.getElementById("role-options");
@@ -121,6 +124,368 @@ const transferMessageEl = document.getElementById("transfer-message");
 const transfersBodyEl = document.getElementById("transfers-body");
 let transfersCache = [];
 const stocksBodyEl = document.getElementById("stocks-body");
+const stockDustWrap = document.getElementById("stock-dust-wrap");
+const stockDustBtn = document.getElementById("stock-dust-btn");
+const stockDustHintEl = document.getElementById("stock-dust-hint");
+
+// Export pentru 1C: acte de achizitie pe perioada. Descarcarea se face prin navigare, nu
+// prin `fetch` + blob: raspunsul are deja `Content-Disposition`, iar cookie-ul de sesiune
+// merge la fel. Asa nu ținem in memorie un fisier care poate fi mare.
+// ============================================================================
+// EXPORT 1C — un singur flux, cu BIFE pe documente
+//
+// Criteriul de „de incarcat" NU e data, e MARCAJUL: un act facut de depozitar dupa ora 17
+// apare la urmatorul export, fara sa fie incarcat de doua ori si fara sa se piarda intre
+// intervale de date. Marcajul il pune omul, dupa un import reusit.
+const EXPORT_1C_TIPURI = {
+  suppliers: { ruta: "/api/exports/suppliers-1c", eticheta: "Furnizori", fisier: "furnizori" },
+  receipts: { ruta: "/api/exports/purchase-acts-1c", eticheta: "Acte de achiziție", fisier: "acte-achizitie" },
+  payments: { ruta: "/api/exports/payments-1c", eticheta: "Ordine de plată", fisier: "ordine-plata" }
+};
+let export1cTip = "suppliers";
+let export1cItems = [];
+let export1cTotal = 0;
+
+function export1cHint(text) {
+  const el = document.getElementById("export-1c-hint");
+  if (el) el.textContent = text || "";
+}
+
+function export1cSelectate() {
+  return [...document.querySelectorAll("#export-1c-body input[data-id]:checked")].map((i) =>
+    Number(i.dataset.id)
+  );
+}
+
+function randeazaExport1c() {
+  const body = document.getElementById("export-1c-body");
+  if (!body) return;
+  for (const tip of Object.keys(EXPORT_1C_TIPURI)) {
+    const btn = document.getElementById(`export-1c-tab-${tip}`);
+    if (btn) btn.classList.toggle("cell-btn-primary", tip === export1cTip);
+  }
+  if (!export1cItems.length) {
+    body.innerHTML =
+      '<tr><td colspan="5" class="muted-count">Nimic de încărcat — toate documentele sunt deja marcate.</td></tr>';
+    return;
+  }
+  const MAX_RANDURI = 500;
+  const randate = export1cItems.slice(0, MAX_RANDURI);
+  body.innerHTML = randate
+    .map(
+      (it) => `
+        <tr>
+          <td><input type="checkbox" data-id="${it.id}" ${it.exported1cAt ? "" : "checked"} /></td>
+          <td>${escapeComboHtml(it.label)}</td>
+          <td>${escapeComboHtml(it.date || "—")}</td>
+          <td>${escapeComboHtml(it.extra || "")}</td>
+          <td>${it.exported1cAt
+            ? `<span class="status-badge badge-warn">${escapeComboHtml(formatDateShort(it.exported1cAt))}</span>`
+            : "—"}</td>
+        </tr>`
+    )
+    .join("") +
+    (export1cTotal > randate.length
+      ? `<tr><td colspan="5" class="muted-count">Se afișează primele ${randate.length} din ` +
+        `${export1cTotal}. Marchează această tranșă, apoi lista se reîncarcă cu următoarea.</td></tr>`
+      : "");
+}
+
+async function incarcaLista1c() {
+  const from = (document.getElementById("export-1c-from") || {}).value || "";
+  const to = (document.getElementById("export-1c-to") || {}).value || "";
+  const include = (document.getElementById("export-1c-include") || {}).checked ? "1" : "";
+  const q = new URLSearchParams({ kind: export1cTip });
+  if (from) q.set("from", from);
+  if (to) q.set("to", to);
+  if (include) q.set("includeExported", "1");
+  try {
+    const res = await fetch(`/api/exports/1c/pending?${q}`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Nu am putut citi lista.");
+    export1cItems = data.items || [];
+    // Serverul plafoneaza raspunsul: `total` spune cate sunt de fapt, ca omul sa stie ca
+    // mai are transe de facut dupa asta.
+    export1cTotal = Number(data.total || export1cItems.length);
+    randeazaExport1c();
+    const neincarcate = export1cItems.filter((i) => !i.exported1cAt).length;
+    export1cHint(
+      `${EXPORT_1C_TIPURI[export1cTip].eticheta}: ${neincarcate} de încărcat` +
+        (export1cItems.length > neincarcate
+          ? `, ${export1cItems.length - neincarcate} deja încărcate`
+          : "") +
+        (export1cTotal > export1cItems.length
+          ? `. În total ${export1cTotal} — se lucrează în tranșe de ${export1cItems.length}.`
+          : "")
+    );
+  } catch (err) {
+    // Lipsa de drepturi nu e o eroare de raportat cu alert: panoul e ascuns oricum pentru
+    // rolurile fara `finance`, iar un alert ar aparea si pe ecranul de login.
+    export1cItems = [];
+    export1cTotal = 0;
+    randeazaExport1c();
+    export1cHint(err.message);
+  }
+}
+
+if (document.getElementById("export-1c-body")) {
+  for (const tip of Object.keys(EXPORT_1C_TIPURI)) {
+    const btn = document.getElementById(`export-1c-tab-${tip}`);
+    if (btn) {
+      btn.addEventListener("click", () => {
+        export1cTip = tip;
+        incarcaLista1c();
+      });
+    }
+  }
+  for (const id of ["export-1c-from", "export-1c-to", "export-1c-include"]) {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener("change", incarcaLista1c);
+  }
+  const toate = document.getElementById("export-1c-all");
+  if (toate) {
+    toate.addEventListener("change", () => {
+      document
+        .querySelectorAll("#export-1c-body input[data-id]")
+        .forEach((i) => {
+          i.checked = toate.checked;
+        });
+    });
+  }
+
+  const descarca = document.getElementById("export-1c-download-btn");
+  if (descarca) {
+    descarca.addEventListener("click", async () => {
+      const ids = export1cSelectate();
+      if (!ids.length) {
+        window.alert("Bifează cel puțin un document.");
+        return;
+      }
+      const def = EXPORT_1C_TIPURI[export1cTip];
+      // `fetch`, nu navigare: avem nevoie de raspuns ca sa putem descarca exact selectia.
+      descarca.disabled = true;
+      try {
+        const res = await fetch(`${def.ruta}?includeExported=1`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids })
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || "Nu am putut descărca.");
+        }
+        const text = await res.text();
+        const url = URL.createObjectURL(new Blob([text], { type: "text/csv;charset=utf-8" }));
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${def.fisier}-1c-${new Date().toISOString().slice(0, 10)}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+        export1cHint(
+          `${ids.length} ${ids.length === 1 ? "document" : "documente"} descărcate. ` +
+            "După importul în 1C, apasă „Am încărcat în 1C”."
+        );
+      } catch (err) {
+        window.alert(err.message);
+      } finally {
+        descarca.disabled = false;
+      }
+    });
+  }
+
+  const marcheaza = async (reset) => {
+    const ids = export1cSelectate();
+    if (!ids.length) {
+      window.alert("Bifează documentele.");
+      return;
+    }
+    const ok = window.confirm(
+      reset
+        ? `Se ANULEAZĂ marcajul pentru ${ids.length} documente — vor reapărea în export.\nContinui?`
+        : `Se marchează ${ids.length} documente ca încărcate în 1C.\n` +
+          "De atunci nu mai apar în export. Apasă OK doar dacă importul a reușit."
+    );
+    if (!ok) return;
+    try {
+      // Transe de 500, cat accepta serverul: la „bifeaza tot" pe mii de documente, un singur
+      // apel cadea, iar omul ar fi re-descarcat si re-importat.
+      const LOT = 500;
+      let total = 0;
+      for (let i = 0; i < ids.length; i += LOT) {
+        const lot = ids.slice(i, i + LOT);
+        const res = await fetch("/api/exports/1c/mark", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ kind: export1cTip, ids: lot, reset })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "Nu am putut marca documentele.");
+        total += (data.changed || []).length;
+        export1cHint(`${total} din ${ids.length} documente actualizate…`);
+      }
+      export1cHint(`${total} documente actualizate.`);
+      await incarcaLista1c();
+    } catch (err) {
+      window.alert(err.message);
+    }
+  };
+  const btnMark = document.getElementById("export-1c-mark-btn");
+  if (btnMark) btnMark.addEventListener("click", () => marcheaza(false));
+  const btnUnmark = document.getElementById("export-1c-unmark-btn");
+  if (btnUnmark) btnUnmark.addEventListener("click", () => marcheaza(true));
+
+  // Fisierul din 1C se citeste IN BROWSER: nomenclatorul are 11 MB, iar pe server n-ar avea
+  // ce caută — ne trebuie doar codurile fiscale. XML-ul 1C le tine in `<Свойство Имя="ФискКод">`;
+  // un fisier text/CSV e tratat ca lista de coduri.
+  function coduriDinText(text, numeFisier) {
+    const esteXml = /\.xml$/i.test(numeFisier || "") || /^\s*<\?xml/.test(text);
+    if (esteXml) {
+      const gasite = [];
+      const re = /Имя="ФискКод"[^>]*>\s*<Значение>([^<]*)<\/Значение>/g;
+      let m;
+      while ((m = re.exec(text))) {
+        const cod = String(m[1]).replace(/[^0-9]/g, "").trim();
+        if (cod) gasite.push(cod);
+      }
+      return gasite;
+    }
+    return text.split(/[\s,;]+/).map((c) => c.replace(/[^0-9]/g, "").trim()).filter(Boolean);
+  }
+
+  let coduri1cDinFisier = [];
+  const inputFisier = document.getElementById("export-1c-file");
+  if (inputFisier) {
+    inputFisier.addEventListener("change", async () => {
+      const hint = document.getElementById("export-1c-file-hint");
+      const f = inputFisier.files && inputFisier.files[0];
+      coduri1cDinFisier = [];
+      if (!f) return;
+      try {
+        const text = await f.text();
+        const brute = coduriDinText(text, f.name);
+        coduri1cDinFisier = [...new Set(brute)];
+        if (hint) {
+          hint.textContent = coduri1cDinFisier.length
+            ? `${coduri1cDinFisier.length} coduri fiscale unice găsite` +
+              (brute.length > coduri1cDinFisier.length
+                ? ` (din ${brute.length} intrări — restul sunt duplicate în 1C).`
+                : ".")
+            : "Nu am găsit coduri fiscale în fișier. Verifică dacă e exportul de contragenți.";
+        }
+      } catch (err) {
+        if (hint) hint.textContent = `Nu am putut citi fișierul: ${err.message}`;
+      }
+    });
+  }
+
+  // Potrivirea DE PORNIRE cu lista din 1C. Se face o singura data.
+  const btnMatch = document.getElementById("export-1c-match-btn");
+  if (btnMatch) {
+    btnMatch.addEventListener("click", async () => {
+      // Fisierul are prioritate; caseta rămâne pentru cazul cand se lipesc cateva coduri.
+      const text = (document.getElementById("export-1c-codes") || {}).value || "";
+      const coduri = coduri1cDinFisier.length
+        ? coduri1cDinFisier
+        : coduriDinText(text, "");
+      if (!coduri.length) {
+        window.alert("Alege fișierul exportat din 1C sau lipește codurile fiscale.");
+        return;
+      }
+      btnMatch.disabled = true;
+      try {
+        const res = await fetch("/api/exports/1c/match-suppliers", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fiscalCodes: coduri })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "Nu am putut potrivi furnizorii.");
+        const lipsa = data.missing || [];
+        window.alert(
+          `Potrivire gata.\n\n` +
+            `${(data.matched || []).length} furnizori există deja în 1C — marcați.\n` +
+            `${data.missingTotal ?? lipsa.length} NU sunt în 1C și trebuie încărcați:\n` +
+            lipsa.slice(0, 15).map((m) => `  ${m.name} (${m.idno})`).join("\n") +
+            (lipsa.length > 15 ? `\n  …și încă ${lipsa.length - 15}` : "")
+        );
+        export1cTip = "suppliers";
+        await incarcaLista1c();
+      } catch (err) {
+        window.alert(err.message);
+      } finally {
+        btnMatch.disabled = false;
+      }
+    });
+  }
+
+  // NU la incarcarea paginii: `#export-1c-body` exista static in HTML, iar `data-access`
+  // doar il ASCUNDE — deci apelul pleca inainte de login, pentru orice rol, si 401/403
+  // deschidea un alert pe ecranul de autentificare. Se incarca la deschiderea acordeonului.
+  const acordeon = document.getElementById("export-1c-accordion");
+  if (acordeon) {
+    acordeon.addEventListener("toggle", () => {
+      if (acordeon.open && canAccess("finance")) incarcaLista1c();
+    });
+  }
+}
+
+// Curatarea resturilor: fiecare rand se asaza la ZERO prin aceeasi corectie de inventar ca
+// manual, deci cu motiv, urma in audit si intrare in coloana „Corectii inventar" in ambele
+// ecrane. Nu scrie direct in stoc (regula 8: orice pierdere e RECUNOSCUTA).
+if (stockDustBtn) {
+  stockDustBtn.addEventListener("click", async () => {
+    const cate = Number(stockDustBtn.dataset.count || 0);
+    const prag = Number(stockDustBtn.dataset.threshold || 5);
+    if (!cate) return;
+    const motiv = window.prompt(
+      `Se vor așeza la zero ${cate} ${cate === 1 ? "rând" : "rânduri"} cu rest sub ${prag} kg.\n` +
+      "Fiecare intră ca pierdere recunoscută, cu urmă în audit.\n\n" +
+      "Motivul corectării (obligatoriu):",
+      "Curățare resturi din rotunjiri"
+    );
+    if (motiv === null) return;
+    if (!String(motiv).trim()) {
+      window.alert("Motivul este obligatoriu.");
+      return;
+    }
+    stockDustBtn.disabled = true;
+    try {
+      const res = await fetch("/api/stock-corrections/clear-dust", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ thresholdKg: prag, changeReason: motiv })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Nu am putut curăța resturile.");
+      const n = (data.cleared || []).length;
+      window.alert(
+        n
+          ? `Gata: ${n} ${n === 1 ? "rând așezat" : "rânduri așezate"} la zero.\n` +
+            (data.cleared || [])
+              .map((c) => `${c.product} / ${c.location}: ${formatNumber(c.kg)} kg → 0`)
+              .join("\n")
+          : "Nu a fost nimic de curățat."
+      );
+      if ((data.skipped || []).length) {
+        window.alert(
+          "Rânduri care nu s-au putut corecta:\n" +
+          data.skipped.map((x) => `${x.product} / ${x.location}: ${x.error}`).join("\n")
+        );
+      }
+      if (Number(data.remaining) > 0) {
+        window.alert(
+          `Au rămas ${data.remaining} rânduri (plafon de ${(data.cleared || []).length} pe o ` +
+          "apăsare, ca operația să nu rămână pe jumătate). Apasă din nou."
+        );
+      }
+      await loadStocks();
+    } catch (err) {
+      window.alert(err.message);
+    } finally {
+      stockDustBtn.disabled = false;
+    }
+  });
+}
 const stockSummaryEl = document.getElementById("stock-summary");
 const silosGridEl = document.getElementById("silos-grid");
 const receiptStatusFilterEl = document.getElementById("receipt-status-filter");
@@ -249,15 +614,19 @@ const currency = new Intl.NumberFormat("ro-RO", {
   maximumFractionDigits: 2
 });
 
+// Formatterul se construieste O SINGURA data, la nivel de modul — ca `currency` de mai sus.
+// `new Intl.NumberFormat` la fiecare apel costa de ~45x mai mult decat formatarea, iar
+// `formatNumber` se cheama de cateva ori pe FIECARE rand al tabelelor (recepții, livrări,
+// rapoarte) si la fiecare tasta in formularele cu calcul live.
+const numberFormatter = new Intl.NumberFormat("ro-RO", { maximumFractionDigits: 2 });
+
 function formatNumber(value) {
   let n = Number(value || 0);
   // Evita afisarea "-0": normalizeaza zero negativ si negativele mici care se rotunjesc la zero.
   if (Object.is(n, -0) || (n < 0 && n > -0.005)) {
     n = 0;
   }
-  return new Intl.NumberFormat("ro-RO", {
-    maximumFractionDigits: 2
-  }).format(n);
+  return numberFormatter.format(n);
 }
 
 // Valoarea e stocata intern in tone. O afisam in kg DOAR daca inregistrarea a fost
@@ -1306,6 +1675,32 @@ function renderStockSummary(summary) {
   const negativeRows = stockRows.filter((item) => Number(item.quantity || 0) < 0);
   // Corecția de inventar e a adminului: el așază stocul la ce a numărat fizic în cilindru.
   const canCorrectStock = currentSessionUser?.roleCode === "admin";
+  // Praful: resturi de cateva kg, din rotunjiri si din documente retroactive. Butonul apare
+  // DOAR cand exista ce curatat — altfel e un buton care nu face nimic.
+  // Pragul vine din nomenclator (`systemSettings`), nu scris aici: duplicat in doua locuri,
+  // era exact tipul de divergenta care a produs bug-ul de 1000x la facturare.
+  const PRAG_PRAF_KG = Number(currentConfig?.systemSettings?.stockDustThresholdKg) || 5;
+  const praf = stockRows.filter((item) => {
+    const kg = Math.abs(Number(item.quantity || 0) * 1000);
+    return kg > 0 && kg < PRAG_PRAF_KG;
+  });
+  if (stockDustWrap) {
+    stockDustWrap.hidden = !(canCorrectStock && praf.length > 0);
+    if (stockDustHintEl && praf.length) {
+      stockDustHintEl.textContent =
+        `${praf.length} ${praf.length === 1 ? "rând" : "rânduri"} cu rest sub ${PRAG_PRAF_KG} kg: ` +
+        praf
+          .slice(0, 6)
+          .map((i) => `${i.product} / ${i.location} (${formatNumber(i.quantity * 1000)} kg)`)
+          .join("; ") +
+        (praf.length > 6 ? ` și încă ${praf.length - 6}` : "");
+    }
+  }
+  if (stockDustBtn) {
+    stockDustBtn.dataset.count = String(praf.length);
+    stockDustBtn.dataset.threshold = String(PRAG_PRAF_KG);
+  }
+
   stocksBodyEl.innerHTML = stockRows
     .map(
       (item) => `
@@ -1647,130 +2042,184 @@ document.addEventListener("click", (e) => {
   printReportTable(btn.dataset.table, btn.dataset.title || "Raport");
 });
 
-function renderStockPeriod() {
-  const body = document.getElementById("stock-period-body");
-  if (!body) return;
-  const fromEl = document.getElementById("stock-period-from");
-  const toEl = document.getElementById("stock-period-to");
+function kgRound(value) {
+  // Aceeasi rotunjire ca `createStockSummary` (backend): la KILOGRAM, la sursa, cu `-0`
+  // normalizat. Altfel „Stoc pe locatii" si tabelele de miscare pornesc de la numere
+  // diferite pentru aceeasi realitate (regula 8 din CLAUDE.md).
+  return Math.round(Number(value || 0) * 1000) / 1000 + 0;
+}
+
+// SURSA UNICA a celor doua tabele de miscare a stocului (pe produs si pe locatie).
+// Oglindeste `createStockSummary` din backend: receptia intra in locatia ei, transferul si
+// procesarea muta marfa intre locatii, livrarea se scade DOAR din locatia ei (iesirea BRUTA,
+// la ziua livrarii), returul se crediteaza la ziua si locatia descarcarii, iar corectiile de
+// inventar intra la ziua lor. Formulele au fost o vreme copiate in doua locuri; orice
+// divergenta intre ele insemna doua ecrane cu cifre diferite, fara explicatie.
+//
+// `before` = tot ce s-a intamplat INAINTE de perioada (formeaza stocul initial),
+// `now` = miscarile din perioada. Campuri: rec (receptii + sold initial), in/out (mutari
+// prin transfer sau procesare), del (livrari, minus retururi), loss (pierderea receptiilor
+// de model vechi), corr (corectii de inventar).
+function collectStockMovements(groupBy) {
+  const byLocation = groupBy === "location";
+  const fromEl = document.getElementById(byLocation ? "stock-period-loc-from" : "stock-period-from");
+  const toEl = document.getElementById(byLocation ? "stock-period-loc-to" : "stock-period-to");
   const from = fromEl && fromEl.value ? fromEl.value : "";
   const to = toEl && toEl.value ? toEl.value : "";
 
   const dayOf = (iso) => String(iso || "").slice(0, 10);
-  const products = new Set();
-
-  // Opening stock (counts as stoc inițial, always before any period).
-  // Sursa: summary-ul de stoc (openingByProduct), independent de rol — astfel „stoc inițial"
-  // apare la TOȚI cei cu drept de stoc (inclusiv operatorul). Nu folosim openingDocumentsCache,
-  // care e gol pentru cine nu are opening-read (financiar).
-  const opening = {};
-  const openingByProduct = (lastStockSummary && lastStockSummary.openingByProduct) || {};
-  Object.keys(openingByProduct).forEach((p) => {
-    products.add(p);
-    opening[p] = (opening[p] || 0) + Number(openingByProduct[p] || 0);
-  });
-
   const inPeriod = (day) => (!from || day >= from) && (!to || day <= to);
-  const recBefore = {}, recIn = {};
-  const procBefore = {}, procIn = {};
-  const delBefore = {}, delIn = {};
-  const corrBefore = {}, corrIn = {};
-  const bucket = (beforeObj, inObj, p, day, qty) => {
-    // Acceptă și valori NEGATIVE: un retur scade dintr-o ieșire, la ziua lui.
-    if (!qty) return;
-    if (from && day < from) beforeObj[p] = (beforeObj[p] || 0) + qty;
-    else if (inPeriod(day)) inObj[p] = (inObj[p] || 0) + qty;
+  const normCache = new Map();
+  const normLoc = (v) => {
+    const raw = String(v || "Fara locatie");
+    let out = normCache.get(raw);
+    if (out === undefined) {
+      out = raw.trim().toLowerCase();
+      normCache.set(raw, out);
+    }
+    return out;
   };
 
-  // Receptii (cantitate bruta de intrare) + pierderi de la procesarile vechi (receptie procesata)
+  const lines = new Map();
+  const line = (location, product) => {
+    const prod = product || "—";
+    const key = byLocation ? `${normLoc(location)}::${prod}` : prod;
+    let row = lines.get(key);
+    if (!row) {
+      row = {
+        location: String(location || "Fara locatie").trim() || "Fara locatie",
+        product: prod,
+        before: { rec: 0, in: 0, out: 0, del: 0, loss: 0, corr: 0 },
+        now: { rec: 0, in: 0, out: 0, del: 0, loss: 0, corr: 0 }
+      };
+      lines.set(key, row);
+    }
+    return row;
+  };
+  const add = (location, product, field, day, qty) => {
+    // Accepta si valori NEGATIVE: un retur scade dintr-o iesire, la ziua lui.
+    if (!qty) return;
+    const row = line(location, product);
+    if (from && day < from) row.before[field] += qty;
+    else if (inPeriod(day)) row.now[field] += qty;
+  };
+
+  // Sold initial (documentul de sold): mereu inaintea oricarei perioade. Sursa e summary-ul
+  // de stoc, independent de rol — asa „stoc initial" apare la toti cei cu drept de stoc
+  // (inclusiv operatorul, care NU are opening-read financiar).
+  if (byLocation) {
+    const openingByLocation = (lastStockSummary && lastStockSummary.openingByLocation) || {};
+    Object.keys(openingByLocation).forEach((key) => {
+      const idx = key.lastIndexOf("::");
+      if (idx < 0) return;
+      line(key.slice(0, idx), key.slice(idx + 2)).before.rec += Number(openingByLocation[key] || 0);
+    });
+  } else {
+    const openingByProduct = (lastStockSummary && lastStockSummary.openingByProduct) || {};
+    Object.keys(openingByProduct).forEach((product) => {
+      line("", product).before.rec += Number(openingByProduct[product] || 0);
+    });
+  }
+
   (receiptsCache || []).forEach((r) => {
     if (!isReceiptInStock(r)) return;
-    const p = r.product || "—";
-    products.add(p);
     const provNet = Number(r.provisionalNetQuantity || r.quantity || 0);
     const day = dayOf(r.createdAt || r.receivedAt);
-    bucket(recBefore, recIn, p, day, provNet);
+    add(r.location, r.product, "rec", day, provNet);
+    // Receptii de model vechi: procesarea a fost scrisa pe receptie (net final sub cel
+    // provizoriu), deci pierderea apartine locatiei receptiei.
     const finalNet = r.finalNetQuantity != null ? Number(r.finalNetQuantity) : provNet;
-    bucket(procBefore, procIn, p, day, Math.max(provNet - finalNet, 0));
+    add(r.location, r.product, "loss", day, Math.max(provNet - finalNet, 0));
   });
 
-  // Livrări: ce a ieșit REAL din stoc LA DATA LIVRĂRII — cantitatea BRUTĂ, dinainte de
-  // retururi. `deliveredQuantity` e micșorat de retur, deci singur ar rescrie retroactiv ziua
-  // livrării (marfa ar apărea ca și cum n-ar fi plecat niciodată în zilele dintre livrare și
-  // retur). Returul intră mai jos, ca intrare datată la ziua descărcării.
-  (deliveriesCache || []).forEach((d) => {
-    if (!d || d.status === "Anulat") return; // anularea șterge complet mișcarea
-    const p = d.product || "—";
-    products.add(p);
-    const gross = Number(d.deliveredQuantity || 0) + Number(d.returnedQuantity || 0);
-    if (gross > 0) bucket(delBefore, delIn, p, dayOf(d.deliveredAt || d.createdAt), gross);
-    // Descărcările se scad din ieșiri, fiecare la ziua ei reală.
-    const entries = Array.isArray(d.returns) && d.returns.length > 0
-      ? d.returns
-      : (Number(d.returnedQuantity || 0) > 0
-          ? [{ quantity: Number(d.returnedQuantity), returnedAt: d.returnedAt || d.createdAt }]
-          : []);
-    entries.forEach((e) => {
-      const qty = Number(e.quantity || 0);
-      if (qty > 0) bucket(delBefore, delIn, p, dayOf(e.returnedAt || d.createdAt), -qty);
-    });
+  (transfersCache || []).forEach((t) => {
+    if (!t || t.status === "Anulat") return;
+    const qty = Number(t.quantity || 0);
+    if (qty <= 0) return;
+    const day = dayOf(t.createdAt);
+    add(t.fromLocation, t.product, "out", day, qty);
+    add(t.toLocation, t.product, "in", day, qty);
   });
 
-  // Corecții de inventar: adminul a numărat fizic și a așezat stocul la realitate.
-  // FĂRĂ ele, acest tabel ar arăta alt total decât „Stoc pe locații" de deasupra — exact
-  // divergența pe care regula 8 din CLAUDE.md o interzice. Semnul e al deltei: negativ =
-  // pierdere recunoscută, pozitiv = plus la inventar.
-  (stockCorrectionsCache || []).forEach((cr) => {
-    const p = cr.product || "—";
-    products.add(p);
-    bucket(corrBefore, corrIn, p, dayOf(cr.createdAt), Number(cr.delta || 0));
-  });
-
-  // Pierderi la procesarile noi (model miscare): intrare − iesire = deseu + apa.
   (processingsCache || []).forEach((pr) => {
     if (!pr || pr.movement !== true) return;
     if (pr.status === "Anulat" || pr.status === "In lucru") return;
-    const p = pr.product || "—";
-    products.add(p);
-    // ACEEAȘI formulă ca în `createStockSummary` (backend). Erau două lanțuri de rezervă
-    // diferite pentru aceeași mărime: aici `outputQuantity ?? finalNetQuantity ?? 0`, acolo
-    // `outputQuantity ?? (intrare − deșeu − apă)`. Când `outputQuantity` lipsea, cele două
-    // ecrane calculau pierderi diferite pentru același document.
+    // ACEEASI formula ca in `createStockSummary`: cand `outputQuantity` lipseste, iesirea e
+    // intrarea minus deseul si apa. Doua lanturi de rezerva diferite pentru aceeasi marime
+    // au facut candva ca doua ecrane sa arate pierderi diferite pentru acelasi document.
     const input = Number(pr.processedQuantity || 0);
     const output = Number(
       pr.outputQuantity ??
         Math.max(input - Number(pr.confirmedWaste || 0) - Number(pr.waterRemoved || 0), 0)
     );
-    const loss = Math.max(input - output, 0);
-    bucket(procBefore, procIn, p, dayOf(pr.createdAt), loss);
+    const day = dayOf(pr.createdAt);
+    add(pr.sourceLocation, pr.product, "out", day, input);
+    add(pr.destLocation || pr.sourceLocation, pr.product, "in", day, output);
   });
 
+  (deliveriesCache || []).forEach((d) => {
+    if (!d || d.status === "Anulat") return; // anularea sterge complet miscarea
+    // Iesirea BRUTA, la ziua livrarii. `deliveredQuantity` singur e micsorat de retur, deci
+    // ar rescrie retroactiv ziua livrarii: marfa ar parea ca n-a plecat niciodata in zilele
+    // dintre livrare si descarcare.
+    const gross = Number(d.deliveredQuantity || 0) + Number(d.returnedQuantity || 0);
+    add(d.location, d.product, "del", dayOf(d.deliveredAt || d.createdAt), gross);
+    const entries = Array.isArray(d.returns) && d.returns.length > 0
+      ? d.returns
+      : (Number(d.returnedQuantity || 0) > 0
+          ? [{ quantity: Number(d.returnedQuantity), location: d.location, returnedAt: d.returnedAt || d.createdAt }]
+          : []);
+    entries.forEach((e) => {
+      const qty = Number(e.quantity || 0);
+      if (qty > 0) add(e.location || d.location, d.product, "del", dayOf(e.returnedAt || d.createdAt), -qty);
+    });
+  });
+
+  // Corectii de inventar: adminul a numarat fizic si a asezat stocul la realitate. FARA ele,
+  // tabelele ar arata alt total decat „Stoc pe locatii" — exact divergenta interzisa de
+  // regula 8. Semnul e al deltei: negativ = pierdere recunoscuta, pozitiv = plus la inventar.
+  (stockCorrectionsCache || []).forEach((cr) => {
+    add(cr.location, cr.product, "corr", dayOf(cr.createdAt), Number(cr.delta || 0));
+  });
+
+  // Stocul de la care porneste perioada si cel cu care se incheie. Ambele rotunjite la kg,
+  // ca in backend.
+  lines.forEach((row) => {
+    row.init = kgRound(row.before.rec + row.before.in - row.before.out - row.before.del
+      - row.before.loss + row.before.corr);
+    row.fin = kgRound(row.init + row.now.rec + row.now.in - row.now.out - row.now.del
+      - row.now.loss + row.now.corr);
+  });
+  return lines;
+}
+
+function renderStockPeriod() {
+  const body = document.getElementById("stock-period-body");
+  if (!body) return;
+  const lines = collectStockMovements("product");
   const prodFilterEl = document.getElementById("stock-period-product");
   const prodFilter = prodFilterEl ? prodFilterEl.value : "";
-  const rows = Array.from(products)
-    .filter((p) => !prodFilter || p === prodFilter)
-    .sort((a, b) => String(a).localeCompare(String(b), "ro"));
+  const rows = Array.from(lines.values())
+    .filter((r) => !prodFilter || r.product === prodFilter)
+    .sort((a, b) => String(a.product).localeCompare(String(b.product), "ro"));
   if (!rows.length) {
     body.innerHTML = '<tr><td colspan="7" class="empty-state">Nu există date pentru perioada aleasă.</td></tr>';
     return;
   }
   let tInit = 0, tRec = 0, tProc = 0, tDel = 0, tCorr = 0, tFin = 0;
-  body.innerHTML = rows.map((p) => {
-    const init = (opening[p] || 0) + (recBefore[p] || 0) - (delBefore[p] || 0)
-      - (procBefore[p] || 0) + (corrBefore[p] || 0);
-    const rec = recIn[p] || 0;
-    const proc = procIn[p] || 0;
-    const del = delIn[p] || 0;
-    const corr = corrIn[p] || 0;
-    const fin = init + rec - proc - del + corr;
-    tInit += init; tRec += rec; tProc += proc; tDel += del; tCorr += corr; tFin += fin;
+  body.innerHTML = rows.map((r) => {
+    // Pe PRODUS, transferurile se anuleaza reciproc (aceeasi marfa, alta locatie), iar din
+    // procesare ramane exact pierderea: intrarea in utilaj minus iesirea din el.
+    const proc = r.now.loss + (r.now.out - r.now.in);
+    tInit += r.init; tRec += r.now.rec; tProc += proc; tDel += r.now.del; tCorr += r.now.corr; tFin += r.fin;
     return `<tr>
-      <td>${p}</td>
-      <td>${kgNum(init)}</td>
-      <td>${kgNum(rec)}</td>
+      <td>${escapeComboHtml(r.product)}</td>
+      <td>${kgNum(r.init)}</td>
+      <td>${kgNum(r.now.rec)}</td>
       <td>${kgNum(proc)}</td>
-      <td>${kgNum(del)}</td>
-      <td>${corr ? `<b>${kgNum(corr)}</b>` : "—"}</td>
-      <td><b>${kgNum(fin)}</b></td>
+      <td>${kgNum(r.now.del)}</td>
+      <td>${r.now.corr ? `<b>${kgNum(r.now.corr)}</b>` : "—"}</td>
+      <td><b>${kgNum(r.fin)}</b></td>
     </tr>`;
   }).join("") + `
     <tr class="totals-row">
@@ -1781,6 +2230,65 @@ function renderStockPeriod() {
       <td>${kgNum(tDel)}</td>
       <td><b>${kgNum(tCorr)}</b></td>
       <td>${kgNum(tFin)}</td>
+    </tr>`;
+}
+
+// Perechea de fata a ecranului „Stoc pe locatii": acolo se vede soldul de acum, aici de unde
+// a venit si unde a plecat marfa in perioada aleasa. Coloana „Pierderi receptie" numara doar
+// pierderea receptiilor de model vechi; pierderea la procesare se vede ca diferenta dintre
+// „Iesit" (intrarea in utilaj) si „Intrat" (iesirea din el).
+function renderStockPeriodByLocation() {
+  const body = document.getElementById("stock-period-loc-body");
+  if (!body) return;
+  const lines = collectStockMovements("location");
+  const prodEl = document.getElementById("stock-period-loc-product");
+  const locEl = document.getElementById("stock-period-loc-location");
+  const prodFilter = prodEl ? prodEl.value : "";
+  const locFilter = locEl ? locEl.value : "";
+  const normLoc = (v) => String(v || "Fara locatie").trim().toLowerCase();
+
+  const rows = Array.from(lines.values())
+    .filter((r) => !prodFilter || r.product === prodFilter)
+    .filter((r) => !locFilter || normLoc(r.location) === normLoc(locFilter))
+    // O linie fara sold si fara nicio miscare nu spune nimic: ar umple tabelul cu zerouri.
+    .filter((r) => [r.init, r.fin, r.now.rec, r.now.in, r.now.out, r.now.del, r.now.loss, r.now.corr]
+      .some((v) => Math.round(v * 1000) !== 0))
+    .sort((a, b) =>
+      String(a.location).localeCompare(String(b.location), "ro") ||
+      String(a.product).localeCompare(String(b.product), "ro"));
+
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="10" class="empty-state">Nu există mișcări pentru perioada aleasă.</td></tr>';
+    return;
+  }
+
+  const t = { init: 0, rec: 0, in: 0, out: 0, del: 0, loss: 0, corr: 0, fin: 0 };
+  body.innerHTML = rows.map((r) => {
+    t.init += r.init; t.rec += r.now.rec; t.in += r.now.in; t.out += r.now.out;
+    t.del += r.now.del; t.loss += r.now.loss; t.corr += r.now.corr; t.fin += r.fin;
+    return `<tr>
+      <td>${escapeComboHtml(r.location)}</td>
+      <td>${escapeComboHtml(r.product)}</td>
+      <td>${kgNum(r.init)}</td>
+      <td>${kgNum(r.now.rec)}</td>
+      <td>${r.now.in ? kgNum(r.now.in) : "—"}</td>
+      <td>${r.now.out ? kgNum(r.now.out) : "—"}</td>
+      <td>${kgNum(r.now.del)}</td>
+      <td>${r.now.loss ? kgNum(r.now.loss) : "—"}</td>
+      <td>${r.now.corr ? `<b>${kgNum(r.now.corr)}</b>` : "—"}</td>
+      <td><b>${kgNum(r.fin)}</b></td>
+    </tr>`;
+  }).join("") + `
+    <tr class="totals-row">
+      <td colspan="2">TOTAL</td>
+      <td>${kgNum(t.init)}</td>
+      <td>${kgNum(t.rec)}</td>
+      <td>${kgNum(t.in)}</td>
+      <td>${kgNum(t.out)}</td>
+      <td>${kgNum(t.del)}</td>
+      <td>${kgNum(t.loss)}</td>
+      <td><b>${kgNum(t.corr)}</b></td>
+      <td><b>${kgNum(t.fin)}</b></td>
     </tr>`;
 }
 
@@ -1923,11 +2431,32 @@ function renderReceipts(receipts) {
   const canEditStatuses = canAccess("receipt-write");
   const canChangeSupplier = canAccess("finance");
   const canEditAmount = canAccess("finance-write");
+  // Corectia de CONDITII (bifa de umiditate + pret) recalculeaza bani pe un document deja
+  // inregistrat. Butonul e separat de ✎ (care scrie o suma la liber) tocmai ca sa nu se
+  // confunde cele doua operatii. Oglinda lui `CAN_CORRECT_TERMS_ROLES` din src/permissions.js:
+  // aici butonul doar se ascunde, garda reala e pe ruta si in magazie.
+  // Drepturile financiare se citesc O SINGURA data per randare: `canAccess` reface listele de
+  // capabilitati la fiecare apel, iar tabelul are un rand per receptie.
+  const canFinance = canAccess("finance");
+  // Aliasul vechi „contabil" exista in conturi mai vechi; serverul il normalizeaza
+  // (`normalizeRoleCode`), deci si oglinda din interfata trebuie sa o faca — altfel butonul
+  // lipseste unui contabil pe care serverul l-ar accepta.
+  const sessionRole = String(currentSessionUser?.roleCode || "").trim().toLowerCase();
+  const CONTABILI_SI_ADMIN = ["accountant", "accountant-sef", "admin", "contabil"];
+  const canCorrectTerms = CONTABILI_SI_ADMIN.includes(sessionRole);
+  // Documentele contabile ale recepției (contract, act de achiziție, ordin de plată) sunt ale
+  // contabililor și ale adminului. Managerul are `finance` (vede banii), dar nu emite acte.
+  const canPrintDocs = CONTABILI_SI_ADMIN.includes(sessionRole);
   // Operatorul nu vede coloanele de plata (plata preliminara, data platii).
   const receiptsTable = document.getElementById("receipts-table");
   if (receiptsTable) {
-    receiptsTable.classList.toggle("hide-fin", !canAccess("finance"));
+    receiptsTable.classList.toggle("hide-fin", !canFinance);
   }
+  // Selectorul de firma pentru actul de achizitie sta in filtre, nu in tabel, deci regula
+  // `.hide-fin .col-fin` nu-l atinge: se ascunde explicit. Fara asta, operatorul vedea un
+  // camp care nu-i foloseste la nimic (butonul de tipar ii e oricum ascuns).
+  const receiptCompanyWrap = document.getElementById("receipt-doc-company")?.closest("label");
+  if (receiptCompanyWrap) receiptCompanyWrap.hidden = !canFinance;
   // Populează filtrul de furnizori (fiecare o singură dată, fără duplicate)
   if (receiptSupplierFilterEl) {
     const sups = Array.from(new Set(receipts.map((r) => r.supplier).filter(Boolean))).sort((a, b) =>
@@ -1963,7 +2492,7 @@ function renderReceipts(receipts) {
       const payBadge = isCanceled
         ? '<span class="pay-badge pay-anulat">—</span>'
         : paymentBadge(item.paymentStatus);
-      const canPay = canAccess("finance") && !isCanceled && rest > 0;
+      const canPay = canFinance && !isCanceled && rest > 0;
       // Cantar in 2 pasi: recepțiile „In descarcare" apar in lista, dar READ-ONLY (badge in loc de select,
       // cantitatea inca necunoscuta) — se finalizeaza din panoul „Recepții în descărcare".
       const isPendingWeighing = item.status === "In descarcare";
@@ -1989,16 +2518,35 @@ function renderReceipts(receipts) {
           <td>${escapeComboHtml(item.product)}${photosMini(item.photos)}</td>
           <td>${item.grossWeight > 0 ? formatNumber(Number(item.grossWeight)) + " kg" : "—"}</td>
           <td>${item.tareWeight > 0 ? formatNumber(Number(item.tareWeight)) + " kg" : "—"}</td>
-          <td title="Apă eliminată la recepție (din umiditatea în exces)">${isPendingWeighing || !(Number(item.estimatedWaterLoss) > 0) ? "—" : formatNumber(Math.round(Number(item.estimatedWaterLoss) * 1000)) + " kg"}</td>
+          <td title="Apă eliminată la recepție (din umiditatea în exces)">${isPendingWeighing || !(Number(item.estimatedWaterLoss) > 0) ? "—" : formatNumber(Math.round(Number(item.estimatedWaterLoss) * 1000)) + " kg"}${item.payOnGrossQuantity === true ? ` <span class="status-badge badge-warn" title="${bi("Plata s-a făcut pe masa cu apă, uscarea nu s-a taxat. În stoc a intrat masa fără apă.")}">${bi("plătit cu apă")}</span>` : ""}</td>
           <td>${qtyCell}</td>
           <td>${item.location || "-"}</td>
-          <td class="col-fin">${currency.format(valoare)}${canEditAmount && !isCanceled ? ` <button type="button" class="cell-btn change-amount-btn" data-action="adjust-amount" data-id="${item.id}" title="Ajustează valoarea recepției">✎</button>` : ""}</td>
+          <td class="col-fin" title="${escapeComboHtml(Number(item.actNumber) > 0 ? `Act emis la ${formatDateShort(item.actIssuedAt)}` : "Actul nu a fost emis")}">${
+            Number(item.actNumber) > 0
+              ? `<b>${escapeComboHtml(String(item.actSeries || ""))} ${escapeComboHtml(String(item.actNumber))}</b>${
+                  (item.actDivergences || []).length
+                    ? ` <span class="status-badge badge-warn" title="${escapeComboHtml(
+                        `Registrul a fost corectat după emiterea actului (${item.actDivergences.length} ` +
+                        `${item.actDivergences.length === 1 ? "corectare" : "corectări"}). ` +
+                        "Hârtia semnată păstrează cifrele de la emitere — vezi Detalii."
+                      )}">≠ registru</span>`
+                    : ""
+                }`
+              : "—"
+          }</td>
+          <td class="col-fin">${currency.format(valoare)}${canEditAmount && !isCanceled ? ` <button type="button" class="cell-btn change-amount-btn" data-action="adjust-amount" data-id="${item.id}" title="Ajustează valoarea recepției">✎</button>` : ""}${canCorrectTerms && !isCanceled && !isPendingWeighing && item.status !== "Inchis" && item.status !== "Proiect" ? ` <button type="button" class="cell-btn change-amount-btn" data-action="correct-terms" data-id="${item.id}" title="Corectează condițiile: plata pe masa cu umiditate și/sau prețul">⚖</button>` : ""}${Array.isArray(item.termCorrections) && item.termCorrections.length ? ` <span class="status-badge badge-warn" title="Condițiile au fost corectate de ${escapeComboHtml(item.termCorrections[item.termCorrections.length - 1].by || "")} — vezi Detalii">corectat</span>` : ""}</td>
           <td class="col-fin">${achitat > 0 ? currency.format(achitat) : "-"}</td>
           <td class="col-fin"><b>${rest > 0 ? currency.format(rest) : "0"}</b></td>
           <td class="col-fin">${formatDateShort(item.lastPaymentDate)}</td>
           <td class="col-fin">${payBadge}</td>
           <td>${statusCell}</td>
-          <td><button type="button" class="cell-btn cell-btn-details" data-action="receipt-details" data-id="${item.id}">Detalii</button> ${docActionsCell("receipt", item)}</td>
+          <td><button type="button" class="cell-btn cell-btn-details" data-action="receipt-details" data-id="${item.id}">Detalii</button>${canPrintDocs ? ` <details class="print-menu">
+              <summary class="doc-print-btn">🖨 Tipar ▾</summary>
+              <div class="print-menu-list">
+                <button type="button" class="doc-print-btn" data-print-receipt="contract" data-id="${item.id}">Contract de vânzare-cumpărare</button>
+                <button type="button" class="doc-print-btn" data-print-receipt="act" data-id="${item.id}">Act de achiziție</button>
+              </div>
+            </details>` : ""} ${docActionsCell("receipt", item)}</td>
           <td class="col-fin">${actionCell}</td>
         </tr>
       `;
@@ -2301,6 +2849,7 @@ function renderReceiptTotals(rows) {
       <td>${waterKg > 0 ? "<b>" + formatNumber(waterKg) + " kg</b>" : "—"}</td>
       <td>${qtyCell}</td>
       <td></td>
+      <td class="col-fin"></td>
       <td class="col-fin"><b>${currency.format(totalPay)}</b></td>
       <td class="col-fin">${currency.format(totalPaid)}</td>
       <td class="col-fin"><b>${currency.format(totalRest)}</b></td>
@@ -2561,7 +3110,7 @@ function transactionReferenceStanding(item) {
     const d = (deliveriesCache || []).find((x) => Number(x.id) === Number(item.deliveryId));
     if (d) {
       const qty = Number(d.deliveredQuantity || d.netWeight || 0);
-      return buildTxStanding(Number(d.contractPrice || 0) * qty, d.collectedAmount || 0, d.collectionStatus);
+      return buildTxStanding(deliveryReceivableTonnePrice(d) * qty, d.collectedAmount || 0, d.collectionStatus);
     }
   } else if (item.referenceType === "opening-debt") {
     for (const doc of (openingDocumentsCache || [])) {
@@ -2765,6 +3314,23 @@ function deliveryDisplayQuantity(item) {
 //  • Preț în valută (EUR/USD/RON) = valută / TONĂ → total valută = tone × preț; total lei = total valută × curs
 //    (ex: 26,16 t × 175 EUR × 20,1152 = 92.087,39 lei)
 // Un SINGUR loc de adevăr pentru sume — folosit în tabel, totaluri, factura tipărită și formularul de facturare.
+// Pretul pe TONA pe care se calculeaza CREANTA. Oglinda lui `deliveryReceivableTonnePrice`
+// din src/local-storage.js — se schimba in AMBELE locuri.
+// Pretul de contract si cel de factura sunt ACELASI pret in unitati diferite: `contractPrice`
+// e lei/TONA, `priceLei` lei/KG, `priceForeign` valuta/TONA. Fallback-ul pe datele de
+// facturare vindeca livrarile la care `contractPrice` a ramas 0, fara migrare.
+// ATENTIE: la valuta NU se trece prin `priceLei` — acolo campul pastreaza lei/TONA, nu lei/kg.
+function deliveryReceivableTonnePrice(item) {
+  const stored = Number((item && item.contractPrice) || 0);
+  if (stored > 0) return stored;
+  if (!item) return 0;
+  const cur = String(item.currency || "MDL").trim().toUpperCase();
+  const foreign = Number(item.priceForeign || 0);
+  const rate = Number(item.exchangeRate || 0);
+  if (cur !== "MDL" && foreign > 0 && rate > 0) return foreign * rate;
+  return Number(item.priceLei || 0) * 1000;
+}
+
 function deliveryInvoiceTotals(item) {
   const tonnes = deliveryDisplayQuantity(item);
   const kg = tonnes * 1000;
@@ -2861,6 +3427,13 @@ function renderDeliveries(deliveries) {
   // Constant pe rol — ridicat din buclă. Contabilii nu au `delivery-write`, dar pot face
   // returul pe livrările facturate, deci butonul trebuie să le apară.
   const canDeliveryWrite = canAccess("delivery-write") || canReturnInvoicedDelivery();
+  const canFinance = canAccess("finance");
+  // Aceeasi regula ca pe randul de receptie: actul de achizitie e al contabililor si al
+  // adminului. Managerul are `finance` (vede banii) dar nu emite acte — si pana acum tiparea
+  // exact acelasi document, pe drumul din Livrari.
+  const canIssueActs = ["accountant", "accountant-sef", "admin", "contabil"].includes(
+    String(currentSessionUser?.roleCode || "").trim().toLowerCase()
+  );
   deliveriesBodyEl.innerHTML = filtered
     .map((item) => {
       const status = item.status || "Proiect";
@@ -2875,10 +3448,10 @@ function renderDeliveries(deliveries) {
       const qty = deliveryDisplayQuantity(item);
       const money = deliveryInvoiceTotals(item);
       const priceLabel = money.isForeign
-        ? `${formatNumber(money.unitForeign)} ${money.cur}/t`
+        ? `${formatNumber(money.unitForeign)} ${escapeComboHtml(money.cur)}/t`
         : (money.unitLei ? `${formatNumber(money.unitLei)} MDL/kg` : "-");
       const totalFactura = money.totalLei;
-      const canBill = canAccess("finance");
+      const canBill = canFinance;
       const paidSelect = canBill
         ? `<select class="delivery-paid-select" data-id="${item.id}">
              <option value="false" ${!item.invoicePaid ? "selected" : ""}>Neachitată</option>
@@ -2889,7 +3462,7 @@ function renderDeliveries(deliveries) {
         <tr>
           <td>Nr. ${item.id}</td>
           <td>${formatDateShort(item.createdAt || item.deliveredAt)}</td>
-          <td>${item.location || (item.receiptId ? `#${item.receiptId}` : "-")}</td>
+          <td>${escapeComboHtml(item.location) || (item.receiptId ? `#${item.receiptId}` : "-")}</td>
           <td>${escapeComboHtml(item.customer)}</td>
           <td class="col-fin">${item.seller || "-"}</td>
           <td>${escapeComboHtml(item.product)}${photosMini(item.photos)}</td>
@@ -2899,14 +3472,13 @@ function renderDeliveries(deliveries) {
           <td class="col-fin">${priceLabel}</td>
           <td class="col-fin">${totalFactura > 0 ? currency.format(totalFactura) : "-"}</td>
           <td class="col-fin pay-cell ${item.invoicePaid ? "is-paid" : "is-unpaid"}">${paidSelect}</td>
-          <td>
-            <div class="col-fin">${item.invoiceNumber || "-"}</div>
-            ${item.note ? `<div class="row-note">${escapeComboHtml(item.note)}</div>` : ""}
-            <div>${deliveryStatusBadge(status)}</div>
-            <div class="action-row">${buttons}</div>
-            <div class="action-row">${docActionsCell("delivery", item)}</div>
-            ${(() => { const cell = deliveryReturnCell(item, canDeliveryWrite); return cell ? `<div class="action-row">${cell}</div>` : ""; })()}
-            ${canAccess("finance") ? `<div class="doc-print-row">
+          <td class="row-actions-cell">
+            <div class="row-actions">
+              ${deliveryStatusBadge(status)}
+              ${buttons}
+              ${docActionsCell("delivery", item)}
+              ${deliveryReturnCell(item, canDeliveryWrite)}
+            ${canFinance ? `
               <button type="button" class="cell-btn cell-btn-primary" data-action="edit-billing" data-id="${item.id}">Date factură</button>
               <details class="print-menu">
                 <summary class="doc-print-btn">Tipar ▾</summary>
@@ -2917,10 +3489,18 @@ function renderDeliveries(deliveries) {
                   <button type="button" class="doc-print-btn" data-print="invoice" data-id="${item.id}">Invoice</button>
                   <button type="button" class="doc-print-btn" data-print="imputernicire" data-id="${item.id}">Împuternicire</button>
                   <button type="button" class="doc-print-btn" data-print="declaratie" data-id="${item.id}">Declarație</button>
-                  <button type="button" class="doc-print-btn" data-print="act" data-id="${item.id}">Act achiziție</button>
+                  ${canIssueActs ? `<button type="button" class="doc-print-btn" data-print="act" data-id="${item.id}">Act achiziție</button>` : ""}
                 </div>
-              </details>
-            </div>` : ""}
+              </details>` : ""}
+            </div>
+            ${(() => {
+              // Numarul facturii si comentariul stau sub butoane, pe un rand marunt: asa
+              // celula nu se mai imparte in benzi verticale si randul ramane scund.
+              const inv = canFinance && item.invoiceNumber
+                ? `<span>Factura ${escapeComboHtml(item.invoiceNumber)}</span>` : "";
+              const note = item.note ? `<span class="row-note">${escapeComboHtml(item.note)}</span>` : "";
+              return inv || note ? `<div class="row-meta">${inv}${note}</div>` : "";
+            })()}
           </td>
         </tr>
       `;
@@ -2957,7 +3537,7 @@ function renderDeliveryTotals(rows) {
     const w = deliveryWaterKg(item, waterIdx);
     if (w !== null) totalWaterKg += w;
   });
-  const foreignStr = Object.entries(totalForeignByCur).map(([c, v]) => `${formatNumber(v)} ${c}`).join(" + ");
+  const foreignStr = Object.entries(totalForeignByCur).map(([c, v]) => `${formatNumber(v)} ${escapeComboHtml(c)}`).join(" + ");
   const facturaCell = `<b>${currency.format(totalLei)}</b>${foreignStr ? `<br><small>${foreignStr}</small>` : ""}`;
   // 13 coloane: ID,Data,Sursă,Cumpărător | Vânzător | Produs | Cantitate | Apă | Mașina |
   //             Preț | Sumă factură | Achitată | Status
@@ -3110,7 +3690,7 @@ function renderOpenJournal() {
         <tr>
           <td>${item.id ? `#${item.id}` : "Sold initial"}</td>
           <td>${item.customer || item.partner}</td>
-          <td>${currency.format(Number(item.contractPrice || 0) * Number(item.deliveredQuantity || 0) || Number(item.amount || 0))}</td>
+          <td>${currency.format(deliveryReceivableTonnePrice(item) * Number(item.deliveredQuantity || 0) || Number(item.amount || 0))}</td>
           <td>${currency.format(Number(item.collectedAmount || item.settledAmount || 0))}</td>
           <td>${item.collectionStatus || item.status || "Neincasat"}</td>
         </tr>
@@ -3789,6 +4369,34 @@ function renderFilterOptions() {
       ...productNames.map((name) => `<option value="${name}">${name}</option>`)
     ].join("");
     stockPeriodProductEl.value = productNames.includes(prev) ? prev : "";
+  }
+
+  // Aceleasi filtre pentru tabelul pe locatii + lista de locatii (nomenclator si orice
+  // locatie aparuta pe documente vechi, ca marfa sa nu ramana invizibila daca locatia a
+  // fost intre timp scoasa din nomenclator).
+  const stockPeriodLocProductEl = document.getElementById("stock-period-loc-product");
+  if (stockPeriodLocProductEl) {
+    const prev = stockPeriodLocProductEl.value;
+    stockPeriodLocProductEl.innerHTML = [
+      '<option value="">Toate produsele</option>',
+      ...productNames.map((name) => `<option value="${escapeComboHtml(name)}">${escapeComboHtml(name)}</option>`)
+    ].join("");
+    stockPeriodLocProductEl.value = productNames.includes(prev) ? prev : "";
+  }
+  const stockPeriodLocEl = document.getElementById("stock-period-loc-location");
+  if (stockPeriodLocEl) {
+    const prev = stockPeriodLocEl.value;
+    const locNames = Array.from(new Set([
+      ...(currentConfig?.storageLocations || []).map((l) => l.name),
+      // Sumarul de stoc e deja agregat pe locatie: aduce si locatiile scoase intre timp din
+      // nomenclator, fara sa reparcurgem toate documentele la fiecare salvare.
+      ...((lastStockSummary && lastStockSummary.byLocation) || []).map((i) => i.location)
+    ].filter(Boolean))).sort((a, b) => String(a).localeCompare(String(b), "ro"));
+    stockPeriodLocEl.innerHTML = [
+      '<option value="">Toate locațiile</option>',
+      ...locNames.map((name) => `<option value="${escapeComboHtml(name)}">${escapeComboHtml(name)}</option>`)
+    ].join("");
+    stockPeriodLocEl.value = locNames.includes(prev) ? prev : "";
   }
 }
 
@@ -4573,8 +5181,11 @@ function getReceiptEstimate() {
   const impurityNorm = Number(selectedProduct?.impurityNorm || 0);
   const excessHumidity = Math.max(humidity - humidityNorm, 0);
   const excessImpurity = Math.max(impurity - impurityNorm, 0);
-  const estimatedWaterLoss = quantity * (excessHumidity / 100);
-  const estimatedImpurityLoss = quantity * (excessImpurity / 100);
+  // Cerealele se socotesc in KILOGRAME INTREGI — oglinda regulii din backend
+  // (`computeReceiptEstimate`). Se schimba in AMBELE locuri.
+  const laKg = (tone) => Math.round(Number(tone) * 1000) / 1000 + 0;
+  const estimatedWaterLoss = laKg(quantity * (excessHumidity / 100));
+  const estimatedImpurityLoss = laKg(quantity * (excessImpurity / 100));
   const provisionalNetQuantity = Math.max(
     quantity - estimatedWaterLoss - estimatedImpurityLoss,
     0
@@ -4585,10 +5196,20 @@ function getReceiptEstimate() {
   //   uscare   = tarif_uscare   × (umiditate − norma_umiditate)   × kg
   //   curatare = tarif_curatare × (impuritati − norma_impuritati) × kg
   // If umiditate ≤ norma AND impuritati ≤ norma → 0 (no services).
+  // Intelegere comerciala: la umiditate peste norma dar in limita acceptata se plateste
+  // masa CU apa si nu se taxeaza uscarea. Stocul primeste tot `provisionalNetQuantity`.
+  // Oglinda exacta a lui `computeReceiptEstimate` din src/receipt-handlers.js — se schimba
+  // in AMBELE locuri (CLAUDE.md, regula 2).
+  // Se pune la loc DOAR apa, nu si impuritatile — vezi comentariul din backend.
+  const payOnGross = Boolean(payOnGrossInput && payOnGrossInput.checked) && excessHumidity > 0;
+  const payableQuantity = payOnGross
+    ? provisionalNetQuantity + estimatedWaterLoss
+    : provisionalNetQuantity;
+
   const cleaningServiceTotal = quantity * excessImpurity * cleaningTariff;
-  const dryingServiceTotal = quantity * excessHumidity * dryingTariff;
+  const dryingServiceTotal = payOnGross ? 0 : quantity * excessHumidity * dryingTariff;
   const preliminaryServicesTotal = cleaningServiceTotal + dryingServiceTotal;
-  const preliminaryMerchandiseValue = provisionalNetQuantity * 1000 * price; // kg × lei/kg
+  const preliminaryMerchandiseValue = payableQuantity * 1000 * price; // kg × lei/kg
   // Aceeasi regula ca in backend (computeReceiptEstimate): costul marfii ramane BRUT, iar impozitul
   // retinut la sursa se scade din datoria catre furnizor. Serviciile NU se scad (barter, plati).
   const withholdingPercent = Number(fiscalProfile?.withholdingPercent || 0);
@@ -4599,6 +5220,9 @@ function getReceiptEstimate() {
     humidityNorm,
     impurityNorm,
     provisionalNetQuantity,
+    payOnGrossQuantity: payOnGross,
+    payableQuantity,
+    excessHumidity,
     preliminaryServicesTotal,
     preliminaryMerchandiseValue,
     withholdingPercent,
@@ -4619,12 +5243,36 @@ function toggleNewSupplierInput() {
   }
 }
 
+// Bifa are sens doar cand umiditatea depaseste norma — altfel nu se scade apa oricum,
+// iar o bifa fara efect e o invitatie la greseli. Cand dispare, se si debifeaza: altfel
+// ar ramane bifata pe o receptie unde nu inseamna nimic si ar deruta la verificare.
+function renderPayOnGrossField(estimate) {
+  if (!payOnGrossWrap || !payOnGrossInput) return;
+  const excess = Number(estimate.excessHumidity || 0);
+  const relevant = excess > 0;
+  payOnGrossWrap.hidden = !relevant;
+  if (!relevant) {
+    payOnGrossInput.checked = false;
+    return;
+  }
+  if (!payOnGrossHintEl) return;
+  const netKg = (estimate.provisionalNetQuantity || 0) * 1000;
+  const payKg = (estimate.payableQuantity || 0) * 1000;
+  const head = `${bi("Umiditate peste norma")}: +${formatNumber(excess)}%.`;
+  const body = estimate.payOnGrossQuantity
+    ? bi("Se plateste masa cu apa, uscarea nu se taxeaza. In stoc intra masa fara apa.")
+    : bi("Acum se plateste masa fara apa si se taxeaza uscarea. Bifeaza daca intelegerea e pe masa cu apa.");
+  payOnGrossHintEl.textContent =
+    `${head} ${body} (${formatNumber(payKg)} kg -> plata / ${formatNumber(netKg)} kg -> stoc)`;
+}
+
 function renderReceiptEstimate() {
   if (!currentConfig) {
     return;
   }
 
   const estimate = getReceiptEstimate();
+  renderPayOnGrossField(estimate);
   estimateHumidityNormEl.textContent = `${formatNumber(estimate.humidityNorm)}%`;
   estimateImpurityNormEl.textContent = `${formatNumber(estimate.impurityNorm)}%`;
   // Net provizoriu afisat in kg (calculul e in tone)
@@ -5126,6 +5774,7 @@ async function createReceipt(formData) {
     price: formData.get("price") || "0",
     humidity: formData.get("humidity") || String(selectedProduct?.humidityNorm ?? 0),
     impurity: formData.get("impurity") || String(selectedProduct?.impurityNorm ?? 0),
+    payOnGrossQuantity: Boolean(payOnGrossInput && payOnGrossInput.checked),
     vehicle: formData.get("vehicle"),
     contact: formData.get("contact"),
     note: formData.get("note"),
@@ -5296,7 +5945,8 @@ function resetReceiptForm(mode = "save") {
     receivedBy: preserveContext ? userSelect.value : "",
     price: preserveContext ? formEl.elements.price.value : "",
     humidity: preserveContext ? humidityInput.value : "",
-    impurity: preserveContext ? impurityInput.value : ""
+    impurity: preserveContext ? impurityInput.value : "",
+    payOnGross: preserveContext && Boolean(payOnGrossInput && payOnGrossInput.checked)
   };
 
   formEl.reset();
@@ -5314,6 +5964,7 @@ function resetReceiptForm(mode = "save") {
   formEl.elements.price.value = preservedValues.price || "";
   humidityInput.value = preservedValues.humidity || "";
   impurityInput.value = preservedValues.impurity || "";
+  if (payOnGrossInput) payOnGrossInput.checked = preservedValues.payOnGross;
   if (grossWeightInput) grossWeightInput.value = "";
   if (tareWeightInput) tareWeightInput.value = "";
   formEl.elements.vehicle.value = "";
@@ -5765,7 +6416,7 @@ function renderTransactionPreview() {
   const direction = transactionDirectionSelect.value;
 
   if (referenceType === "delivery" && delivery) {
-    const targetAmount = Number(delivery.contractPrice || 0) * Number(delivery.deliveredQuantity || 0);
+    const targetAmount = deliveryReceivableTonnePrice(delivery) * Number(delivery.deliveredQuantity || 0);
     transactionPartnerEl.textContent = delivery.customer || "-";
     transactionTargetEl.textContent = currency.format(targetAmount);
     transactionStatusEl.textContent =
@@ -6235,8 +6886,14 @@ function fillHeaderCompanySelects() {
   });
 }
 
+// Formatter la nivel de modul: `moneyRo` se cheama pe fiecare rand al documentelor tiparite.
+const moneyFormatter = new Intl.NumberFormat("ro-RO", {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2
+});
+
 function moneyRo(n) {
-  return new Intl.NumberFormat("ro-RO", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(n) || 0);
+  return moneyFormatter.format(Number(n) || 0);
 }
 
 function buildStatementPrintHtml(data, company) {
@@ -6316,8 +6973,11 @@ function resolveCompany(companyId) {
 
 // Fereastra de tipar „oficiala" — reproduce fidel formularele originale (fara branding AgroProfit,
 // fara subsol). Alb-negru, Times New Roman, format A4. Fiecare builder isi aduce structura proprie.
-function openOfficialDocWindow(bodyHtml, title) {
-  const win = window.open("", "_blank");
+// `win` opțional: fereastra se poate deschide INAINTE, in gestul utilizatorului. Dupa un
+// `await` (ex. cererea numarului de act), `window.open` e blocat de blocatorul de pop-up,
+// fiindca s-a pierdut contextul gestului — iar contabilul ar rămâne fara document.
+function openOfficialDocWindow(bodyHtml, title, win) {
+  win = win || window.open("", "_blank");
   if (!win) {
     alert("Permite ferestrele pop-up pentru a printa documentul.");
     return;
@@ -6334,6 +6994,10 @@ function openOfficialDocWindow(bodyHtml, title) {
   .of-ru { font-style:italic; font-size:9px; font-weight:400; }
   .of-cap { font-size:8px; font-style:italic; text-align:center; }
   .of-row { margin:5px 0; }
+  /* Actul de achizitie incepe mai jos pe foaie: formularul tipizat se stampileaza si se
+     indosariaza, deci are nevoie de spatiu liber sus. Scoped la act — contractul si
+     celelalte documente isi pastreaza incadrarea. */
+  .of-act { padding-top:14mm; }
   .of-fill { border-bottom:1px solid #000; display:inline-block; min-width:80px; padding:0 4px; }
   .of-b { font-weight:bold; }
   .of-c { text-align:center; }
@@ -6432,11 +7096,6 @@ function receiptNetKg(receipt) {
   return Number(receipt.provisionalNetQuantity || receipt.quantity || 0) * 1000;
 }
 
-function receiptPrintValue(receipt) {
-  const stored = Number(receipt.amountToPay || receipt.preliminaryPayableAmount || 0);
-  if (stored > 0) return stored;
-  return receiptNetKg(receipt) * (Number(receipt.price) || 0);
-}
 
 
 // 1) ACT DE ACHIZITIE A MARFURILOR — fidel formularului oficial bilingv RO/RU (dintr-o receptie).
@@ -6452,16 +7111,28 @@ function partnerWithholdingPercent(partner) {
 
 // Cantitate (kg) + valoare (bruta) + pret derivat pentru o receptie, pe act (cantitate × pret = valoare).
 function actReceiptFigures(receipt) {
-  // Cantitatea = aceeași bază ca in tabelul Recepții (net provizoriu × 1000 = kg).
-  const netKg = Number(receipt.provisionalNetQuantity || receipt.quantity || 0) * 1000
-    || Number(receipt.netWeight) || 0;
-  // Prețul = EXACT cel introdus la recepție (lei/kg), NU derivat din valoare ÷ cantitate.
-  const price = Number(receipt.price) || 0;
-  // Valoarea (brută, cost) = cantitate × preț, exact — ca „col.5 = col.3 × col.4" să iasă perfect.
-  // Doar dacă lipsește prețul, cădem pe valoarea brută stocată.
-  const value = price > 0 && netKg > 0
-    ? Number((netKg * price).toFixed(2))
-    : Number(receipt.preliminaryMerchandiseValue) || 0;
+  // Cantitatea de pe act = cea pe care s-au calculat BANII, nu cea intrata in stoc.
+  // Cand plata s-a convenit pe masa cu umiditate (`payOnGrossQuantity`), apa se pune
+  // inapoi — doar apa, impuritatile raman scazute. Oglinda lui `receiptPayableTonnes`
+  // din src/local-storage.js; se schimba in AMBELE locuri.
+  // Fara asta, actul semnat de furnizor arata o suma mai mica decat datoria inregistrata.
+  const payableTonnes = Number(receipt.provisionalNetQuantity || receipt.quantity || 0)
+    + (receipt.payOnGrossQuantity === true ? Number(receipt.estimatedWaterLoss || 0) : 0);
+  const netKg = payableTonnes * 1000 || Number(receipt.netWeight) || 0;
+  // Valoarea BRUTĂ e cea de pe document (`preliminaryMerchandiseValue`), nu o recalculare din
+  // preț: prețul (și cel derivat de ✎, în lei/kg brut) e rotunjit la 4 zecimale, iar
+  // „cantitate × preț" ar cădea la câțiva lei de brutul înregistrat — exact diferența care ar
+  // reapărea apoi ca reținere fantomă. Aceeași bază ca actul tipărit din Livrări.
+  const storedGross = Number(receipt.preliminaryMerchandiseValue) || 0;
+  const entryPrice = Number(receipt.price) || 0;
+  const value = storedGross > 0
+    ? Number(storedGross.toFixed(2))
+    : entryPrice > 0 && netKg > 0
+    ? Number((netKg * entryPrice).toFixed(2))
+    : 0;
+  // Pretul afisat se DERIVA din valoare, ca „col.5 = col.3 × col.4" sa fie adevarat pe
+  // hartie. Aceeasi regula ca in actul din Livrari.
+  const price = netKg > 0 && value > 0 ? actDerivePrice(value, netKg) : entryPrice;
   return { netKg, price, value };
 }
 
@@ -6469,24 +7140,307 @@ function actReceiptFigures(receipt) {
 // Impozitul la buget = valoare × procent (din nomenclator); Total de plata = valoare − impozit.
 // Numar cu separator de mii = SPATIU (ex. „8 220", „49 320,00") — fara echivoc pe actul oficial,
 // ca sa nu para 8220 kg drept 8,22 (in ro-RO punctul e separator de mii). Zecimala ramane virgula.
+// Capul de tabel al formularului tipizat afirma „5 = 3 x 4". Pretul de pe act e DERIVAT
+// (valoare / cantitate), iar tiparit cu 2 zecimale rupea relatia cu pana la cativa lei — pe
+// un document care e temeiul platii si al impozitului reținut la sursa. Mai rau: codul QR
+// purta pretul cu 4 zecimale, deci hartia si codul scanat de pe acelasi act aratau altceva.
+//
+// Regula NU e „cate zecimale are pretul" (nu ajunge: 836,16 kg x 6,1234 = 5 120,14 fata de
+// 5 120,16 inregistrat), ci „cate zecimale fac inmultirea sa se inchida". Se ia prima
+// precizie care iese; un pret rotund ramane „6,15", nu „6,1500".
+// Prețul de pe act, derivat din valoare, cu prima precizie (2..6 zecimale) la care
+// `cantitate x preț = valoare` se închide la ban. Rotunjirea fixă la 4 zecimale rupea
+// relația afirmată în capul de tabel al formularului tipizat.
+function actDerivePrice(value, netKg) {
+  for (const dec of [2, 3, 4, 5, 6]) {
+    const p = Number((value / netKg).toFixed(dec));
+    if (Math.abs(netKg * p - value) < 0.005) return p;
+  }
+  return Number((value / netKg).toFixed(6));
+}
+
+function actPriceDecimals(price, netKg, value) {
+  const p = Number(price) || 0;
+  const kg = Number(netKg) || 0;
+  const val = Number(value) || 0;
+  for (const dec of [2, 3, 4, 5, 6]) {
+    if (kg <= 0 || val <= 0) {
+      // Fara cantitate sau fara valoare nu exista relatie de inchis: se afiseaza pretul cum e.
+      if (Math.abs(p - Number(p.toFixed(dec))) < 1e-9) return dec;
+      continue;
+    }
+    if (Math.abs(kg * Number(p.toFixed(dec)) - val) < 0.005) return dec;
+  }
+  return 6;
+}
+
+// `dec` variaza (2..6 zecimale pe pretul derivat), deci formatterele se tin intr-un cache
+// mic — se construiesc cel mult de cateva ori, nu la fiecare celula a actului.
+const actFormatters = new Map();
+
+function actFormatter(dec) {
+  const cheie = Number(dec) || 0;
+  if (!actFormatters.has(cheie)) {
+    actFormatters.set(
+      cheie,
+      new Intl.NumberFormat("ro-RO", { minimumFractionDigits: cheie, maximumFractionDigits: cheie })
+    );
+  }
+  return actFormatters.get(cheie);
+}
+
 function actNum(n, dec) {
-  return new Intl.NumberFormat("ro-RO", { minimumFractionDigits: dec, maximumFractionDigits: dec })
+  return actFormatter(dec)
     .format(Number(n) || 0)
     .replace(/\./g, " ");
 }
 
-function buildPurchaseActHtml(receipts, partner, company) {
-  const p = partner || {};
-  const co = company || DEFAULT_COMPANY;
-  const rows = (receipts || []).filter(Boolean).map((r) => ({ r, ...actReceiptFigures(r) }));
-  const totalKg = rows.reduce((s, x) => s + x.netKg, 0);
+// Textul din codul QR al actului: datele documentului, ca sa poata fi citite cu telefonul
+// fara cont si fara internet. Doar ASCII (diacriticele ar dubla octetii si ar scoate textul
+// din capacitatea codului) si scurtat la ce incape: identificarea partilor si banii.
+// ATENTIE: textul intors NU e escapat pentru HTML (pastreaza < > " ' &). E facut sa intre
+// intr-un cod QR, unde ajunge sir de biti. Daca vreodata se afiseaza pe pagina (sub cod, in
+// `title`, oriunde), trece-l intai prin `escapeComboHtml`.
+function actQrPayload({ company, partner, series, nr, dateText, rows, value, tax, netPay }) {
+  // Chirilicele din nomenclator (nomenclatorul e bilingv) s-ar pierde la filtrul ASCII, iar
+  // linia „Furnizor" ar ramane goala. Transliterare minima, ca numele sa fie recunoscibil.
+  const CHIRILICE = {
+    а: "a", б: "b", в: "v", г: "g", д: "d", е: "e", ё: "e", ж: "j", з: "z", и: "i", й: "i",
+    к: "k", л: "l", м: "m", н: "n", о: "o", п: "p", р: "r", с: "s", т: "t", у: "u", ф: "f",
+    х: "h", ц: "t", ч: "ci", ш: "s", щ: "sci", ъ: "", ы: "i", ь: "", э: "e", ю: "iu", я: "ia"
+  };
+  const ascii = (v) => String(v || "")
+    .replace(/[\u0400-\u04FF]/g, (m) => {
+      const mic = CHIRILICE[m.toLowerCase()] || "";
+      return m === m.toUpperCase() && mic ? mic.charAt(0).toUpperCase() + mic.slice(1) : mic;
+    })
+    .replace(/[—–]/g, "-")
+    .replace(/[ăâ]/gi, (m) => (m === m.toUpperCase() ? "A" : "a"))
+    .replace(/[îí]/gi, (m) => (m === m.toUpperCase() ? "I" : "i"))
+    .replace(/[șş]/gi, (m) => (m === m.toUpperCase() ? "S" : "s"))
+    .replace(/[țţ]/gi, (m) => (m === m.toUpperCase() ? "T" : "t"))
+    .replace(/[^\x20-\x7E]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const bani = (n) => actNum(n, 2).replace(/\s/g, "");
+  // IDNP-ul furnizorului NU intra in cod (decizia proprietarului, 25.09.2026). Pe hartie
+  // apare intreg, fiindca formularul il cere, dar in QR ar deveni extractibil automat din
+  // orice fotografie a actului. Documentul ramane identificabil prin firma si IDNO, seria,
+  // numarul si data actului.
+  const marfa = rows.length === 1
+    ? `${ascii(rows[0].r.product)} ${bani(rows[0].netKg)}kg x ${actNum(rows[0].price, 4).replace(/\s/g, "")}`
+    : `${rows.length} pozitii`;
+  // `nr` e „____" (numarul se completeaza de mana pe formular), deci singurul identificator
+  // stabil sunt recepțiile din act: fara ele, doua acte ale aceluiasi furnizor din aceeasi zi
+  // ar avea coduri identice.
+  const idReceptii = rows.map((x) => x.r.id).filter(Boolean).join(",");
+  const build = (numeFirma) => [
+    `${numeFirma} IDNO ${ascii(company.idno)}`,
+    `Act ${ascii(series) || "-"} ${ascii(nr)} din ${ascii(dateText)}${idReceptii ? ` (rec. ${idReceptii})` : ""}`,
+    `Furnizor ${ascii(partner.name)}`,
+    marfa,
+    `Val ${bani(value)} Ret ${bani(tax)} Plata ${bani(netPay)} lei`
+  ].join("\n");
+
+  // Capacitatea codului e de 213 de octeti. Scurtam in ordinea importantei: intai numele
+  // firmei (IDNO-ul o identifica oricum), apoi detaliul marfii. Identificarea partilor si
+  // suma de plata raman mereu.
+  let text = build(ascii(company.name));
+  if (text.length > 213) text = build(ascii(company.name).slice(0, 40).trim());
+  if (text.length > 213) {
+    const linii = build(ascii(company.name).slice(0, 40).trim()).split("\n");
+    linii.splice(3, 1);
+    text = linii.join("\n");
+  }
+  return text.slice(0, 213);
+}
+
+// Numarul actului de achizitie. Decide pe UN SINGUR act si spune clar ce urmeaza:
+//   { status: "ok", act }      -> se tipareste cu numarul si cifrele INGHEȚATE
+//   { status: "fara-numar" }   -> legitim fara numar (achizitie de la firma): linia goala
+//   { status: "abort" }        -> NU se tipareste; motivul a fost deja afisat
+//
+// Garzile de pe server nu se vad din interfata daca aici se iese din scurt: inainte se lua
+// `actNumber` de la o receptie si `actFigures` de la ALTA, deci se putea tipari numarul
+// actului A peste conținutul actului B.
+async function ensureActNumber(receipts, company, partner) {
+  const lista = (receipts || []).filter(Boolean);
+  if (!lista.length) return { status: "abort" };
+  const purtator = [...lista]
+    .sort((a, b) => new Date(a.receivedAt || a.createdAt) - new Date(b.receivedAt || b.createdAt))[0];
+
+  const acoperite = lista.filter((r) => Number(r.actNumber || 0) > 0);
+  if (acoperite.length) {
+    // TOATE receptiile cu numar trebuie sa fie pe ACELASI act.
+    const chei = new Set(
+      acoperite.map((r) => `${Number(r.actCompanyId || 0)}:${Number(r.actNumber)}`)
+    );
+    if (chei.size > 1) {
+      alert(
+        "Selecția conține recepții de pe acte diferite: " +
+        acoperite.map((r) => `#${r.id} → ${r.actSeries || ""} ${r.actNumber}`).join(", ") +
+        ". Tipărește fiecare act separat."
+      );
+      return { status: "abort" };
+    }
+    const emisa = acoperite[0];
+    // Captura sta pe PURTATOR. Celelalte receptii ale actului au doar o referinta
+    // (`actCarrierId`), ca blobul sa nu purte N copii ale aceleiasi capturi. Daca selectia
+    // nu include purtatorul, il luam din cache.
+    const cuCifre =
+      acoperite.find((r) => r.actFigures) ||
+      (receiptsCache || []).find(
+        (r) =>
+          r &&
+          r.actFigures &&
+          acoperite.some((a) => Number(a.actCarrierId || 0) === Number(r.id))
+      ) ||
+      null;
+    if (!cuCifre) {
+      // Numar fara captura = act emis inainte ca cifrele sa fie inghetate. Tiparit, ar scoate
+      // aceeasi serie si acelasi numar cu cifrele de azi.
+      alert(
+        `Actul ${emisa.actSeries || ""} ${emisa.actNumber} a fost emis fără captura cifrelor. ` +
+        "Nu se poate retipări identic — folosește hârtia din dosar."
+      );
+      return { status: "abort" };
+    }
+    // Selectia trebuie sa fie o PARTE din actul emis, nu un amestec cu marfa noua: altfel
+    // actul vechi s-ar tipari cu alt conținut, iar marfa noua ar rămâne pe niciun act.
+    // Garda exista si pe server, dar aici nu se mai ajunge la el.
+    const aleActului = (cuCifre.actFigures.receiptIds || []).map(Number);
+    const strain = lista.find((r) => !aleActului.includes(Number(r.id)));
+    if (strain) {
+      alert(
+        `Recepțiile ${aleActului.join(", ")} sunt deja pe actul ${emisa.actSeries || ""} ${emisa.actNumber}, ` +
+        `iar #${strain.id} nu. Emite un act separat pentru ea sau restrânge perioada.`
+      );
+      return { status: "abort" };
+    }
+    return {
+      status: "ok",
+      act: {
+        actNumber: emisa.actNumber,
+        actSeries: emisa.actSeries || "",
+        actFigures: cuCifre.actFigures
+      }
+    };
+  }
+
+  // Actul de achizitie se intocmeste doar la cumpararea de la PERSOANE FIZICE. Pentru firme
+  // nu se consuma numar — nu e eroare, e documentul fara rubrica de numar completata.
+  if (!(partnerWithholdingPercent(partner || {}) > 0)) {
+    return { status: "fara-numar" };
+  }
+
+  try {
+    const res = await fetch(`/api/receipts/${purtator.id}/act-number`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        companyId: company?.id,
+        // TOATE receptiile acoperite de aceasta hartie primesc numarul.
+        receiptIds: lista.map((r) => r.id)
+      })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      alert(err.error || "Nu am putut obține numărul actului. Încearcă din nou.");
+      return { status: "abort" };
+    }
+    const data = await res.json();
+    if (!data.actFigures) {
+      alert("Numărul s-a atribuit, dar cifrele actului nu s-au înregistrat. Nu tipări: reîncearcă.");
+      return { status: "abort" };
+    }
+    // Cache: cifrele pe TOATE, ca serverul. Puse doar pe purtator, tiparirea imediata de pe
+    // alt rand dadea alerta falsa „emis fara captura" si apoi un act fara numar.
+    for (const r of lista) {
+      r.actNumber = data.actNumber;
+      r.actSeries = data.actSeries;
+      r.actFigures = data.actFigures;
+    }
+    return {
+      status: "ok",
+      act: { actNumber: data.actNumber, actSeries: data.actSeries, actFigures: data.actFigures }
+    };
+  } catch (err) {
+    console.error("Nu am putut obtine numarul actului:", err);
+    alert("Nu am putut obține numărul actului (eroare de rețea). Nu s-a tipărit nimic.");
+    return { status: "abort" };
+  }
+}
+
+function buildPurchaseActHtml(receipts, partner, company, act) {
+  const inghetatFirma = act && act.actFigures ? act.actFigures : null;
+  // Pe un act emis, firma si furnizorul sunt cei de la EMITERE: altfel reselectarea unei alte
+  // firme in „Documente tipar" scotea antetul firmei B cu seria si numarul firmei A, iar
+  // redenumirea furnizorului schimba numele vanzatorului de pe hartia deja semnata.
+  // Antetul si identitatea partilor vin din CAPTURA, nu din nomenclatorul de acum.
+  // `resolveCompany` nu se foloseste aici: la dezactivarea firmei emitente ar cadea pe prima
+  // firma activa — alt emitent sub acelasi numar. Captura e completa, deci nu e nevoie.
+  const firmaInghetata = inghetatFirma && inghetatFirma.company ? inghetatFirma.company : null;
+  const p = inghetatFirma && inghetatFirma.supplierName
+    ? {
+        ...(partner || {}),
+        name: inghetatFirma.supplierName,
+        // Rubrica legala a formularului: IDNP + adresa. Se citeau LIVE, deci completarea
+        // IDNP-ului dupa semnare schimba hartia retiparita.
+        idno: inghetatFirma.supplierIdno || (partner || {}).idno || "",
+        address: inghetatFirma.supplierAddress || (partner || {}).address || ""
+      }
+    : partner || {};
+  const co = firmaInghetata
+    ? { ...DEFAULT_COMPANY, ...firmaInghetata, series: inghetatFirma.series || "" }
+    : company || DEFAULT_COMPANY;
+  // Pe un act DEJA EMIS randurile vin din cifrele INGHEȚATE atunci, nu din recalculul de
+  // acum: altfel, dupa o corectie de suma, actul se contrazicea pe aceeasi hartie — rand
+  // 35.756,10 sub un total de 17.878,05, pe un formular care afirma „5 = 3 x 4".
+  const inghetatIn = act && act.actFigures ? act.actFigures : null;
+  const rows = inghetatIn && Array.isArray(inghetatIn.rows) && inghetatIn.rows.length
+    ? inghetatIn.rows.map((snap) => {
+        const r = (receipts || []).find((x) => x && Number(x.id) === Number(snap.id)) || { id: snap.id };
+        const netKg = Number(snap.netKg) || 0;
+        const value = Number(snap.value) || 0;
+        return {
+          // Denumirea se ia din captura: nomenclatorul se poate redenumi dupa emitere.
+          r: { ...r, product: snap.product || r.product },
+          netKg,
+          value,
+          price: netKg > 0 && value > 0 ? actDerivePrice(value, netKg) : 0
+        };
+      })
+    : (receipts || []).filter(Boolean).map((r) => ({ r, ...actReceiptFigures(r) }));
   const value = Number(rows.reduce((s, x) => s + x.value, 0).toFixed(2));
   const taxPercent = partnerWithholdingPercent(p);
-  const tax = Number(((value * taxPercent) / 100).toFixed(2));
-  const netPay = Number((value - tax).toFixed(2));
-  const nr = "____";
-  const words = escapeComboHtml(numberToWordsRo(value));
-  const dates = rows.map((x) => x.r.receivedAt || x.r.createdAt).filter(Boolean).sort();
+  // „Total de plata" = datoria INREGISTRATA pe document, nu o recalculare din cota de azi.
+  // Doua motive, amandoua vazute in date:
+  //  1. dupa ajustarea manuala a sumei (✎), `price` de pe receptie devine lei/kg NET, deci
+  //     `value` e deja suma neta — scazand inca o data impozitul, actul semnat de furnizor
+  //     arata 0,94 din datoria reala, iar extrasul de cont arata altceva;
+  //  2. cota se poate schimba in nomenclator dupa receptie, iar retinerea e INGHETATA pe
+  //     document (`withholdingAmount`) — reprintarea trebuie sa dea aceeasi cifra.
+  // Impozitul ramane diferenta brut − net, exact ca pe actul tiparit din livrare.
+  const netPay = Number(rows.reduce((sum, x) => {
+    const stored = Number(x.r.amountToPay ?? x.r.preliminaryPayableAmount ?? 0);
+    return sum + (stored > 0 ? stored : x.value - (x.value * taxPercent) / 100);
+  }, 0).toFixed(2));
+  const tax = Math.max(Number((value - netPay).toFixed(2)), 0);
+  // Pe un act DEJA EMIS se tiparesc cifrele inghetate atunci, nu recalculul de acum: o
+  // corectie ulterioara de pret sau de bifa ar face ca aceeasi serie si acelasi numar sa
+  // arate alte cifre decat hartia semnata. Actul nou cere numar nou.
+  const inghetat = inghetatIn;
+  const valueTiparit = inghetat ? Number(inghetat.value) : value;
+  const netPayTiparit = inghetat ? Number(inghetat.netPay) : netPay;
+  const taxTiparit = inghetat ? Number(inghetat.tax) : tax;
+  const kgTiparit = inghetat ? Number(inghetat.netKg) : rows.reduce((s, x) => s + x.netKg, 0);
+  const nr = act && Number(act.actNumber) > 0 ? String(act.actNumber) : "____";
+  const seria = (act && act.actSeries) || co.series || co.shortName || "";
+  const words = escapeComboHtml(numberToWordsRo(valueTiparit));
+  const dates = (inghetatIn && Array.isArray(inghetatIn.rows)
+    ? inghetatIn.rows.map((r) => r.date)
+    : rows.map((x) => x.r.receivedAt || x.r.createdAt)
+  ).filter(Boolean).sort();
   const dateText = dates.length
     ? (dates[0] === dates[dates.length - 1]
       ? formatDateShort(dates[0])
@@ -6497,63 +7451,210 @@ function buildPurchaseActHtml(receipts, partner, company) {
           <td>${escapeComboHtml(x.r.product || "")}</td>
           <td class="of-c">kg</td>
           <td class="of-r">${actNum(x.netKg, 2)}</td>
-          <td class="of-r">${actNum(x.price, 2)}</td>
+          <td class="of-r">${actNum(x.price, actPriceDecimals(x.price, x.netKg, x.value))}</td>
           <td class="of-r">${actNum(x.value, 2)}</td>
         </tr>`).join("");
+  // Codul QR cu datele actului (generat local, vezi public/qr.js). Daca generatorul lipseste
+  // sau textul nu incape, actul se tipareste pur si simplu fara cod — hartia ramane valida.
+  const qrTag = (() => {
+    if (typeof qrMatrix !== "function" || typeof qrSvg !== "function") return "";
+    try {
+      const matrix = qrMatrix(actQrPayload({
+        company: co, partner: p, series: seria, nr,
+        dateText, rows, value: valueTiparit, tax: taxTiparit, netPay: netPayTiparit
+      }));
+      return matrix ? qrSvg(matrix, 96) : "";
+    } catch (err) {
+      // Codul e o comoditate de citire; actul fara el ramane valid. O eroare la generare nu
+      // are voie sa lase contabilul fara document.
+      console.error("Cod QR nereusit pentru actul de achizitie:", err);
+      return "";
+    }
+  })();
+  // Rand gol: pe formularul tipizat tabelul are o linie libera sub cea numerotata.
+  const emptyRow = `<tr><td>&nbsp;</td><td></td><td></td><td></td><td></td></tr>`;
+  // Linie punctata cu eticheta dedesubt, ca pe formular.
+  // `text`, nu `value`: in functie exista deja `value` (valoarea totala a actului), iar un
+  // parametru cu acelasi nume ar umbri-o la prima editare a formularului.
+  const ln = (text, min) => `<span class="of-fill" style="min-width:${min}px;">${escapeComboHtml(text || "")}</span>`;
+  const cap = (ro, ru) => `<div class="of-cap">${ro}${ru ? ` (${ru})` : ""}</div>`;
   return `
-    <table style="width:100%;border-collapse:collapse;"><tr>
-      <td style="width:60px;text-align:center;font-size:16px;">◯</td>
-      <td><div class="of-title">Act de achiziție a mărfurilor<small class="of-ru">Акт закупки товаров</small></div></td>
-      <td style="width:150px;font-size:11px;">Seria <span class="of-fill">${escapeComboHtml(co.series || co.shortName || "")}</span><br>Nr. <span class="of-fill">${escapeComboHtml(nr)}</span></td>
+    <div class="of-act">
+    <table style="width:100%;border-collapse:collapse;margin-bottom:6px;"><tr>
+      <td style="width:90px;vertical-align:top;">${co.logoUrl ? `<img src="${escapeComboHtml(co.logoUrl)}" style="max-width:80px;max-height:80px;">` : ""}</td>
+      <td style="vertical-align:top;">${qrTag}</td>
+      <td></td>
     </tr></table>
-    <div class="of-row of-c">din <span class="of-fill">${dateText}</span></div>
+    <table style="width:100%;border-collapse:collapse;"><tr>
+      <td><div style="font-weight:bold;font-size:15px;text-transform:uppercase;">Act de achiziție a mărfurilor</div></td>
+      <td style="width:230px;font-weight:bold;font-size:13px;">Seria ${ln(seria, 60)} &nbsp; Nr. ${ln(nr, 70)}</td>
+    </tr></table>
 
-    <div class="of-row"><span class="of-fill" style="min-width:340px;">${escapeComboHtml(co.name || "")}</span>, IDNO <span class="of-fill">${escapeComboHtml(co.idno || "")}</span>
-      <div class="of-cap">Denumirea și rechizitele întreprinderii, adresa / Наименование, реквизиты предприятия, адрес</div></div>
-    <div class="of-row">${escapeComboHtml(co.address || "")}${co.vatCode ? " · Cod TVA " + escapeComboHtml(co.vatCode) : ""}</div>
-    <div class="of-row">Conducătorul unității: <span class="of-fill">${escapeComboHtml(co.admin || "")}</span> <span class="of-cap">/ Руководитель</span></div>
+    <table style="width:100%;border-collapse:collapse;margin-top:6px;"><tr>
+      <td style="width:55%;vertical-align:top;">
+        <div><span class="of-b">din</span> ${ln(dateText, 160)}</div>
+        <div class="of-ru" style="margin-left:2px;">от</div>
+      </td>
+      <td style="width:45%;vertical-align:top;font-size:11px;">
+        <div class="of-b">Primit în baza contractului</div>
+        <div class="of-ru">Принято в счет договора</div>
+        <div style="margin-top:10px;"><span class="of-b">nr.</span> ${ln(nr, 70)} <span class="of-b">din</span> ${ln(dateText, 90)}</div>
+        <div class="of-ru">№ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; от</div>
+      </td>
+    </tr></table>
 
-    <div class="of-row">Primit marfa <span class="of-fill" style="min-width:260px;">${escapeComboHtml(co.admin || "")}</span>
-      <div class="of-cap">numele, prenumele / Принял товар — фамилия, имя</div></div>
-    <div class="of-row">Predat marfa <span class="of-fill" style="min-width:260px;">${escapeComboHtml(p.name || "")}</span>
-      <div class="of-cap">numele, prenumele / Сдал товар — фамилия, имя</div></div>
-    <div class="of-row">Codul personal / IDNP, datele buletinului de identitate, adresa:
-      <span class="of-fill" style="min-width:340px;">${escapeComboHtml([p.idno, p.address].filter(Boolean).join(", "))}</span></div>
+    <div style="margin-top:10px;border-bottom:1px solid #000;text-align:center;font-weight:bold;padding-bottom:1px;">
+      ${escapeComboHtml([co.name, co.address].filter(Boolean).join(", "))}</div>
+    ${cap("denumirea entitatii, adresa", "наименование субъекта, адрес")}
 
-    <table class="of-tbl">
+    <table style="width:100%;border-collapse:collapse;margin-top:10px;"><tr>
+      <td style="width:45%;vertical-align:top;">
+        <div><span class="of-b">Cod fiscal/IDNO</span> ${ln(co.idno, 150)}</div>
+        <div class="of-ru">Фискальный код/IDNO</div>
+      </td>
+      <td style="width:55%;vertical-align:top;">
+        <table style="width:100%;border-collapse:collapse;"><tr>
+          <td style="width:45%;font-size:11px;">
+            <div class="of-b">Conducătorul entitatii /</div>
+            <div class="of-b">persoana imputernicita</div>
+            <div class="of-ru">Руководитель субъекта /</div>
+            <div class="of-ru">уполномоченное лицо</div>
+          </td>
+          <td style="vertical-align:top;">
+            <div style="border-bottom:1px solid #000;text-align:center;font-weight:bold;padding-bottom:1px;">${escapeComboHtml(co.admin || "")}</div>
+            ${cap("numele, prenumele", "фамилия, имя")}
+          </td>
+        </tr></table>
+      </td>
+    </tr></table>
+
+    <table style="width:100%;border-collapse:collapse;margin-top:14px;"><tr>
+      <td style="width:22%;"><span class="of-b">Primit marfuri</span><div class="of-ru">Принял товары</div></td>
+      <td>
+        <div style="border-bottom:1px solid #000;text-align:center;font-weight:bold;padding-bottom:1px;">${escapeComboHtml(co.admin || "")}</div>
+        ${cap("numele, prenumele", "фамилия, имя")}
+      </td>
+    </tr></table>
+    <table style="width:100%;border-collapse:collapse;margin-top:10px;"><tr>
+      <td style="width:22%;"><span class="of-b">Predat marfuri</span><div class="of-ru">Сдал товары</div></td>
+      <td>
+        <div style="border-bottom:1px solid #000;text-align:center;font-weight:bold;padding-bottom:1px;">${escapeComboHtml(p.name || "")}</div>
+        ${cap("numele, prenumele", "фамилия, имя")}
+      </td>
+    </tr></table>
+
+    <div style="margin-top:16px;border-bottom:1px solid #000;text-align:center;padding-bottom:1px;">
+      ${escapeComboHtml([p.idno, p.address].filter(Boolean).join(", "))}</div>
+    ${cap("Codul personal / IDNP , datele buletinului de identitate, adresa", "идентификационный номер / IDNP, данные удостоверения личности , адрес")}
+
+    <table class="of-tbl" style="margin-top:10px;">
       <thead>
         <tr>
-          <th>Denumirea mărfurilor<br><span class="of-ru">Наименование товаров</span></th>
-          <th>Unit. de măsură<br><span class="of-ru">Единица измерения</span></th>
-          <th>Cantitate<br><span class="of-ru">Количество</span></th>
-          <th>Preț unitar, lei<br><span class="of-ru">Цена единицы, лей</span></th>
-          <th>Valoare, lei<br><span class="of-ru">Стоимость, лей</span></th>
+          <th style="text-align:left;">Denumirea mărfurilor<div class="of-ru">Наименование товаров</div></th>
+          <th style="text-align:left;width:70px;">Unit. de măsură<div class="of-ru">Единица измерения</div></th>
+          <th style="text-align:left;width:110px;">Cantitate<div class="of-ru">Количество</div></th>
+          <th style="text-align:left;width:90px;">Preț unitar, lei<div class="of-ru">Цена единицы, леев</div></th>
+          <th style="text-align:left;width:110px;">Valoare, lei<div class="of-ru">Стоимость, леев</div></th>
         </tr>
-        <tr><td class="of-c">1</td><td class="of-c">2</td><td class="of-c">3</td><td class="of-c">4</td><td class="of-c">5 = 3 × 4</td></tr>
+        <tr><td class="of-c">1</td><td class="of-c">2</td><td class="of-c">3</td><td class="of-c">4</td><td class="of-c">5= 3 x 4</td></tr>
       </thead>
-      <tbody>${bodyRows}
+      <tbody>${bodyRows}${emptyRow}
       </tbody>
       <tfoot>
-        <tr><td class="of-b">Total / Итого</td><td class="of-c">×</td><td class="of-r of-b">${actNum(totalKg, 2)}</td><td class="of-c">×</td><td class="of-r of-b">${actNum(value, 2)}</td></tr>
+        <tr><td class="of-b">Total / Итого</td><td class="of-c of-b">X</td><td class="of-c of-b">X</td><td class="of-c of-b">X</td><td class="of-r of-b">${actNum(valueTiparit, 2)}</td></tr>
       </tfoot>
     </table>
 
-    <div class="of-row"><span class="of-b">Valoarea totală / Общая стоимость:</span> <span class="of-fill" style="min-width:320px;">${words}</span>
-      <div class="of-cap">în litere / прописью</div></div>
-    <div class="of-row of-b">Rețineri / Удержания:</div>
-    <div class="of-row">— la buget / в бюджет${taxPercent > 0 ? ` (${formatNumber(taxPercent)}%)` : ""}:
-      <span class="of-fill" style="min-width:260px;">${escapeComboHtml(numberToWordsRo(tax))}</span> <span class="of-fill" style="min-width:110px;">${actNum(tax, 2)}</span>
-      <div class="of-cap">în litere / прописью &nbsp;·&nbsp; în cifre / цифрами</div></div>
-    <div class="of-row">— avansuri achitate / уплаченные авансы: <span class="of-fill" style="min-width:230px;"></span> <span class="of-fill" style="min-width:110px;"></span>
-      <div class="of-cap">în litere / прописью &nbsp;·&nbsp; în cifre / цифрами</div></div>
-    <div class="of-row"><span class="of-b">Total de plată / Общая сумма к оплате:</span>
-      <span class="of-fill" style="min-width:270px;">${escapeComboHtml(numberToWordsRo(netPay))}</span> <span class="of-fill" style="min-width:110px;">${actNum(netPay, 2)}</span>
-      <div class="of-cap">în litere / прописью &nbsp;·&nbsp; în cifre / цифрами</div></div>
+    <table style="width:100%;border-collapse:collapse;margin-top:10px;"><tr>
+      <td style="width:22%;vertical-align:bottom;"><span class="of-b">Valoarea totală</span><div class="of-ru">Общая стоимость</div></td>
+      <td style="vertical-align:bottom;">
+        <div style="border-bottom:1px solid #000;padding-bottom:1px;">${words}</div>
+        ${cap("în litere", "прописью")}
+      </td>
+      <td style="width:150px;"></td>
+    </tr></table>
 
-    <p class="of-just" style="margin-top:8px;">Declarația pe propria răspundere a persoanei fizice care a predat mărfurile: confirm că marfa îmi aparține, este liberă de sarcini și corespunde cantității și calității indicate. / Декларация под собственную ответственность физического лица, передавшего товары.</p>
-    <div class="of-sign">
-      <div class="col">Predat marfa / Сдал товар<div class="ln of-cap">semnătura / подпись</div></div>
-      <div class="col">Primit marfa / Принял товар<div class="ln of-cap">semnătura / подпись</div></div>
+    <div style="margin-top:10px;"><span class="of-b">Rețineri:</span><div class="of-ru">Удержания</div></div>
+    <table style="width:100%;border-collapse:collapse;margin-top:6px;"><tr>
+      <td style="width:22%;vertical-align:bottom;"><span class="of-b">la buget</span><div class="of-ru">в бюджет</div></td>
+      <td style="vertical-align:bottom;">
+        <div style="border-bottom:1px solid #000;padding-bottom:1px;">${escapeComboHtml(numberToWordsRo(taxTiparit))}</div>
+        ${cap("în litere", "прописью")}
+      </td>
+      <td style="width:170px;vertical-align:bottom;padding-left:10px;">
+        <div style="border-bottom:1px solid #000;text-align:center;padding-bottom:1px;">${actNum(taxTiparit, 2)}</div>
+        ${cap("în cifre", "цифрами")}
+      </td>
+    </tr></table>
+    <table style="width:100%;border-collapse:collapse;margin-top:10px;"><tr>
+      <td style="width:22%;vertical-align:bottom;"><span class="of-b">avansuri achitate</span><div class="of-ru">уплаченные авансы</div></td>
+      <td style="vertical-align:bottom;">
+        <div style="border-bottom:1px solid #000;padding-bottom:1px;">&nbsp;</div>
+        ${cap("în litere", "прописью")}
+      </td>
+      <td style="width:170px;vertical-align:bottom;padding-left:10px;">
+        <div style="border-bottom:1px solid #000;padding-bottom:1px;">&nbsp;</div>
+        ${cap("în cifre", "цифрами")}
+      </td>
+    </tr></table>
+    <table style="width:100%;border-collapse:collapse;margin-top:10px;"><tr>
+      <td style="width:22%;vertical-align:bottom;"><span class="of-b">Total de plata</span><div class="of-ru">Общая сумма к оплате</div></td>
+      <td style="vertical-align:bottom;">
+        <div style="border-bottom:1px solid #000;padding-bottom:1px;">${escapeComboHtml(numberToWordsRo(netPayTiparit))}</div>
+        ${cap("în litere", "прописью")}
+      </td>
+      <td style="width:170px;vertical-align:bottom;padding-left:10px;">
+        <div style="border-bottom:1px solid #000;text-align:center;padding-bottom:1px;">${actNum(netPayTiparit, 2)}</div>
+        ${cap("în cifre", "цифрами")}
+      </td>
+    </tr></table>
+
+    <table style="width:100%;border-collapse:collapse;margin-top:14px;"><tr>
+      <td style="width:22%;"><span class="of-b">Predat marfuri</span><div class="of-ru">Сдал товары</div></td>
+      <td style="width:45%;vertical-align:bottom;">
+        <div style="border-bottom:1px solid #000;padding-bottom:1px;">&nbsp;</div>
+        ${cap("semnătura", "подпись")}
+      </td>
+      <td></td>
+    </tr></table>
+
+    <div style="margin-top:16px;"><span class="of-b">Declarația pe propria răspundere a persoanei fizice care a predat mărfurile.</span>
+      <div class="of-ru">Декларация под собственную ответственность физического лица, передавшего товары</div></div>
+
+    <div style="margin-top:12px;"><span class="of-b">Declar ca marfurile predate sint obținute integral pe teritoriul Republicii Moldova:</span>
+      <div class="of-ru">Заявляю, что переданные товары полностью получены на территории Республики Молдова:</div></div>
+    <table style="width:100%;border-collapse:collapse;margin-top:12px;"><tr>
+      <td style="width:40%;">
+        <div style="border-bottom:1px solid #000;padding-bottom:1px;">&nbsp;</div>
+        ${cap("numele, prenumele", "фамилия, имя")}
+      </td>
+      <td></td>
+    </tr></table>
+    <table style="width:100%;border-collapse:collapse;margin-top:10px;"><tr>
+      <td style="width:40%;">
+        <div style="border-bottom:1px solid #000;padding-bottom:1px;">&nbsp;</div>
+        ${cap("semnătura", "подпись")}
+      </td>
+      <td></td>
+    </tr></table>
+
+    <div style="margin-top:18px;"><span class="of-b">Declarațiile și înscrisurile false, precum și însușirea averii străine se pedepsește conform legislației în vigoare.</span>
+      <div class="of-ru">Ложные заявления и записи, а также присвоение чужого имущества наказывается согласно действующему законодательству.</div></div>
+
+    <table style="width:100%;border-collapse:collapse;margin-top:12px;"><tr>
+      <td style="width:22%;"><span class="of-b">Primit marfuri</span><div class="of-ru">Принял товары</div></td>
+      <td style="width:45%;vertical-align:bottom;">
+        <div style="border-bottom:1px solid #000;padding-bottom:1px;">&nbsp;</div>
+        ${cap("semnătura", "подпись")}
+      </td>
+      <td></td>
+    </tr></table>
+
+    <table style="width:100%;border-collapse:collapse;margin-top:16px;"><tr>
+      <td style="width:14%;padding-left:40px;"><span class="of-b">L. Ș.</span><div class="of-ru">М.П.</div></td>
+      <td style="width:30%;vertical-align:bottom;"><div style="border-bottom:1px solid #000;padding-bottom:1px;">&nbsp;</div></td>
+      <td></td>
+    </tr></table>
     </div>`;
 }
 
@@ -6605,6 +7706,8 @@ function buildSaleContractHtml(partner, company) {
     ${pt("8.1. Neînțelegerile se rezolvă pe cale amiabilă, iar în caz contrar de instanța competentă, conform legislației Republicii Moldova.")}
     ${pt("8.2. Contractul este întocmit în două exemplare, câte unul pentru fiecare parte, cu aceeași valoare juridică.")}
     ${pt("8.3. Prezentul contract are aceeași valoare juridică pentru orice livrare efectuată de Vânzător, indiferent de actele de întocmire a livrării (anexă la contract, act de primire-predare, factură fiscală, act de verificare etc.).")}
+    ${pt("8.4. <b>Prelucrarea datelor cu caracter personal.</b> Prin semnarea prezentului contract, Vânzătorul — persoană fizică — își exprimă consimțământul liber, expres și neechivoc ca Cumpărătorul, în calitate de operator de date cu caracter personal, să prelucreze datele sale cu caracter personal: numele și prenumele, IDNP, datele actului de identitate, domiciliul, datele de contact și datele bancare. Scopul prelucrării este încheierea și executarea prezentului contract, întocmirea documentelor primare și a evidenței contabile, calcularea, reținerea și transferul impozitelor, precum și raportarea către autoritățile publice, conform <b>Legii nr. 133/2011 privind protecția datelor cu caracter personal</b> și legislației fiscale și contabile în vigoare.")}
+    ${pt("8.5. Datele se prelucrează pe durata contractului și se păstrează ulterior în termenele stabilite de legislația contabilă și fiscală; ele nu se transmit terților decât în cazurile prevăzute de lege sau autorităților îndreptățite. Vânzătorul are dreptul de acces, de intervenție și de opoziție asupra datelor sale, dreptul de a cere rectificarea sau ștergerea lor și dreptul de a se adresa Centrului Național pentru Protecția Datelor cu Caracter Personal ori instanței de judecată. Comunicarea datelor este necesară pentru executarea contractului și îndeplinirea obligațiilor legale ale Cumpărătorului; retragerea consimțământului nu afectează legalitatea prelucrării efectuate anterior și nici obligația legală de păstrare a documentelor.")}
     <table style="width:100%;margin-top:16px;border-collapse:collapse;font-size:11px;"><tr>
       <td style="width:50%;vertical-align:top;padding-right:10px;">
         <div class="of-b">CUMPĂRĂTOR</div>
@@ -6709,7 +7812,19 @@ async function printAccountingDocument(docType, refId, companyId) {
         .filter((r) => printDocInRange(r.receivedAt || r.createdAt, from, to))
         .sort((a, b) => new Date(a.receivedAt || a.createdAt) - new Date(b.receivedAt || b.createdAt));
       if (!receipts.length) { alert("Nu există recepții pentru acest furnizor în perioada aleasă."); return; }
-      openOfficialDocWindow(buildPurchaseActHtml(receipts, partner, company), `Act de achizitie ${partner.name}`);
+      const win = window.open("", "_blank");
+      const rezultat = await ensureActNumber(receipts, company, partner);
+      if (rezultat.status === "abort") {
+        // Motivul a fost deja afisat. NU se tipareste: altfel ar ieși o a doua hartie
+        // semnabila pe aceiasi bani, cu „Nr. ____" si cifrele de azi.
+        if (win) win.close();
+        return;
+      }
+      openOfficialDocWindow(
+        buildPurchaseActHtml(receipts, partner, company, rezultat.act),
+        `Act de achizitie ${partner.name}`,
+        win
+      );
     } else if (docType === "paymentOrder") {
       const tx = (transactionsCache || []).find((t) => Number(t.id) === Number(refId));
       if (!tx) { alert("Plata nu a fost găsită."); return; }
@@ -6734,19 +7849,8 @@ async function printAccountingDocument(docType, refId, companyId) {
 }
 
 // Cere serverului un numar oficial (crescator, per companie+tip). Idempotent: acelasi document -> acelasi numar.
-async function allocatePrintNumber(docType, refId, companyId) {
-  const res = await fetch("/api/print-docs/allocate-number", {
-    method: "POST",
-    credentials: "same-origin",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ docType, refId, companyId })
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || "Nu am putut aloca numărul documentului.");
-  }
-  return res.json();
-}
+// `allocatePrintNumber` STERS: era wrapper-ul mecanismului vechi de numerotare, fara niciun
+// apelant. Actul de achizitie se numeroteaza prin `ensureActNumber` (regula 10 din CLAUDE.md).
 
 // Build invoice / certificate / purchase act from a delivery + config
 function findPartnerByName(name) {
@@ -6853,48 +7957,6 @@ function buildInvoicePrintHtml(delivery) {
     <div style="margin-top:6px;"><span class="lbl">Data:</span> ${dateInv}</div>
     <div class="isign">Administrator&nbsp;&nbsp;&nbsp;<span class="iline">&nbsp;</span></div>
   </div>`;
-}
-
-function buildPurchaseActPrintHtml(delivery, company) {
-  // Act de achizitie is based on the source receipt's supplier
-  const receipt = (receiptsCache || []).find((r) => Number(r.id) === Number(delivery.receiptId));
-  const supplier = receipt ? findPartnerByName(receipt.supplier) : null;
-  // Actul de achizitie reflecta RECEPTIA (cumpararea de la furnizor): cantitate neta + pret lei/kg.
-  const qty = Number(
-    receipt?.provisionalNetQuantity || receipt?.quantity ||
-    (delivery.netWeight > 0 ? delivery.netWeight : delivery.deliveredQuantity) || 0
-  ); // tone
-  if (!receipt) {
-    alert("Recepția sursă nu a fost găsită — reîncarcă pagina și încearcă din nou.");
-    return "";
-  }
-  const priceRaw = Number(receipt.price || 0); // lei/kg
-  // Aceeasi regula ca la actul din pagina „Documente tipar": randul arata valoarea BRUTA
-  // (cantitate × pret), iar „Total de plata" e datoria REALA din registru (neta, dupa impozitul
-  // retinut la sursa). Reținerea se deduce ca diferenta, deci documentul se inchide aritmetic.
-  const gross = Number(receipt.preliminaryMerchandiseValue) || Number((qty * 1000 * priceRaw).toFixed(2));
-  const netPay = Number(receipt.amountToPay ?? gross);
-  const tax = Math.max(Number((gross - netPay).toFixed(2)), 0);
-  // Pretul afisat se derivă din brut, ca „cantitate × preț = Sumă" să iasă exact pe hârtie.
-  const price = qty > 0 ? Number((gross / (qty * 1000)).toFixed(4)) : priceRaw;
-  return `${docHeader(company)}
-    <div class="doc-title">Act de achiziție</div>
-    <div class="doc-subtitle">${formatDateShort(delivery.createdAt)} · Recepție #${escapeComboHtml(String(delivery.receiptId))}</div>
-    <div class="doc-party" style="margin-bottom:14px;">
-      <h4>Furnizor</h4>
-      <div><b>${escapeComboHtml(receipt?.supplier || "-")}</b></div>
-      ${supplier?.idno ? `<div>IDNO: ${escapeComboHtml(supplier.idno)}</div>` : ""}
-      ${supplier?.address ? `<div>${escapeComboHtml(supplier.address)}</div>` : ""}
-      ${supplier?.bankName ? `<div>Banca: ${escapeComboHtml(supplier.bankName)} · IBAN: ${escapeComboHtml(supplier.iban || "-")}</div>` : ""}
-    </div>
-    <table class="doc-table">
-      <thead><tr><th>Produs</th><th>Cantitate</th><th>Preț</th><th>Sumă</th></tr></thead>
-      <tbody><tr><td>${escapeComboHtml(delivery.product || "")}</td><td>${formatNumber(qty * 1000)} kg</td><td>${moneyRo(price)}/kg</td><td>${moneyRo(gross)}</td></tr></tbody>
-      <tfoot><tr><td colspan="3">VALOARE TOTALĂ</td><td>${moneyRo(gross)} MDL</td></tr></tfoot>
-    </table>
-    ${tax > 0 ? `<div class="doc-grid"><div><b>Rețineri la buget:</b> ${moneyRo(tax)} MDL</div></div>` : ""}
-    <div class="doc-total">TOTAL DE PLATĂ: ${moneyRo(netPay)} MDL</div>
-    <div class="doc-sign"><div>Furnizor</div><div>Achizitor AgroProfit+</div></div>`;
 }
 
 function buildCertificatePrintHtml(delivery) {
@@ -7362,13 +8424,27 @@ function assertPrintableDelivery(delivery) {
   return true;
 }
 
-function printDeliveryDocument(deliveryId, docType) {
+async function printDeliveryDocument(deliveryId, docType) {
+  // Se deschide ACUM, in gestul utilizatorului: actul cere numarul de la server, iar dupa un
+  // `await` blocatorul de pop-up refuza `window.open`.
+  const docWin = docType === "act" ? window.open("", "_blank") : null;
+  const renunta = (mesaj) => {
+    if (docWin) docWin.close();
+    if (mesaj) alert(mesaj);
+    return "";
+  };
   const delivery = (deliveriesCache || []).find((d) => Number(d.id) === Number(deliveryId));
-  if (!delivery) return;
-  if (!assertPrintableDelivery(delivery)) return;
+  if (!delivery) return renunta();
+  if (!assertPrintableDelivery(delivery)) return renunta();
   // Compania de antet aleasă în pagina Livrări (gol → AgroProfit+ implicit). Se aplică documentelor
   // „interne" cu antet de firmă (Bon, Act de achiziție, Declarație).
-  const headerCompany = printHeaderCompany(document.getElementById("delivery-doc-company")?.value);
+  const alegereFirma = document.getElementById("delivery-doc-company")?.value;
+  const headerCompany = printHeaderCompany(alegereFirma);
+  // Actul de achizitie e document fiscal: numarul si SERIA se ingheata pe receptie la prima
+  // tiparire. `printHeaderCompany` intoarce null pe „implicit", iar atunci actul ieșea fara
+  // emitent, dar cu seria primei firme active — numar ars, serie greșita, fara cale de
+  // corectie. Aici se rezolva mereu o firma reala, ca pe randul de receptie.
+  const actCompany = resolveCompany(alegereFirma);
   let html = "";
   let title = "";
   if (docType === "invoice") { html = buildInvoicePrintHtml(delivery); title = `Factura ${delivery.invoiceNumber || delivery.id}`; }
@@ -7376,10 +8452,26 @@ function printDeliveryDocument(deliveryId, docType) {
     // Actul de achizitie documenteaza cumpararea de la un furnizor (receptie). Livrarile pe
     // produs nu au o receptie/furnizor unic, deci documentul nu se poate genera.
     if (!delivery.receiptId) {
-      alert("Actul de achiziție este disponibil doar pentru livrări legate de o recepție (cu furnizor).");
-      return;
+      return renunta("Actul de achiziție este disponibil doar pentru livrări legate de o recepție (cu furnizor).");
     }
-    html = buildPurchaseActPrintHtml(delivery, headerCompany); title = `Act achizitie ${delivery.id}`;
+    // Acelasi formular tipizat ca pe randul receptiei: un singur act oficial, o singura
+    // macheta. Inainte existau doua machete pentru aceeasi cumparare.
+    const actReceipt = (receiptsCache || []).find((r) => Number(r.id) === Number(delivery.receiptId));
+    if (!actReceipt) {
+      return renunta("Recepția sursă nu a fost găsită — reîncarcă pagina și încearcă din nou.");
+    }
+    const actPartner = findPartnerById(actReceipt.supplierId) || findPartnerByName(actReceipt.supplier);
+    if (!actPartner) {
+      return renunta("Furnizorul recepției nu a fost găsit în nomenclator.");
+    }
+    // Aceeasi regula ca pe randul receptiei: ce nu e in stoc nu are act de achizitie.
+    if (!isReceiptInStock(actReceipt)) {
+      return renunta(`Recepția #${actReceipt.id} nu e în stoc (${actReceipt.status}). Actul de achiziție s-ar emite pe marfă care n-a intrat.`);
+    }
+    const rezultat = await ensureActNumber([actReceipt], actCompany, actPartner);
+    if (rezultat.status === "abort") return renunta();
+    html = buildPurchaseActHtml([actReceipt], actPartner, actCompany, rezultat.act);
+    title = `Act achizitie ${actPartner.name}`;
   }
   else if (docType === "certificate") { html = buildCertificatePrintHtml(delivery); title = `Certificat calitate ${delivery.id}`; }
   else if (docType === "bon") { html = buildBonCantarHtml(delivery, headerCompany); title = `Bon cantar ${delivery.id}`; }
@@ -7387,10 +8479,15 @@ function printDeliveryDocument(deliveryId, docType) {
   else if (docType === "imputernicire") { html = buildImputernicireHtml(delivery); title = `Imputernicire ${delivery.id}`; }
   else if (docType === "declaratie") { html = buildDeclaratieHtml(delivery, headerCompany); title = `Declaratie ${delivery.id}`; }
   // Formele refăcute fidel modelelor originale se tipăresc alb-negru, fără antet AgroProfit.
-  const officialDocs = ["invoice", "certificate", "cmr", "imputernicire"];
+  // Actul de achizitie foloseste formularul tipizat, cu clasele `of-*` — definite DOAR in
+  // `openOfficialDocWindow`. Trimis in fereastra obisnuita, iesea fara chenare, cu alte
+  // margini si cu subsol „Generat de AgroProfit+" pe un formular de stat.
+  const officialDocs = ["invoice", "certificate", "cmr", "imputernicire", "act"];
   if (html) {
-    if (officialDocs.includes(docType)) openOfficialDocWindow(html, title);
+    if (officialDocs.includes(docType)) openOfficialDocWindow(html, title, docWin);
     else openPrintWindow(html, title);
+  } else if (docWin) {
+    docWin.close(); // nu lasam o fereastra goala daca documentul nu s-a construit
   }
   // Close the print dropdown after choosing
   document.querySelectorAll(".print-menu[open]").forEach((d) => d.removeAttribute("open"));
@@ -7577,8 +8674,13 @@ async function refreshViewData(view) {
     } else if (view === "financiar") {
       await Promise.all([loadTransactions(), loadReceipts(), loadDeliveries()]);
     } else if (view === "stoc") {
-      await Promise.all([loadStocks(), loadReceipts(), loadDeliveries()]);
+      // Transferurile si procesarile sunt mutarile INTRE locatii: fara ele, tabelul pe
+      // locatii ar arata alt stoc final decat „Stoc pe locatii" de deasupra.
+      await Promise.all([
+        loadStocks(), loadReceipts(), loadDeliveries(), loadTransfers(), loadProcessings()
+      ]);
       renderStockPeriod();
+      renderStockPeriodByLocation();
     } else if (view === "rapoarte") {
       // SINCRON, înainte de orice fetch: golește+ascunde panoul de activitate pentru non-admin,
       // ca setView (care afișează după data-view) să nu lase vizibil nicio clipă tabelul vechi.
@@ -7617,6 +8719,59 @@ document.querySelectorAll(".view-tab").forEach((button) => {
 // Act de verificare buttons (Etapa 7)
 document.getElementById("statement-generate-btn")?.addEventListener("click", generateSupplierStatement);
 document.getElementById("statement-print-btn")?.addEventListener("click", printSupplierStatement);
+
+// Act de achizitie direct de pe randul de receptie. Foloseste ACELASI `buildPurchaseActHtml`
+// ca pagina „Documente tipar" (o receptie = un rand in act), ca sa nu apara a doua varianta a
+// aceluiasi document oficial, cu alte cifre.
+bodyEl?.addEventListener("click", async (event) => {
+  const btn = event.target.closest("[data-print-receipt]");
+  if (!btn) return;
+  const receipt = (receiptsCache || []).find((r) => Number(r.id) === Number(btn.dataset.id));
+  if (!receipt) return;
+  const partner = findPartnerById(receipt.supplierId) || findPartnerByName(receipt.supplier);
+  if (!partner) {
+    window.alert("Furnizorul recepției nu a fost găsit în nomenclator. Completează-l înainte de a tipări documentele.");
+    return;
+  }
+  // Firma emitenta se alege pe pagina Receptii, ca pe „Documente tipar": cu mai multe firme
+  // in nomenclator, un document tiparit tacit pe firma implicita iese pe persoana juridica gresita.
+  const company = resolveCompany(document.getElementById("receipt-doc-company")?.value || "");
+  const kind = btn.dataset.printReceipt;
+  // Meniul se inchide singur dupa alegere; altfel ramane deschis peste tabel.
+  btn.closest("details")?.removeAttribute("open");
+  if (kind === "contract") {
+    // Contractul e un document de PARTENER, fara cifre din receptie: se poate pregati si
+    // inainte ca marfa sa intre in stoc (exact cazul pentru care contabilul il vrea). Pe o
+    // receptie ANULATA insa nu: documentul ar parea ca tine de o operatiune stearsa.
+    if (receipt.status === "Anulat") {
+      window.alert("Recepția e anulată. Contractul se tipărește de pe o recepție validă sau din „Documente tipar”.");
+      return;
+    }
+    openOfficialDocWindow(buildSaleContractHtml(partner, company), `Contract ${partner.name}`);
+  } else if (kind === "act") {
+    // Actul insa vorbeste despre marfa cumparata: pe un proiect sau pe o receptie anulata ar
+    // fi o hartie fara acoperire (regula 7 din CLAUDE.md).
+    if (!isReceiptInStock(receipt)) {
+      window.alert(`Recepția are statusul „${receipt.status}" și nu e în stoc. Actul de achiziție s-ar emite pe marfă care n-a intrat.`);
+      return;
+    }
+    const win = window.open("", "_blank");
+    const rezultat = await ensureActNumber([receipt], company, partner);
+    if (rezultat.status === "abort") {
+      if (win) win.close();
+      return;
+    }
+    openOfficialDocWindow(
+      buildPurchaseActHtml([receipt], partner, company, rezultat.act),
+      `Act de achizitie ${partner.name}`,
+      win
+    );
+  }
+  // Ordinul de plata NU se emite de aici: el iese dintr-o PLATA inregistrata, din ecranul
+  // Financiar (`printAccountingDocument("paymentOrder")`). Sintetizat din restul de plata, ar
+  // fi o dispozitie de casa fara corespondent in registru, retiparibila oricand pe aceeasi
+  // datorie — doua hartii semnabile pentru aceiasi bani.
+});
 
 // Delivery document print buttons (Etapa 6) — event delegation
 document.getElementById("deliveries-body")?.addEventListener("click", (event) => {
@@ -7776,6 +8931,33 @@ supplierSuggestionsEl.addEventListener("mousedown", (event) => {
   handleSuggestionPick(li);
 });
 humidityInput.addEventListener("input", renderReceiptEstimate);
+// Bifa ridica suma platita furnizorului si anuleaza taxa de uscare. Nu exista prag care
+// sa opreasca o greseala, deci singura aparare e ca omul sa confirme explicit, cu cifrele
+// in fata. Confirmarea se cere DOAR la bifare; debifarea (intoarcerea la regula obisnuita)
+// nu are nevoie de ea.
+if (payOnGrossInput) {
+  payOnGrossInput.addEventListener("change", () => {
+    if (payOnGrossInput.checked) {
+      const estimate = getReceiptEstimate();
+      const excess = Number(estimate.excessHumidity || 0);
+      const apaKg = Number(estimate.estimatedWaterLoss || 0) * 1000;
+      // Doar ce e specific ACESTEI decizii. Ca in stoc intra masa fara apa e regula
+      // permanenta a aplicatiei, nu ceva ce se schimba prin bifa — nu se repeta aici.
+      const intrebare = [
+        bi("Sigur se achită marfa CU TOT CU APĂ?"),
+        "",
+        `${bi("Umiditate peste normă")}: +${formatNumber(excess)}%`,
+        `${bi("Apă plătită ca marfă")}: ${formatNumber(apaKg)} kg`,
+        "",
+        bi("Apasă OK doar dacă aceasta este înțelegerea cu furnizorul.")
+      ].join("\n");
+      if (!window.confirm(intrebare)) {
+        payOnGrossInput.checked = false;
+      }
+    }
+    renderReceiptEstimate();
+  });
+}
 impurityInput.addEventListener("input", renderReceiptEstimate);
 grossWeightInput.addEventListener("input", renderReceiptEstimate);
 tareWeightInput.addEventListener("input", renderReceiptEstimate);
@@ -7875,6 +9057,22 @@ function openReceiptDetails(id) {
         ${rdRow("Stare plată", escapeComboHtml(item.paymentStatus || "—"))}
         ${rdRow("Ultima plată", formatDateShort(item.lastPaymentDate))}
         ${item.amountNote ? rdRow("Corectare valoare", escapeComboHtml(item.amountNote)) : ""}
+        ${item.payOnGrossQuantity === true ? rdRow("Bază de plată", "Masa CU apă (uscarea nu s-a taxat)") : ""}
+        ${(Array.isArray(item.actDivergences) ? item.actDivergences : []).map((d) => rdRow(
+          "⚠ Registru ≠ act " + escapeComboHtml(String(d.actSeries || "")) + " " + escapeComboHtml(String(d.actNumber || "")),
+          escapeComboHtml(
+            `${formatDateShort(d.at)} · pe hârtie: ${formatNumber(d.actValue)} lei ` +
+            `(net ${formatNumber(d.actNetPay)} lei) · ${d.reason || ""}`
+          )
+        )).join("")}
+        ${(Array.isArray(item.termCorrections) ? item.termCorrections : []).map((c) => rdRow(
+          "Corectare condiții · " + formatDateShort(c.at),
+          escapeComboHtml(
+            `${c.oldPayOnGrossQuantity === c.newPayOnGrossQuantity ? "" : (c.newPayOnGrossQuantity ? "bifat «cu apă»; " : "scos «cu apă»; ")}` +
+            `${Number(c.oldPrice) === Number(c.newPrice) ? "" : `preț ${formatNumber(c.oldPrice)} → ${formatNumber(c.newPrice)} lei/kg; `}` +
+            `sumă ${formatNumber(c.oldAmount)} → ${formatNumber(c.newAmount)} lei · ${c.by || "-"} · ${c.reason || ""}`
+          )
+        )).join("")}
       </div>`
     : "";
 
@@ -8442,6 +9640,10 @@ function fillPrintDocPanel() {
 document.getElementById("stock-period-from")?.addEventListener("change", renderStockPeriod);
 document.getElementById("stock-period-to")?.addEventListener("change", renderStockPeriod);
 document.getElementById("stock-period-product")?.addEventListener("change", renderStockPeriod);
+document.getElementById("stock-period-loc-from")?.addEventListener("change", renderStockPeriodByLocation);
+document.getElementById("stock-period-loc-to")?.addEventListener("change", renderStockPeriodByLocation);
+document.getElementById("stock-period-loc-product")?.addEventListener("change", renderStockPeriodByLocation);
+document.getElementById("stock-period-loc-location")?.addEventListener("change", renderStockPeriodByLocation);
 document.getElementById("losses-report-form")?.addEventListener("submit", (e) => { e.preventDefault(); renderLossesReport(); });
 ["losses-from", "losses-to", "losses-product"].forEach((id) => document.getElementById(id)?.addEventListener("change", renderLossesReport));
 document.getElementById("field-yield-form")?.addEventListener("submit", (e) => { e.preventDefault(); renderFieldYield(); });
@@ -9337,7 +10539,7 @@ function updateBillingPriceLei() {
   const el = document.getElementById("billing-price-lei");
   if (el) {
     if (isForeign && pf > 0 && rate <= 0) {
-      el.innerHTML = `<span style="color:var(--danger);">Introdu cursul valutar pentru ${cur}!</span>`;
+      el.innerHTML = `<span style="color:var(--danger);">Introdu cursul valutar pentru ${escapeComboHtml(cur)}!</span>`;
     } else {
       el.textContent = currency.format(leiPerUnit || 0);
     }
@@ -9366,6 +10568,28 @@ function updateBillingPriceLei() {
       baseEl.textContent = formatNumber(Number(baza.toFixed(2)));
       vatEl.textContent = formatNumber(Number(tva.toFixed(2)));
       totalEl.textContent = formatNumber(Number(totalCuTva.toFixed(2)));
+    }
+
+    // Creanta: acelasi pret, in lei/TONA. Se arata aici fiindca pana acum contabilul punea
+    // pretul pe factura si nu vedea niciunde ca din el iese suma pe care o datoreaza
+    // cumparatorul in „Incasari". Trebuie sa coincida cu Total factura.
+    const recEl = document.getElementById("billing-receivable");
+    const recHintEl = document.getElementById("billing-receivable-hint");
+    if (recEl) {
+      const tonnePrice = isForeign ? pf * rate : pf * 1000;
+      const qty = Number(
+        billingDelivery
+          ? (billingDelivery.deliveredQuantity || billingDelivery.netWeight || 0)
+          : 0
+      );
+      const creanta = tonnePrice * qty;
+      recEl.textContent = formatNumber(Number(creanta.toFixed(2)));
+      if (recHintEl) {
+        const incasat = Number((billingDelivery && billingDelivery.collectedAmount) || 0);
+        recHintEl.textContent = incasat > 0 && creanta < incasat
+          ? `Atenție: s-au încasat deja ${formatNumber(incasat)} lei. Stornează încasarea înainte de a reduce prețul.`
+          : `${formatNumber(tonnePrice)} lei/tonă × ${formatNumber(qty)} t`;
+      }
     }
   }
 }
@@ -9554,6 +10778,141 @@ bodyEl.addEventListener("click", async (event) => {
     window.alert(err.message);
   }
 });
+
+// --- Corectie de CONDITII pe o receptie deja intrata (contabili + admin) ---
+// Intelegerea se afla uneori dupa ce marfa a fost descarcata: furnizorul spune abia la
+// decontare ca achizitia s-a facut cu tot cu apa, sau pretul n-a fost completat la cantar.
+// Diferenta fata de ✎ (ajustare de suma): aici se corecteaza INTRARILE (bifa, pretul), iar
+// sumele se recalculeaza dupa aceeasi formula ca la creare — deci actul si extrasul raman
+// aritmetic inchise. Fiecare corectare ramane pe document, in `termCorrections`.
+const receiptCorrectDialog = document.getElementById("receipt-correct-dialog");
+const receiptCorrectForm = document.getElementById("receipt-correct-form");
+let receiptBeingCorrected = null;
+
+function rcEstimate(receipt, payOnGross, priceKg) {
+  // Previzualizare. Trebuie sa dea EXACT ce salveaza serverul, altfel confirmarea finala
+  // (singurul control uman al operatiei) arata o suma si se salveaza alta.
+  //
+  // De aceea foloseste aceleasi surse ca `correctReceiptTermsHandler`: cantitatea si apa
+  // DE PE DOCUMENT (corectarea nu le atinge — serverul chiar refuza daca s-ar schimba) si
+  // cota de impozit DE PE DOCUMENT, nu din nomenclatorul curent.
+  const apa = Number(receipt.estimatedWaterLoss || 0);
+  const net = Number(receipt.provisionalNetQuantity || receipt.quantity || 0);
+  const tone = payOnGross && apa > 0 ? net + apa : net;
+  const gross = tone * 1000 * (Number(priceKg) || 0);
+  const percent = Number(receipt.withholdingPercent || 0);
+  const tax = gross * (percent / 100);
+  return { kg: tone * 1000, gross, tax, total: Math.max(gross - tax, 0) };
+}
+
+function renderReceiptCorrectPreview() {
+  if (!receiptBeingCorrected) return;
+  const flag = document.getElementById("rc-pay-on-gross").checked;
+  const price = parseDecimal(document.getElementById("rc-price").value);
+  const e = rcEstimate(receiptBeingCorrected, flag, price);
+  document.getElementById("rc-qty").textContent = formatNumber(e.kg);
+  document.getElementById("rc-gross").textContent = formatNumber(e.gross);
+  document.getElementById("rc-tax").textContent = formatNumber(e.tax);
+  document.getElementById("rc-total").textContent = formatNumber(e.total);
+
+  const vechi = Number(receiptBeingCorrected.amountToPay ?? receiptBeingCorrected.preliminaryPayableAmount ?? 0);
+  const delta = e.total - vechi;
+  const deltaEl = document.getElementById("rc-delta");
+  deltaEl.textContent = Math.abs(delta) < 0.005
+    ? ""
+    : `(${delta > 0 ? "+" : "−"}${formatNumber(Math.abs(delta))} lei față de acum)`;
+  deltaEl.className = "rc-delta " + (delta > 0 ? "rc-up" : delta < 0 ? "rc-down" : "");
+
+  const apaKg = Number(receiptBeingCorrected.estimatedWaterLoss || 0) * 1000;
+  document.getElementById("rc-flag-hint").textContent = apaKg > 0
+    ? (flag
+        ? `Se plătesc și cele ${formatNumber(apaKg)} kg de apă; uscarea nu se taxează.`
+        : `Apa (${formatNumber(apaKg)} kg) se scoate din calcul și uscarea se taxează.`)
+    : "Recepția nu are umiditate peste normă — bifa nu schimbă suma.";
+}
+
+if (receiptCorrectDialog && receiptCorrectForm) {
+  document.addEventListener("click", (event) => {
+    const trigger = event.target.closest('[data-action="correct-terms"]');
+    if (!trigger) return;
+    const receipt = receiptsCache.find((r) => String(r.id) === String(trigger.dataset.id));
+    if (!receipt) return;
+    receiptBeingCorrected = receipt;
+
+    document.getElementById("rc-receipt-id").textContent = `#${receipt.id}`;
+    document.getElementById("rc-context").textContent =
+      `${receipt.supplier || "-"} · ${receipt.product || "-"} · umiditate ${formatNumber(Number(receipt.humidity || 0))}% ` +
+      `(normă ${formatNumber(Number(receipt.humidityNorm || 0))}%) · în stoc ` +
+      `${formatNumber(Number(receipt.provisionalNetQuantity || receipt.quantity || 0) * 1000)} kg`;
+    document.getElementById("rc-pay-on-gross").checked = receipt.payOnGrossQuantity === true;
+    document.getElementById("rc-price").value = receipt.price ? String(receipt.price).replace(".", ",") : "";
+    document.getElementById("rc-reason").value = "";
+    document.getElementById("rc-message").textContent = "";
+    renderReceiptCorrectPreview();
+    receiptCorrectDialog.showModal();
+  });
+
+  document.getElementById("rc-pay-on-gross").addEventListener("change", renderReceiptCorrectPreview);
+  document.getElementById("rc-price").addEventListener("input", renderReceiptCorrectPreview);
+  document.getElementById("rc-cancel-btn").addEventListener("click", () => receiptCorrectDialog.close());
+
+  receiptCorrectForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!receiptBeingCorrected) return;
+    const messageEl = document.getElementById("rc-message");
+    const flag = document.getElementById("rc-pay-on-gross").checked;
+    const price = parseDecimal(document.getElementById("rc-price").value);
+    const reason = String(document.getElementById("rc-reason").value || "").trim();
+
+    if (!String(document.getElementById("rc-price").value || "").trim() || !(price > 0)) {
+      messageEl.textContent = "Introdu un preț valid, mai mare ca zero (ex. 5 sau 5,20).";
+      return;
+    }
+    if (!reason) {
+      messageEl.textContent = "Motivul este obligatoriu — el explică suma peste un an.";
+      return;
+    }
+
+    // Aceeasi regula ca la bifarea de la receptie: schimbarea bazei de plata se confirma
+    // explicit, cu cifrele in fata.
+    const e = rcEstimate(receiptBeingCorrected, flag, price);
+    const vechi = Number(receiptBeingCorrected.amountToPay ?? receiptBeingCorrected.preliminaryPayableAmount ?? 0);
+    const achitat = Number(receiptBeingCorrected.paidAmount || 0);
+    const avertismente = [];
+    if (achitat > 0) {
+      avertismente.push(`Atenție: pe această recepție s-au achitat deja ${formatNumber(achitat)} lei.`);
+    }
+    if (Array.isArray(receiptBeingCorrected.amountCorrections) && receiptBeingCorrected.amountCorrections.length) {
+      avertismente.push("Atenție: suma fusese ajustată manual — corectarea o va înlocui.");
+    }
+    const intrebare = [
+      `Recepția #${receiptBeingCorrected.id} · ${receiptBeingCorrected.supplier || "-"}`,
+      "",
+      `Total de plată: ${formatNumber(vechi)} lei  →  ${formatNumber(e.total)} lei`,
+      ...(avertismente.length ? ["", ...avertismente] : []),
+      "",
+      "Corectarea rămâne în istoricul recepției. Continui?"
+    ].join("\n");
+    if (!window.confirm(intrebare)) return;
+
+    try {
+      const res = await fetch(`/api/receipts/${receiptBeingCorrected.id}/correct-terms`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ payOnGrossQuantity: flag, price, reason })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Nu am putut corecta condițiile.");
+      }
+      receiptCorrectDialog.close();
+      receiptBeingCorrected = null;
+      await loadReceipts();
+    } catch (err) {
+      messageEl.textContent = err.message;
+    }
+  });
+}
 
 // Contabilul schimba DOAR furnizorul unei receptii (inline, in lista Receptii recente)
 bodyEl.addEventListener("click", (event) => {

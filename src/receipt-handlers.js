@@ -1,6 +1,9 @@
 const {
+  assignActNumber,
   closeReceipt,
   completeReceiptWeighing,
+  correctReceiptTerms,
+  getReceiptRaw,
   createReceipt,
   getConfig,
   getStats,
@@ -27,7 +30,16 @@ function getBody(req) {
   return req.body || {};
 }
 
-function computeReceiptEstimate({ quantity, price, humidity, impurity, product, tariffs, fiscalProfile }) {
+function getTariffValue(tariffs, service) {
+  const found = (tariffs || []).find(
+    (item) => String(item.service || "").toLowerCase() === service && item.active
+  );
+  return Number(found?.value || 0);
+}
+
+function computeReceiptEstimate({
+  quantity, price, humidity, impurity, product, tariffs, fiscalProfile, payOnGrossQuantity
+}) {
   const grossQuantity = Number(quantity);
   const unitPrice = Number(price);
   const humidityNorm = Number(product.humidityNorm || 0);
@@ -36,8 +48,15 @@ function computeReceiptEstimate({ quantity, price, humidity, impurity, product, 
   const actualImpurity = Number(impurity || 0);
   const excessHumidity = Math.max(actualHumidity - humidityNorm, 0);
   const excessImpurity = Math.max(actualImpurity - impurityNorm, 0);
-  const estimatedWaterLoss = grossQuantity * (excessHumidity / 100);
-  const estimatedImpurityLoss = grossQuantity * (excessImpurity / 100);
+  // CEREALELE SE SOCOTESC IN KILOGRAME INTREGI. Cantarul lucreaza in kg, deci bruta e mereu
+  // un numar intreg de kg; daca pierderile rămân fractionare, in stoc rămân cozi de genul
+  // 0,6 kg care apar ca „−1 kg" intr-un ecran si „0" in altul, pe aceeasi realitate.
+  // Se rotunjesc AICI, la sursa, inainte de scaderea din bruta — astfel cantitatea neta,
+  // cea care intra in cilindru si cea pe care se calculeaza banii, iese intreaga.
+  // `+ 0` normalizeaza `-0`.
+  const laKg = (tone) => Math.round(Number(tone) * 1000) / 1000 + 0;
+  const estimatedWaterLoss = laKg(grossQuantity * (excessHumidity / 100));
+  const estimatedImpurityLoss = laKg(grossQuantity * (excessImpurity / 100));
   const provisionalNetQuantity = Math.max(
     grossQuantity - estimatedWaterLoss - estimatedImpurityLoss,
     0
@@ -48,12 +67,31 @@ function computeReceiptEstimate({ quantity, price, humidity, impurity, product, 
   const dryingTariff =
     tariffs.find((item) => item.service.toLowerCase() === "uscare" && item.active)?.value || 0;
 
-  const cleaningServiceTotal = grossQuantity * Number(cleaningTariff || 0);
-  const dryingServiceTotal = grossQuantity * excessHumidity * Number(dryingTariff || 0);
+  // Intelegere comerciala: la umiditate peste norma dar in limita acceptata, se plateste
+  // cantitatea CU apa, iar uscarea nu se taxeaza. Stocul primeste tot masa FARA apa
+  // (`provisionalNetQuantity`) — in cilindru intra echivalentul uscat, ca pana acum.
+  //
+  // Se pune la loc DOAR apa, nu si impuritatile. Pe brut s-ar plati si gunoiul de peste
+  // norma, ceea ce nu a convenit nimeni; cand impuritatile sunt in norma, cele doua
+  // formule coincid oricum.
+  const payOnGross = payOnGrossQuantity === true && excessHumidity > 0;
+  const payableQuantity = payOnGross
+    ? provisionalNetQuantity + estimatedWaterLoss
+    : provisionalNetQuantity;
+
+  // Serviciile se taxeaza DOAR pe procentul peste norma — ca uscarea, chiar deasupra.
+  // Backend-ul ignora complet `excessImpurity` si taxa toata cantitatea: la 100 t, tarif 10
+  // si 3% exces, ecranul arata 3.000 lei iar documentul salva 1.000. Mai rau, taxa curatirea
+  // si cand impuritatile erau SUB norma. Oglinda lui `getReceiptEstimate` din public/app.js.
+  const cleaningServiceTotal =
+    grossQuantity * excessImpurity * Number(cleaningTariff || 0);
+  const dryingServiceTotal = payOnGross
+    ? 0
+    : grossQuantity * excessHumidity * Number(dryingTariff || 0);
   const preliminaryServicesTotal = cleaningServiceTotal + dryingServiceTotal;
   // Pretul e in lei/kg, cantitatea in TONE -> ×1000 pentru kg (aceeasi regula ca receiptPayableValue
   // si getReceiptEstimate din frontend; a se pastra sincronizate).
-  const preliminaryMerchandiseValue = provisionalNetQuantity * 1000 * unitPrice;
+  const preliminaryMerchandiseValue = payableQuantity * 1000 * unitPrice;
   // COSTUL marfii ramane valoarea BRUTA (integrala) = preliminaryMerchandiseValue.
   // IMPOZITUL retinut la sursa (din statutul fiscal al furnizorului; ex. persoana fizica) se calculeaza
   // pe valoarea bruta si se SCADE din datoria catre furnizor: furnizorul primeste NETUL, iar impozitul
@@ -74,6 +112,10 @@ function computeReceiptEstimate({ quantity, price, humidity, impurity, product, 
     estimatedWaterLoss,
     estimatedImpurityLoss,
     provisionalNetQuantity,
+    cleaningTariff: Number(cleaningTariff || 0),
+    dryingTariff: Number(dryingTariff || 0),
+    payOnGrossQuantity: payOnGross,
+    payableQuantity,
     cleaningServiceTotal,
     dryingServiceTotal,
     preliminaryServicesTotal,
@@ -105,7 +147,25 @@ const FINANCIAL_RECEIPT_FIELDS = [
   "paymentStatus",
   "lastPaymentDate",
   "amountNote",
-  "amountCorrections"
+  "amountCorrections",
+  // Istoricul corectarilor de conditii contine PRETURI si SUME. Fara el aici, operatorul
+  // si rolul `control` primeau pretul de achizitie si datoria catre furnizor prin API,
+  // desi interfata nu le arata.
+  "termCorrections",
+  "cleaningTariff",
+  "dryingTariff",
+  // Metadatele actului de achizitie: nu sunt sume, dar sunt date ale unui document fiscal pe
+  // care doar contabilii il emit. Sirul ar permite unui rol fara `finance` sa numere actele.
+  "actNumber",
+  "actSeries",
+  "actIssuedAt",
+  "actCompanyId",
+  // Cifrele INGHEȚATE ale actului: valoare, retinere, net, si pe fiecare rand. Exact datele
+  // pentru care se sterg `price` si `preliminaryMerchandiseValue` — fara asta ajungeau la
+  // operator si la `control` prin GET /api/receipts si prin raspunsul de schimbare de status.
+  "actFigures",
+  // Divergentele act-registru contin sumele de pe hartie.
+  "actDivergences"
 ];
 
 function stripReceiptFinancials(receipt) {
@@ -145,7 +205,11 @@ function receiptForRequest(req, receipt) {
 
 async function listReceiptsHandler(req, res) {
   try {
-    const [receipts, stats] = await Promise.all([listReceipts(), getStats()]);
+    // `getStats` primeste receptiile DEJA calculate: altfel `listReceipts` ruleaza de doua ori
+    // in aceeasi cerere (alocare FIFO a platilor per partener + clonarea tuturor receptiilor),
+    // adica se dubla cea mai scumpa agregare din aplicatie pentru cardurile de KPI.
+    const receipts = await listReceipts();
+    const stats = await getStats(receipts);
     const canSeeFinance = requestCanSeeFinance(req);
     // Documentele anulate sunt filtrate dupa rol (server-side, nu doar in UI).
     const visible = filterCanceledForRole(receipts, req.currentUser && req.currentUser.roleCode);
@@ -242,7 +306,18 @@ async function createReceiptHandler(req, res) {
       return sendJson(res, 400, { error: "Impuritatile trebuie sa fie o valoare valida." });
     }
 
+    if (
+      body.payOnGrossQuantity !== undefined &&
+      body.payOnGrossQuantity !== null &&
+      typeof body.payOnGrossQuantity !== "boolean"
+    ) {
+      return sendJson(res, 400, {
+        error: "Campul „plata pe masa cu umiditate” trebuie sa fie adevarat sau fals."
+      });
+    }
+
     const estimate = computeReceiptEstimate({
+      payOnGrossQuantity: body.payOnGrossQuantity === true,
       quantity: normalizedQuantity,
       price: normalizedPrice,
       humidity: normalizedHumidity,
@@ -372,12 +447,23 @@ async function completeWeighingHandler(req, res, id) {
     const partner = config.partners.find((item) => item.id === Number(receipt.supplierId));
     const fiscalProfile = config.fiscalProfiles.find((item) => item.name === partner?.fiscalProfile);
 
+    // Normele se citesc de pe DOCUMENT, nu din nomenclatorul de acum. Intre cele doua
+    // cantariri cineva poate schimba `humidityNorm` sau sterge produsul, iar recalcularea
+    // ar rescrie retroactiv baza de plata a unei receptii deja intrate — inclusiv anuland
+    // tacit intelegerea de plata pe masa cu apa. Normele sunt inghetate la creare exact
+    // pentru asta; config-ul ramane fallback doar pentru documentele vechi, fara ele.
+    const normeDocument = {
+      humidityNorm: Number(receipt.humidityNorm ?? product?.humidityNorm ?? 0),
+      impurityNorm: Number(receipt.impurityNorm ?? product?.impurityNorm ?? 0)
+    };
+
     const estimate = computeReceiptEstimate({
+      payOnGrossQuantity: receipt.payOnGrossQuantity === true,
       quantity: quantityTons,
       price: Number(receipt.price || 0),
       humidity: Number(receipt.humidity || 0),
       impurity: Number(receipt.impurity || 0),
-      product: product || { humidityNorm: 0, impurityNorm: 0 },
+      product: normeDocument,
       tariffs: config.tariffs,
       fiscalProfile
     });
@@ -397,9 +483,203 @@ async function completeWeighingHandler(req, res, id) {
   }
 }
 
+// Corectie de conditii pe o receptie deja intrata (contabili + admin, vezi
+// `CAN_CORRECT_TERMS_ROLES`): bifa „plata pe masa cu umiditate" si/sau pretul.
+// Recalculam estimarea AICI, ca la creare si la a doua cantarire —
+// stratul de persistenta nu citeste nomenclatorul.
+async function correctReceiptTermsHandler(req, res, id) {
+  const body = req.body || {};
+  try {
+    // Document BRUT: avem nevoie doar de campuri de pe el. `listReceipts` ar agrega FIFO
+    // toate platile si ar clona toate receptiile, ca sa arunce tot.
+    const receipt = getReceiptRaw(id);
+    if (!receipt) {
+      return sendJson(res, 404, { error: "Receptia nu a fost gasita." });
+    }
+
+    if (
+      body.payOnGrossQuantity !== undefined &&
+      body.payOnGrossQuantity !== null &&
+      typeof body.payOnGrossQuantity !== "boolean"
+    ) {
+      return sendJson(res, 400, {
+        error: "Campul „plata pe masa cu umiditate” trebuie sa fie adevarat sau fals."
+      });
+    }
+
+    // Lipsa din body PASTREAZA valoarea curenta, ca la pret. Altfel un apel care voia doar
+    // sa corecteze pretul ar scoate tacit bifa si ar micsora datoria catre furnizor.
+    const nextFlag =
+      body.payOnGrossQuantity === undefined || body.payOnGrossQuantity === null
+        ? receipt.payOnGrossQuantity === true
+        : body.payOnGrossQuantity === true;
+
+    const price = body.price === undefined ? Number(receipt.price || 0) : Number(body.price);
+    if (!Number.isFinite(price) || price < 0) {
+      return sendJson(res, 400, { error: "Pretul trebuie sa fie un numar pozitiv." });
+    }
+
+    const config = await getConfig();
+    const partner = config.partners.find((item) => item.id === Number(receipt.supplierId));
+    const fiscalProfile = config.fiscalProfiles.find(
+      (item) =>
+        String(item.name || "").trim().toLowerCase() ===
+        String(partner?.fiscalProfile || "").trim().toLowerCase()
+    );
+    const product = config.products.find(
+      (item) => item.id === Number(receipt.productId) || item.name === receipt.product
+    );
+
+    // TOT ce s-a inghetat la receptie se citeste de pe DOCUMENT, nu din nomenclatorul de
+    // acum: normele, TARIFELE si COTA DE IMPOZIT. Altfel o corectare care voia doar sa
+    // schimbe pretul rescrie retroactiv si cifra fiscala — iar adminul confirma o suma in
+    // timp ce serverul salveaza alta. Config-ul ramane fallback doar pentru documentele
+    // vechi, care nu au campurile salvate.
+    const normeDocument = {
+      humidityNorm: Number(receipt.humidityNorm ?? product?.humidityNorm ?? 0),
+      impurityNorm: Number(receipt.impurityNorm ?? product?.impurityNorm ?? 0)
+    };
+    const tarifeDocument = [
+      {
+        service: "Curatire",
+        active: true,
+        value: Number(receipt.cleaningTariff ?? getTariffValue(config.tariffs, "curatire"))
+      },
+      {
+        service: "Uscare",
+        active: true,
+        value: Number(receipt.dryingTariff ?? getTariffValue(config.tariffs, "uscare"))
+      }
+    ];
+    const cotaDocument = {
+      withholdingPercent: Number(
+        receipt.withholdingPercent ?? fiscalProfile?.withholdingPercent ?? 0
+      )
+    };
+
+    const estimate = computeReceiptEstimate({
+      payOnGrossQuantity: nextFlag,
+      // Cantitatea ramane cea cantarita: se corecteaza conditiile, nu marfa.
+      quantity: Number(receipt.quantity || 0),
+      price,
+      humidity: Number(receipt.humidity || 0),
+      impurity: Number(receipt.impurity || 0),
+      product: normeDocument,
+      tariffs: tarifeDocument,
+      fiscalProfile: cotaDocument
+    });
+
+    const updated = await correctReceiptTerms(id, {
+      estimate,
+      payOnGrossQuantity: estimate.payOnGrossQuantity,
+      price,
+      reason: body.reason,
+      actorRole: req.currentUser && req.currentUser.roleCode,
+      changedBy: getActorLabel(req)
+    });
+    return sendJson(res, 200, receiptForRequest(req, updated));
+  } catch (error) {
+    console.error("Failed to correct receipt terms:", error.message);
+    return sendJson(res, error.statusCode || 400, {
+      error: error.message || "Nu am putut corecta conditiile receptiei."
+    });
+  }
+}
+
+// Numarul actului de achizitie. Se cere la TIPARIRE: prima data se atribuie si se salveaza
+// pe receptie, apoi orice reimprimare primeste acelasi numar.
+// „Persoana fizica" se decide pe SERVER, din profilul fiscal al partenerului — nu din body:
+// altfel apelantul ar putea consuma numere pentru achizitii de la firme, lasand gauri in
+// sirul din dosar.
+async function assignActNumberHandler(req, res, id) {
+  try {
+    const receipt = getReceiptRaw(id);
+    if (!receipt) {
+      return sendJson(res, 404, { error: "Receptia nu a fost gasita." });
+    }
+    // Un act poate acoperi mai multe receptii ale aceluiasi furnizor. TOATE primesc numarul,
+    // altfel una tiparita ulterior individual ar arde un numar nou pentru marfa deja
+    // acoperita. Se accepta doar receptii ale ACELUIASI furnizor — un act e al unui furnizor.
+    // Tipizat: `.map(Number)` accepta booleeni si tablouri imbricate (`true` -> 1, `[7]` -> 7).
+    const brute = Array.isArray((req.body || {}).receiptIds) ? (req.body || {}).receiptIds : [];
+    if (brute.length > 50) {
+      return sendJson(res, 400, { error: "Un act nu poate acoperi mai mult de 50 de receptii." });
+    }
+    const cerute = brute
+      .map((v) => (typeof v === "number" || typeof v === "string" ? Number(v) : NaN))
+      .filter((v) => Number.isInteger(v) && v > 0);
+    if (brute.length && cerute.length !== brute.length) {
+      return sendJson(res, 400, { error: "Lista de receptii pentru act e invalida." });
+    }
+    const ids = cerute.length ? [...new Set([Number(id), ...cerute])] : [Number(id)];
+    for (const altId of ids) {
+      const alta = getReceiptRaw(altId);
+      if (!alta) {
+        return sendJson(res, 404, { error: `Receptia #${altId} nu a fost gasita.` });
+      }
+      if (Number(alta.supplierId) !== Number(receipt.supplierId)) {
+        return sendJson(res, 400, {
+          error: "Actul de achizitie acopera receptiile unui singur furnizor."
+        });
+      }
+    }
+
+    const config = await getConfig();
+    const partner = config.partners.find((item) => item.id === Number(receipt.supplierId));
+    const fiscalProfile = config.fiscalProfiles.find(
+      (item) =>
+        String(item.name || "").trim().toLowerCase() ===
+        String(partner?.fiscalProfile || "").trim().toLowerCase()
+    );
+    // Persoana fizica = cea la care se retine impozit la sursa. Acelasi criteriu folosit de
+    // actul tiparit (`partnerWithholdingPercent`).
+    const isNaturalPerson = Number(fiscalProfile?.withholdingPercent || 0) > 0;
+    // Seria e per FIRMA (nomenclatorul „companies"), nu globala. Firma vine din cerere
+    // fiindca actul se poate emite pe oricare dintre firmele active; daca nu e trimisa sau
+    // nu se gaseste, se ia prima firma activa — ca pe actul tiparit.
+    // Firma se cere EXPLICIT: seria intra pe un document fiscal si se ingheata pe receptie.
+    // Un fallback „prima firma activa" ingheta tacit seria altei firme decat cea pe care
+    // omul credea ca emite — numar ars, serie greșita, fara cale de corectie din aplicatie.
+    const companies = Array.isArray(config.companies) ? config.companies : [];
+    const cerutId = (req.body || {}).companyId;
+    const company = companies.find((item) => Number(item.id) === Number(cerutId));
+    if (!company) {
+      return sendJson(res, 400, {
+        error: "Alege firma emitenta inainte de a tipari actul: seria si numarul se inregistreaza pe document."
+      });
+    }
+    const series = String(company.series || company.shortName || "").trim();
+
+    const updated = await assignActNumber(ids, {
+      isNaturalPerson,
+      series,
+      companyId: company.id,
+      // Antetul firmei si identitatea furnizorului se ingheata pe act: nomenclatorul se
+      // poate edita, iar firma emitenta se poate dezactiva.
+      company,
+      supplier: partner,
+      actorRole: req.currentUser && req.currentUser.roleCode,
+      changedBy: getActorLabel(req)
+    });
+    return sendJson(res, 200, {
+      ok: true,
+      actNumber: updated.actNumber,
+      actSeries: updated.actSeries,
+      actFigures: updated.actFigures || null
+    });
+  } catch (error) {
+    console.error("Failed to assign act number:", error.message);
+    return sendJson(res, error.statusCode || 400, {
+      error: error.message || "Nu am putut atribui numarul actului."
+    });
+  }
+}
+
 module.exports = {
+  assignActNumberHandler,
   closeReceiptHandler,
   completeWeighingHandler,
+  correctReceiptTermsHandler,
   createReceiptHandler,
   healthHandler,
   listReceiptsHandler,

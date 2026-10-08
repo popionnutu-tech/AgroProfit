@@ -27,6 +27,10 @@
       "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
     },
     {
+      "source": "/qr.js",
+      "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+    },
+    {
       "source": "/styles.css",
       "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
     }

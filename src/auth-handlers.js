@@ -209,9 +209,17 @@ async function changePasswordHandler(req, res) {
       newValue: { username: fullUser.username, ip: getClientIp(req) }
     });
 
+    // Schimbarea parolei REVOCA sesiunile emise inainte (inclusiv cea curenta). Fara un
+    // token nou, omul care tocmai si-a schimbat parola primea 401 la urmatoarea cerere —
+    // iar pe un cont cu `requirePasswordChange` asta se intampla la FIECARE prima intrare.
+    const proaspat = await findUserByUsername(fullUser.username);
+    const tokenNou = createSession(proaspat || fullUser);
+    setSessionCookie(res, req, tokenNou);
+
     return sendJson(res, 200, {
       ok: true,
-      user: updatedUser
+      user: updatedUser,
+      token: tokenNou
     });
   } catch (error) {
     console.error("Failed to change password:", error.message);

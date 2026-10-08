@@ -13,7 +13,7 @@ const {
 } = require("./automation-handlers");
 const { startCloseOfDayScheduler } = require("./close-of-day");
 const { startCriticalAlertMonitor } = require("./critical-alerts");
-const { attachCurrentUser, getActorLabel, requireAuth, requireRoles } = require("./auth");
+const { attachCurrentUser, getActorLabel, requireAuth, requireRoles, setUserLookup } = require("./auth");
 const {
   changePasswordHandler,
   loginHandler,
@@ -36,6 +36,8 @@ const {
 const {
   closeReceiptHandler,
   completeWeighingHandler,
+  assignActNumberHandler,
+  correctReceiptTermsHandler,
   createReceiptHandler,
   healthHandler,
   listReceiptsHandler,
@@ -71,6 +73,7 @@ const {
 } = require("./complaint-handlers");
 const { listAuditLogsHandler } = require("./audit-handlers");
 const {
+  clearStockDustHandler,
   createStockCorrectionHandler,
   listStockCorrectionsHandler
 } = require("./stock-correction-handlers");
@@ -80,13 +83,19 @@ const {
   listOpeningDocumentsHandler
 } = require("./opening-handlers");
 const {
+  exportPurchaseActs1cHandler,
+  exportPayments1cHandler,
+  listPending1cHandler,
+  matchSuppliers1cHandler,
+  setExported1cHandler,
+  exportSuppliers1cHandler,
   exportResourceHandler,
   getDashboardHandler,
   getDeliveryDefaultsHandler,
   getReceiptDefaultsHandler
 } = require("./report-extensions-handlers");
 const storage = require("./storage");
-const { filterCanceledForRole } = require("./permissions");
+const { CAN_CORRECT_TERMS_ROLES, filterCanceledForRole } = require("./permissions");
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
@@ -118,6 +127,10 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json({ limit: "1mb" }));
+// `auth.js` nu poate cere `local-storage` (acela il cere pe el). Injectam cautarea contului
+// ca sesiunea sa fie verificata pe CONT la fiecare cerere, nu doar pe token.
+setUserLookup((username) => storage.findUserByUsername(username));
+
 app.use("/api", attachCurrentUser);
 app.use(express.static(path.join(process.cwd(), "public")));
 
@@ -385,6 +398,29 @@ app.post(
   }
 );
 
+// Numarul actului de achizitie: se atribuie la prima tiparire si NU se mai schimba.
+// Doar contabil/admin — e un numar de document fiscal, nu o eticheta de interfata.
+app.post(
+  "/api/receipts/:id/act-number",
+  requireRoles(["accountant", "accountant-sef", "admin"]),
+  async (req, res) => {
+    return assignActNumberHandler(req, res, req.params.id);
+  }
+);
+
+// Corectie de conditii pe o receptie deja intrata: bifa „plata pe masa cu umiditate" si/sau
+// pretul. Contabil, contabil-sef si admin — rescrie bani pe un document inregistrat, aceeasi
+// categorie cu ajustarea valorii receptiei (`finance-write`). Motiv obligatoriu, istoric pe
+// document (`termCorrections`) si intrare de audit. Rolul se reverifica in storage
+// (`CAN_CORRECT_TERMS_ROLES`), ca ruta si magazia sa nu poata divergea.
+app.patch(
+  "/api/receipts/:id/correct-terms",
+  requireRoles(CAN_CORRECT_TERMS_ROLES),
+  async (req, res) => {
+    return correctReceiptTermsHandler(req, res, req.params.id);
+  }
+);
+
 // Cantar in 2 pasi: a doua cantarire (tara) finalizeaza receptia "In descarcare".
 app.patch(
   "/api/receipts/:id/complete-weighing",
@@ -429,6 +465,10 @@ app.get(
   listStockCorrectionsHandler
 );
 app.post("/api/stock-corrections", requireRoles(["admin"]), createStockCorrectionHandler);
+
+// Curatarea resturilor sub prag: fiecare rand trece prin aceeasi corectie de inventar,
+// deci rămâne urma. Doar admin, ca orice rescriere de stoc.
+app.post("/api/stock-corrections/clear-dust", requireRoles(["admin"]), clearStockDustHandler);
 
 // Transfer de produs intre cilindri (mutare stoc).
 app.get(
@@ -677,6 +717,63 @@ app.get(
   getDashboardHandler
 );
 
+// GET pentru descarcarea simpla (pe perioada); POST cand se trimite o SELECTIE de ids:
+// in URL, mii de ids depasesc limita de antet a platformei.
+app.all(
+  "/api/exports/purchase-acts-1c",
+  requireRoles(["accountant", "accountant-sef", "admin"]),
+  exportPurchaseActs1cHandler
+);
+
+// Furnizorii de pe actele din perioada. Se incarca in 1C INAINTEA actelor, ca fiecare act
+// sa gaseasca furnizorul existent — fara cimpuri goale si fara dubluri.
+// GET pentru descarcarea simpla (pe perioada); POST cand se trimite o SELECTIE de ids:
+// in URL, mii de ids depasesc limita de antet a platformei.
+app.all(
+  "/api/exports/suppliers-1c",
+  requireRoles(["accountant", "accountant-sef", "admin"]),
+  exportSuppliers1cHandler
+);
+
+// Ordine de plata. Se incarca in 1C DUPA acte.
+// GET pentru descarcarea simpla (pe perioada); POST cand se trimite o SELECTIE de ids:
+// in URL, mii de ids depasesc limita de antet a platformei.
+app.all(
+  "/api/exports/payments-1c",
+  requireRoles(["accountant", "accountant-sef", "admin"]),
+  exportPayments1cHandler
+);
+
+// Ce e de incarcat in 1C (pentru bifare in interfata): `?kind=suppliers|receipts|payments`.
+app.get(
+  "/api/exports/1c/pending",
+  requireRoles(["accountant", "accountant-sef", "admin"]),
+  listPending1cHandler
+);
+
+// Marcheaza / anuleaza marcajul „incarcat in 1C" pe furnizori, acte sau plati.
+// Anularea serveste reincarcarii unui document corectat.
+// Aceleasi roluri ca exportul: cine marcheaza trebuie sa poata si CITI documentele.
+app.post(
+  "/api/exports/1c/mark",
+  requireRoles(["accountant", "accountant-sef", "admin"]),
+  setExported1cHandler
+);
+
+// Potrivirea DE PORNIRE cu lista de furnizori descarcata din 1C: marcheaza tot ce exista
+// deja acolo, ca primul export sa nu scoata si furnizorii vechi. Se ruleaza O DATA.
+app.post(
+  "/api/exports/1c/match-suppliers",
+  requireRoles(["accountant", "accountant-sef", "admin"]),
+  matchSuppliers1cHandler
+);
+
+// Ruta veche de marcare a furnizorilor a fost SCOASA: duplica `POST /api/exports/1c/mark`
+// cu `kind=suppliers`, prin a doua functie de storage, cu propria validare. Doua cai pentru
+// aceeasi actiune inseamna ca o inasprire pe una lasa cealalta deschisa.
+
+// Exportul generic (CSV de lucru). Ruta de mai sus e DEASUPRA, altfel „purchase-acts-1c" ar
+// fi prins de `:resource` si ar da „resursa necunoscuta".
 app.get(
   "/api/exports/:resource",
   requireRoles(["manager", "accountant", "accountant-sef", "admin", "control"]),

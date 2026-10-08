@@ -230,12 +230,16 @@ function createSession(user) {
 }
 
 function destroySession(_token) {
-  // Stateless tokens — destroy is handled by clearing the cookie on the client.
+  // Token stateless: ieșirea de pe UN dispozitiv = stergerea cookie-ului. Invalidarea
+  // tuturor sesiunilor unui utilizator se face prin `sessionsRevokedAt` pe cont (vezi
+  // `attachCurrentUser`): se seteaza la schimbarea parolei, la dezactivare si la schimbarea
+  // rolului. Asa „ieși de pe telefon" nu te scoate si din birou, dar un cont dezactivat sau
+  // o parola schimbata taie imediat sesiunile existente.
 }
 
 function updateSessionUser(_userId, _patch) {
-  // Stateless tokens — user data in the token reflects login moment.
-  // After password change / role update, user gets new token on next login.
+  // Nu mai e nevoie de patch pe token: `attachCurrentUser` reciteste contul la FIECARE
+  // cerere, deci rolul, drepturile si starea „activ" sunt mereu cele de acum.
 }
 
 function getClientIp(req) {
@@ -366,7 +370,15 @@ function unlockUsername(username) {
   clearFailedAttempt(loginAttemptsByUsername, username);
 }
 
-function attachCurrentUser(req, _res, next) {
+// Cautarea contului, injectata de `server.js` — `auth.js` nu poate cere `local-storage`
+// (acela il cere pe el, deci ar fi ciclu).
+let userLookup = null;
+
+function setUserLookup(fn) {
+  userLookup = typeof fn === "function" ? fn : null;
+}
+
+async function attachCurrentUser(req, _res, next) {
   const cookies = parseCookies(req.headers.cookie);
   let token = cookies[SESSION_COOKIE_NAME];
 
@@ -386,7 +398,25 @@ function attachCurrentUser(req, _res, next) {
     const payload = verifyToken(token);
     const now = Date.now();
     if (payload && payload.expiresAt > now) {
-      req.currentUser = payload.user;
+      // Tokenul dovedeste doar ca omul s-a autentificat CANDVA. Rolul si starea contului se
+      // citesc de pe CONT, la fiecare cerere: altfel un utilizator dezactivat sau retrogradat
+      // pastra drepturile vechi pana la expirarea tokenului (12 ore), iar o parola schimbata
+      // nu taia sesiunile existente.
+      if (!userLookup) {
+        req.currentUser = payload.user;
+      } else {
+        try {
+          const cont = await userLookup(payload.user && payload.user.username);
+          const revocatLa = cont && cont.sessionsRevokedAt ? Date.parse(cont.sessionsRevokedAt) : 0;
+          const emisLa = Number(payload.createdAt || 0);
+          if (cont && cont.active !== false && !(revocatLa > 0 && emisLa < revocatLa)) {
+            req.currentUser = sanitizeUserForSession(cont);
+          }
+        } catch (error) {
+          // O eroare la citirea contului nu are voie sa acorde acces: fail-closed.
+          console.error("Nu am putut verifica sesiunea:", error.message);
+        }
+      }
     }
   }
 
@@ -422,6 +452,7 @@ function getActorLabel(req) {
 }
 
 module.exports = {
+  setUserLookup,
   SESSION_COOKIE_NAME,
   SESSION_INACTIVITY_MS,
   attachCurrentUser,

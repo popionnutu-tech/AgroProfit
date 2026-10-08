@@ -14,3 +14,50 @@ data/
 
 # Rapoarte de audit de securitate — NU se comit (repo public)
 SECURITY-AUDIT-*.md
+.DS_Store
+
+# Exporturi descarcate din aplicatie (contin date REALE de productie).
+# Hook-ul de auto-commit face `git add -A`, iar repo-ul e public: fara liniile astea,
+# un export lasat in radacina ajunge publicat la prima modificare de cod.
+/config.json
+/stocks.json
+/receipts.json
+/config*.json
+/stocks*.json
+/receipts*.json
+
+# Documente scanate / acte cu date personale puse temporar in folder pentru analiza.
+# Repo-ul e public: un `git add -A` din hook le-ar publica ireversibil.
+*.pdf
+*.PDF
+# Un act fotografiat cu telefonul NU e PDF: vine ca .jpg/.heic. Se ignora in RADACINA
+# (unde ajung fisierele puse temporar pentru analiza); imaginile aplicatiei stau in
+# `public/` si nu sunt atinse de regulile astea.
+/*.jpg
+/*.JPG
+/*.jpeg
+/*.JPEG
+/*.png
+/*.PNG
+/*.heic
+/*.HEIC
+/*.webp
+/*.tif
+/*.tiff
+# Exporturile pentru 1C: contin IDNP-uri, adrese, telefoane, IBAN-uri, sume si impozitul
+# retinut pentru PERSOANE FIZICE. Hook-ul de auto-commit face `git add -A`, iar repo-ul e
+# public: un fisier salvat oriunde in proiect + prima modificare de cod = publicat ireversibil.
+# FARA `/` initial: `/ *.csv` prindea doar radacina, deci `export-1c/furnizori.csv` se comitea.
+*.csv
+*.CSV
+
+# Nomenclatorul de contragenti EXPORTAT DIN 1C (~11 MB): nume + cod fiscal/IDNP pentru TOTI
+# contragentii, inclusiv istoricul. Functionalitatea noua cere utilizatorului sa deschida exact
+# acest fisier, deci el ajunge pe disc langa proiect. Niciun XML nu e urmarit in repo, deci
+# regula poate fi globala fara sa strice nimic.
+*.xml
+*.XML
+
+# Loc dedicat pentru documentele primite de la furnizori, daca e nevoie sa stea in folder.
+/scanuri/
+/documente/

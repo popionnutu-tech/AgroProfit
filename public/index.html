@@ -545,6 +545,14 @@
               </label>
             </div>
 
+            <label class="inline-check" id="pay-on-gross-wrap" hidden>
+              <input name="payOnGrossQuantity" id="pay-on-gross-input" type="checkbox" />
+              <span>
+                <strong>Plata pe masa cu umiditate (fara scaderea apei)</strong>
+                <span class="field-hint" id="pay-on-gross-hint"></span>
+              </span>
+            </label>
+
             <details class="optional-fields">
               <summary>Detalii optionale</summary>
               <div class="split">
@@ -723,6 +731,11 @@
                 Pana la
                 <input type="date" id="receipt-date-to" />
               </label>
+              <label class="col-fin">Firmă pe documente
+                <select id="receipt-doc-company" class="doc-header-company" title="Firma care apare sus pe Actul de achiziție tipărit de pe rândul recepției">
+                  <option value="">AgroProfit+ (implicit)</option>
+                </select>
+              </label>
             </div>
           </section>
 
@@ -744,6 +757,7 @@
                     <th>Apă (kg)</th>
                     <th>Cantitate</th>
                     <th>Locatie</th>
+                    <th class="col-fin" title="Numarul actului de achizitie emis pe aceasta receptie">Act nr.</th>
                     <th class="col-fin">Valoare</th>
                     <th class="col-fin">Achitat</th>
                     <th class="col-fin">Rest</th>
@@ -1055,6 +1069,12 @@
           </div>
           <div class="stock-summary" id="stock-summary"></div>
           <p class="stock-deficit-warning" id="stock-deficit-warning" hidden></p>
+          <div class="report-actions" id="stock-dust-wrap" hidden style="margin:6px 0">
+            <button type="button" id="stock-dust-btn" class="cell-btn">
+              🧹 Curăță resturile sub 5 kg
+            </button>
+            <span class="field-hint" id="stock-dust-hint"></span>
+          </div>
           <div class="table-wrap">
             <table>
               <thead>
@@ -1095,6 +1115,38 @@
                 </tr>
               </thead>
               <tbody id="stock-period-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel" data-view="stoc">
+          <div class="panel-head">
+            <h2>Mișcare stoc pe perioadă, pe locații</h2>
+            <p>Aceleași mișcări, desfășurate pe fiecare cilindru / groapă: de unde a plecat marfa și unde a ajuns. Toate cantitățile în kg.</p>
+          </div>
+          <div class="inline-date-filter">
+            <label>De la<input type="date" id="stock-period-loc-from" /></label>
+            <label>Pana la<input type="date" id="stock-period-loc-to" /></label>
+            <label>Produs<select id="stock-period-loc-product"><option value="">Toate produsele</option></select></label>
+            <label>Locație<select id="stock-period-loc-location"><option value="">Toate locațiile</option></select></label>
+          </div>
+          <div class="table-wrap">
+            <table id="stock-period-loc-table">
+              <thead>
+                <tr>
+                  <th>Locație</th>
+                  <th>Produs</th>
+                  <th>Inițial</th>
+                  <th>Recepții</th>
+                  <th title="Marfă venită prin transfer sau ieșită din procesare în această locație">Intrat</th>
+                  <th title="Marfă plecată prin transfer sau intrată la procesare din această locație">Ieșit</th>
+                  <th>Livrări</th>
+                  <th title="Pierdere la recepție (net final sub cel provizoriu). Pierderea la procesare se vede ca diferență între Ieșit și Intrat.">Pierderi recepție</th>
+                  <th>Corecții</th>
+                  <th>Final</th>
+                </tr>
+              </thead>
+              <tbody id="stock-period-loc-body"></tbody>
             </table>
           </div>
         </section>
@@ -1426,6 +1478,9 @@
               <div>Valoare totală fără TVA: <strong id="billing-base">0,00</strong> lei</div>
               <div>Suma totală TVA: <strong id="billing-vat">0,00</strong> lei</div>
               <div class="billing-grand">Total factură: <strong id="billing-total">0,00</strong> lei</div>
+              <div class="billing-receivable">De încasat de la cumpărător: <strong id="billing-receivable">0,00</strong> lei
+                <span class="field-hint" id="billing-receivable-hint"></span>
+              </div>
             </div>
             <div class="split">
               <label>Nr. contract<input name="contractNumber" placeholder="Contract" /></label>
@@ -1451,6 +1506,44 @@
               <button type="button" class="ghost-button" id="billing-cancel-btn">Renunță</button>
             </div>
             <p class="form-message" id="billing-message"></p>
+          </form>
+        </dialog>
+
+        <dialog id="receipt-correct-dialog" class="billing-dialog">
+          <form id="receipt-correct-form" method="dialog">
+            <h3>Corectează condițiile · Recepție <span id="rc-receipt-id"></span></h3>
+            <p class="field-hint" id="rc-context"></p>
+
+            <label class="inline-check">
+              <input name="payOnGrossQuantity" id="rc-pay-on-gross" type="checkbox" />
+              <span>
+                <strong>Plata pe masa cu umiditate (fara scaderea apei)</strong>
+                <span class="field-hint" id="rc-flag-hint"></span>
+              </span>
+            </label>
+
+            <label>Preț (lei / kg)
+              <input name="price" id="rc-price" type="text" inputmode="decimal" placeholder="ex: 5 sau 5,20" />
+            </label>
+
+            <div class="billing-totals" id="rc-totals">
+              <div>Cantitate plătită: <strong id="rc-qty">0</strong> kg</div>
+              <div>Valoare marfă: <strong id="rc-gross">0,00</strong> lei</div>
+              <div>Impozit reținut: <strong id="rc-tax">0,00</strong> lei</div>
+              <div class="billing-grand">Total de plată: <strong id="rc-total">0,00</strong> lei
+                <span id="rc-delta" class="rc-delta"></span>
+              </div>
+            </div>
+
+            <label>Motivul corectării (obligatoriu)
+              <input name="reason" id="rc-reason" placeholder="Ex: înțelegere cu furnizorul, achiziție cu tot cu apă" />
+            </label>
+
+            <div class="form-actions">
+              <button type="submit" value="save">Salvează corectarea</button>
+              <button type="button" class="ghost-button" id="rc-cancel-btn">Renunță</button>
+            </div>
+            <p class="form-message" id="rc-message"></p>
           </form>
         </dialog>
 
@@ -1872,8 +1965,11 @@
 
             <details class="report-accordion">
               <summary>Plati si incasari pe zi</summary>
+              <div class="report-actions" style="margin:6px 0">
+                <button type="button" class="table-print-btn" data-table="daily-report-transactions-table" data-title="Plăți și încasări pe zi">🖨 Tipărește tabelul</button>
+              </div>
               <div class="table-wrap">
-                <table>
+                <table id="daily-report-transactions-table">
                   <thead>
                     <tr>
                       <th>ID</th>
@@ -1892,8 +1988,11 @@
 
             <details class="report-accordion">
               <summary>Reclamatii pe zi</summary>
+              <div class="report-actions" style="margin:6px 0">
+                <button type="button" class="table-print-btn" data-table="daily-report-complaints-table" data-title="Reclamații pe zi">🖨 Tipărește tabelul</button>
+              </div>
               <div class="table-wrap">
-                <table>
+                <table id="daily-report-complaints-table">
                   <thead>
                     <tr>
                       <th>ID</th>
@@ -1911,8 +2010,11 @@
 
             <details class="report-accordion" id="daily-report-canceled-accordion">
               <summary>Operatiuni anulate si retururi <span id="daily-report-canceled-count" class="muted-count"></span></summary>
+              <div class="report-actions" style="margin:6px 0">
+                <button type="button" class="table-print-btn" data-table="daily-report-canceled-table" data-title="Operațiuni anulate și retururi">🖨 Tipărește tabelul</button>
+              </div>
               <div class="table-wrap">
-                <table>
+                <table id="daily-report-canceled-table">
                   <thead>
                     <tr>
                       <th>Tip</th>
@@ -1934,6 +2036,89 @@
 
         <section class="panel reports-panel" data-access="reports" data-view="rapoarte">
           <div class="report-accordion-list">
+            <details class="report-accordion" id="export-1c-accordion" data-access="finance">
+              <summary>Export pentru 1C · acte de achiziție</summary>
+              <p class="field-hint" style="margin:6px 0">
+                Fișier CSV cu actele de achiziție emise, pentru încărcare în 1C
+                (<i>Акт закупки</i>). Se exportă cifrele îngheţate la emitere, deci coincid cu
+                hârtia semnată. Impozitul e inclus pentru verificare — în 1C el se ia din
+                ordinul de plată.
+              </p>
+              <div class="split">
+                <label>De la<input type="date" id="export-1c-from" /></label>
+                <label>Până la<input type="date" id="export-1c-to" /></label>
+              </div>
+              <div class="report-actions" style="margin:6px 0">
+                <button type="button" id="export-1c-tab-suppliers" class="cell-btn">1 · Furnizori noi</button>
+                <button type="button" id="export-1c-tab-receipts" class="cell-btn">2 · Acte de achiziție</button>
+                <button type="button" id="export-1c-tab-payments" class="cell-btn">3 · Ordine de plată</button>
+                <label class="inline-check" style="padding:4px 8px">
+                  <input type="checkbox" id="export-1c-include" />
+                  <span>arată și cele deja încărcate</span>
+                </label>
+              </div>
+
+              <div class="table-wrap" style="max-height:320px;overflow:auto">
+                <table id="export-1c-table">
+                  <thead>
+                    <tr>
+                      <th style="width:28px"><input type="checkbox" id="export-1c-all" title="Bifează tot" /></th>
+                      <th>Document</th>
+                      <th>Data</th>
+                      <th>Sumă / Cod fiscal</th>
+                      <th>Încărcat în 1C</th>
+                    </tr>
+                  </thead>
+                  <tbody id="export-1c-body"></tbody>
+                </table>
+              </div>
+
+              <div class="report-actions" style="margin:6px 0">
+                <button type="button" id="export-1c-download-btn" class="cell-btn cell-btn-primary">⬇ Descarcă selecția</button>
+                <button type="button" id="export-1c-mark-btn" class="cell-btn">✓ Am încărcat în 1C</button>
+                <button type="button" id="export-1c-unmark-btn" class="cell-btn">↺ Anulează marcajul</button>
+                <span class="field-hint" id="export-1c-hint"></span>
+              </div>
+              <p class="field-hint" style="margin:2px 0 6px">
+                <b>Potrivire de pornire:</b> lipește aici codurile fiscale ale furnizorilor
+                care există deja în 1C (din exportul nomenclatorului) și apasă „Potrivește".
+                Se face <b>o singură dată</b> — de atunci marcajul zilnic funcționează singur.
+              </p>
+              <div class="split">
+                <label>Fișierul exportat din 1C (nomenclatorul de contragenți)
+                  <input type="file" id="export-1c-file" accept=".xml,.txt,.csv" />
+                  <span class="field-hint" id="export-1c-file-hint">
+                    Alege fișierul — codurile fiscale se citesc automat, nu se încarcă nimic pe server.
+                  </span>
+                </label>
+                <label>…sau lipește codurile (unul per rând)
+                  <textarea id="export-1c-codes" rows="3" placeholder="2000000000001&#10;2000000000002"></textarea>
+                </label>
+              </div>
+              <div class="report-actions" style="margin:6px 0">
+                <button type="button" id="export-1c-match-btn" class="cell-btn">Potrivește cu 1C</button>
+              </div>
+              <p class="field-hint" style="margin:2px 0 6px">
+                <b>Ordinea contează.</b> „Furnizori noi" scoate doar furnizorii care nu au
+                fost încă încărcați în 1C. După ce îi importezi acolo, apasă
+                <b>„Am încărcat în 1C"</b> — de atunci nu mai apar în export, deci nu se
+                creează dubluri. Apoi descarcă <b>actele</b>.
+              </p>
+              <p class="field-hint" style="margin:2px 0 6px">
+                Potrivirea în 1C se face după <b>codul fiscal / IDNP</b>, nu după denumire —
+                un furnizor fără cod fiscal nu se exportă, fiindcă 1C nu l-ar putea lega de
+                nimic. Marcajul se apasă de tine, nu automat la descărcare: dacă importul în
+                1C cade, furnizorii trebuie să rămână în export.
+              </p>
+              <p class="field-hint" style="margin:2px 0 6px">
+                <b>Ordinele de plată</b> se încarcă <b>după</b> acte: plata se leagă de
+                furnizor și de contul contabil, iar actul justifică datoria. Conturile
+                implicite sunt cele din exportul tău (casa <b>241.1</b>, furnizor
+                <b>544.32</b>, impozit <b>534.3</b>) și se pot schimba din Setări.
+                Suma din export e <b>brută</b>, iar impozitul se reține din ea — ca în 1C.
+              </p>
+            </details>
+
             <details class="report-accordion" id="losses-report-accordion">
               <summary>Pierderi cantitative</summary>
               <p class="field-hint" style="margin-top:6px">Fluxul cantității pe produs: primit → procesare → livrat, cu diferența necontabilizată</p>
@@ -2335,6 +2520,17 @@
               </div>
               <input name="reportAudience" placeholder="Destinatari raport" required />
               <input name="defaultCurrency" placeholder="Moneda" required />
+              <p class="field-hint" style="margin:6px 0 2px">
+                Conturi contabile pentru exportul în 1C și pragul resturilor de stoc:
+              </p>
+              <div class="split">
+                <label>Cont casă<input name="account1cCash" placeholder="241.1" /></label>
+                <label>Cont furnizor<input name="account1cSupplier" placeholder="544.32" /></label>
+              </div>
+              <div class="split">
+                <label>Cont impozit<input name="account1cTax" placeholder="534.3" /></label>
+                <label>Prag resturi stoc (kg)<input name="stockDustThresholdKg" type="number" min="1" max="50" step="1" placeholder="5" /></label>
+              </div>
               <button type="submit">Salveaza setari</button>
               <p class="form-message" id="settings-message"></p>
             </form>
@@ -2518,6 +2714,8 @@
       </div>
     </div>
 
+    <!-- Generatorul de QR e folosit doar la tipar, deci nu are ce cauta pe calea critica. -->
+    <script src="/qr.js" defer></script>
     <script src="/i18n-ru.js"></script>
     <script src="/app.js"></script>
   </body>

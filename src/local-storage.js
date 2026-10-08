@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const { createPasswordRecord } = require("./auth");
@@ -5,7 +6,8 @@ const {
   getRoleName,
   getRolePermissions,
   listSystemRoles,
-  normalizeRoleCode
+  normalizeRoleCode,
+  CAN_CORRECT_TERMS_ROLES
 } = require("./permissions");
 const { backupRuntimeData } = require("./runtime-backup");
 const { writeJsonAtomic } = require("./atomic-write");
@@ -189,6 +191,15 @@ const defaultConfigState = {
     reportChannel: "telegram",
     reportAudience: "manager,control",
     defaultCurrency: "MDL",
+    // Pragul sub care un rest de stoc e considerat „praf" si se poate asaza la zero in bloc.
+    // Tinut AICI, nu duplicat in cod: era scris si in backend si in frontend, exact tipul de
+    // duplicare care a produs bug-ul de 1000x la facturare.
+    stockDustThresholdKg: 5,
+    // Conturile contabile pentru exportul in 1C. Implicitele sunt cele citite din exportul
+    // real al utilizatorului; un alt plan de conturi nu trebuie sa ceara modificare de cod.
+    account1cCash: "241.1",
+    account1cSupplier: "544.32",
+    account1cTax: "534.3",
     migrationVersion: ""
   }
 };
@@ -209,7 +220,50 @@ const configEntities = [
   "fields"
 ];
 
-const defaultUserPassword = process.env.DEFAULT_USER_PASSWORD || "Agro2026!";
+// Parola cu care se seamana conturile fara parola si adminul de pornire.
+//
+// NU are voie sa fie o constanta in cod: repo-ul e PUBLIC, deci o valoare scrisa aici e
+// cunoscuta de oricine si functioneaza pe orice cont care nu si-a schimbat parola inca.
+// Daca `DEFAULT_USER_PASSWORD` nu e setata, se genereaza una ALEATOARE si se scrie in logul
+// serverului — bootstrap-ul rămâne posibil, dar nimic nu e cunoscut din afara.
+// Parola cu care se seamana conturile fara parola si adminul de pornire.
+//
+// LENESA, nu constanta la incarcarea modulului: o aruncare aici lasa `api/index.js` cu
+// `app = null`, deci FIECARE cerere raspunde 500 — inclusiv login-ul. O cerinta de mediu nu
+// are voie sa doboare serverul; se cade doar pe drumul care are efectiv nevoie de parola.
+let parolaInitialaCache = null;
+
+function defaultUserPasswordValue() {
+  if (parolaInitialaCache) return parolaInitialaCache;
+
+  const dinMediu = String(process.env.DEFAULT_USER_PASSWORD || "").trim();
+  if (dinMediu) {
+    parolaInitialaCache = dinMediu;
+    return parolaInitialaCache;
+  }
+
+  const publicat = String(process.env.STORAGE_DRIVER || "").trim().toLowerCase() === "supabase";
+  if (publicat) {
+    // In productie nu se logheaza nimic: parola ar ajunge in logurile platformei, vizibile
+    // oricui are acces la proiect si pastrate cu retentie. Nici nu se genereaza tacit o
+    // parola „valabila": un cont semanat cu ea ar fi inaccesibil oricum. Se cade cu mesaj
+    // clar, DOAR daca se ajunge aici (in practica: niciun admin activ).
+    throw new Error(
+      "DEFAULT_USER_PASSWORD nu e setata. Seteaz-o in variabilele de mediu inainte de a " +
+      "crea conturi initiale — altfel parola ar ajunge in loguri."
+    );
+  }
+
+  // Local: se genereaza si se scrie in consola, ca sa fie posibila prima intrare.
+  // Se garanteaza o CIFRA: politica stricta cere una, iar din 12 caractere base64url una
+  // din opt parole nu avea niciuna — si pornirea cadea exact pe calea de recuperare.
+  parolaInitialaCache = `Ap${crypto.randomInt(10)}-${crypto.randomBytes(9).toString("base64url")}!`;
+  console.warn(
+    "[securitate] DEFAULT_USER_PASSWORD nu e setata (mediu local). Parola initiala pentru " +
+    `aceasta pornire: ${parolaInitialaCache}`
+  );
+  return parolaInitialaCache;
+}
 
 const DELIVERY_STATUSES = ["Proiect", "Confirmat", "Livrat", "Inchis", "Anulat", "Redeschis", "Returnat"];
 const RECEIPT_STATUSES = ["Proiect", "In descarcare", "Draft", "Procesata", "Confirmat", "Inchis", "Anulat", "Redeschis"];
@@ -242,6 +296,32 @@ const CAN_RETURN_INVOICED_ROLES = ["accountant", "accountant-sef", "admin"];
 // vanzator, TVA, achitat). NU operatorul: el ar putea goli `invoiceNumber` ca sa ocoleasca
 // garda de mai sus. Managerul e inclus fiindca supervizeaza contabilitatea.
 const CAN_EDIT_BILLING_ROLES = ["accountant", "accountant-sef", "manager", "admin"];
+// Monedele permise. Lista se verifica pe SERVER: selectul din interfata are 4 optiuni, dar
+// un apel direct il ocoleste, iar moneda se randeaza in tabelul de livrari.
+const VALID_CURRENCIES = ["MDL", "EUR", "USD", "RON"];
+// Sursa unica, folosita la CREARE si la EDITARE. Selectul din interfata nu e o garda: un apel
+// direct il ocoleste, iar o moneda necunoscuta comuta calculul pe ramura „valuta" si intra in
+// capul facturii.
+function normalizeCurrency(value) {
+  const cerut = String(value || "MDL").trim().toUpperCase() || "MDL";
+  if (!VALID_CURRENCIES.includes(cerut)) {
+    throw new Error(`Moneda "${cerut}" nu este permisa. Alege una din: ${VALID_CURRENCIES.join(", ")}.`);
+  }
+  return cerut;
+}
+// Numerotarea actelor de achizitie. Primul act emis din aplicatie e cel
+// din 02.10.2026, care pe hartie are numarul 914 — deci sirul porneste de acolo. Actele de
+// DINAINTE rămân nenumerotate in aplicatie: au deja numere scrise de mana si nu se rescrie
+// nimic din ce e deja semnat (decizia utilizatorului, 03.10.2026).
+const ACT_NUMBER_START = 914;
+// Se seteaza DUPA ce migrarea de numerotare atomica e aplicata si verificata. De atunci,
+// derivarea din blob (mai slaba) nu mai e acceptata ca rezerva.
+const REQUIRE_PG_ACT_NUMBERS =
+  ["1", "true", "yes"].includes(String(process.env.ACT_NUMBERS_PG || "").trim().toLowerCase());
+// Doar achizitiile de la PERSOANE FIZICE consuma numere: actul de achizitie se intocmeste
+// acolo, fiindca acolo se retine impozitul la sursa. Astfel sirul rămâne compact si coincide
+// cu dosarul de hartie.
+const CAN_ISSUE_ACTS_ROLES = ["accountant", "accountant-sef", "admin"];
 // Campurile de facturare ale unei livrari. Sursa unica: verificate si la creare, si la editare.
 const DELIVERY_BILLING_FIELDS = [
   "invoiceNumber", "invoiceDate", "seller", "sellerId", "priceLei", "priceForeign",
@@ -253,6 +333,7 @@ const WAREHOUSE_ONLY_RETURN_ROLES = ["accountant", "accountant-sef"];
 // sa apuce sa le introduca). Proiectul NU misca stoc si NU creeaza datorie; operatorul il
 // confirma la cantar cu greutatile reale.
 const CAN_CREATE_DRAFT_ROLES = ["accountant", "accountant-sef", "admin"];
+
 // Statusuri care NU se pot cere din body la crearea unei receptii:
 //   „Proiect" — se obtine doar prin `isDraft`, decis de ROL. Altfel oricine putea crea o
 //               receptie in afara stocului, a KPI-ului si a datoriei: ascundere de marfa.
@@ -462,7 +543,7 @@ function ensureUserSecurityState(users = []) {
     }
 
     if (!nextUser.passwordSalt || !nextUser.passwordHash) {
-      const passwordRecord = createPasswordRecord(defaultUserPassword, { mode: "lenient" });
+      const passwordRecord = createPasswordRecord(defaultUserPasswordValue(), { mode: "lenient" });
       nextUser.passwordSalt = passwordRecord.salt;
       nextUser.passwordHash = passwordRecord.hash;
       if (nextUser.requirePasswordChange === undefined) {
@@ -488,7 +569,9 @@ function ensureBootstrapAdmin(users = []) {
   }
 
   const nextUsers = [...users];
-  const passwordRecord = createPasswordRecord(defaultUserPassword);
+  // Politica LENIENT, ca la celelalte doua apeluri: o parola venita din variabila de mediu
+  // nu are voie sa impiedice crearea adminului de recuperare.
+  const passwordRecord = createPasswordRecord(defaultUserPasswordValue(), { mode: "lenient" });
   nextUsers.push({
     id: nextUsers.reduce((max, item) => Math.max(max, Number(item.id || 0)), 0) + 1,
     name: "Administrator",
@@ -498,6 +581,10 @@ function ensureBootstrapAdmin(users = []) {
     active: true,
     passwordSalt: passwordRecord.salt,
     passwordHash: passwordRecord.hash,
+    // OBLIGATORIU: parola de pornire e cunoscuta (din variabila de mediu sau din log).
+    // Fara asta, `ensureUserSecurityState` o lasa pe `false` la urmatoarea citire (hash-ul
+    // exista deja), deci credentialul rămânea valabil nelimitat.
+    requirePasswordChange: true,
     createdAt: new Date().toISOString()
   });
 
@@ -1104,58 +1191,41 @@ function createStockSummary(receipts, deliveries = [], openingDocuments = [], tr
   }
   const byLocation = Array.from(mergedMap.values());
 
-  // Scadem fiecare livrare livrata: intai din locatia aleasa la livrare, apoi din
-  // celelalte locatii ale produsului (cele mai pline intai) daca acolo nu ajunge —
-  // astfel poarta (pe locatie) si scaderea coincid, dar ramane robust daca produsul
-  // a fost mutat intre timp prin procesare/transfer.
+  // Fiecare livrare se scade DOAR din locatia ei. Nu se mai „imprumuta" din alte locatii ale
+  // produsului: cascada de odinioara (cele mai pline intai) muta marfa intre locatii fara
+  // niciun document si fara sa tina cont de date. Cazul real: returul unei livrari din
+  // Cilindru 2 scade intai iesirea bruta, lipsa temporara era acoperita din gropile de
+  // primire, iar creditul returului o punea apoi in Cilindru 2 — receptiile din gropi
+  // „ajungeau" in cilindru. O mutare intre locatii se face DOAR prin transfer sau procesare.
+  // Daca livrarea nu incape, locatia ei iese pe minus — vizibil si corectabil (regula 8).
   for (const d of deliveries) {
     // Livrarea anulată nu a existat niciodată: nicio mișcare, nici ieșirea, nici returul.
     if (d.status === "Anulat") continue;
     // Scădem IEȘIREA BRUTĂ (cât a plecat efectiv din stoc la încărcare), nu cantitatea rămasă
-    // după retur. Altfel cascada de mai jos s-ar recalcula cu un număr mai mic și marfa ar
-    // „reveni" în locațiile din care s-a completat, nu în cea unde a fost descărcată fizic.
-    // Creditul returului se aplică separat, mai jos, DUPĂ ce ieșirea a fost alocată.
-    let remaining = Number(d.deliveredQuantity || 0) + Number(d.returnedQuantity || 0);
-    if (remaining <= 0) continue;
-    const product = d.product;
-    const primary = byLocation.find((i) => normLoc(i.location) === normLoc(d.location) && i.product === product);
-    if (primary && primary.quantity > 0) {
-      const take = Math.min(primary.quantity, remaining);
-      primary.quantity -= take;
-      primary.deliveredQuantity += take;
-      remaining -= take;
+    // după retur. Creditul returului se aplică separat, mai jos, în locația unde marfa a fost
+    // descărcată fizic — care poate diferi de locația de plecare.
+    const outQty = Number(d.deliveredQuantity || 0) + Number(d.returnedQuantity || 0);
+    if (outQty <= 0) continue;
+    const locName = d.location || "Fara locatie";
+    let target = byLocation.find((i) => normLoc(i.location) === normLoc(locName) && i.product === d.product);
+    if (!target) {
+      target = {
+        location: locName,
+        product: d.product,
+        quantity: 0,
+        unit: "tone",
+        costCategory: null,
+        deliveredQuantity: 0
+      };
+      byLocation.push(target);
     }
-    if (remaining > 0) {
-      const others = byLocation
-        .filter((i) => i.product === product && i !== primary && i.quantity > 0)
-        .sort((a, b) => b.quantity - a.quantity);
-      for (const loc of others) {
-        if (remaining <= 0) break;
-        const take = Math.min(loc.quantity, remaining);
-        loc.quantity -= take;
-        loc.deliveredQuantity += take;
-        remaining -= take;
-      }
-    }
-    // Ce nu s-a putut scadea de nicaieri NU se arunca: se scade din locatia livrarii, chiar
-    // daca iese pe minus. Altfel cantitatea dispare in tacere si stocul pe locatii ajunge
-    // MAI MARE decat realitatea — exact cazul „marfa descarcata, apoi livrata din nou":
-    // a doua livrare cauta marfa inainte ca descarcarea sa fie creditata (creditul vine mai
-    // jos), nu o gaseste, restul se pierdea, iar creditul adauga apoi un stoc fantoma egal
-    // cu cantitatea descarcata. Pe minus, cele doua ecrane coincid intotdeauna.
-    if (remaining > 0) {
-      const target = primary || byLocation.find((i) => i.product === product);
-      if (target) {
-        target.quantity -= remaining;
-        target.deliveredQuantity += remaining;
-      }
-    }
+    target.quantity -= outQty;
+    target.deliveredQuantity += outQty;
   }
 
   // Retur / descărcare: marfa se întoarce EXACT în locația unde a fost pusă fizic — cea
   // verificată la retur (conflict de produs + capacitate). Creditul vine DUPĂ scăderea
-  // livrărilor, ca alocarea ieșirii originale (eventual cascadată pe mai multe locații)
-  // să rămână neatinsă, și ÎNAINTE de plafonarea la zero de mai jos.
+  // ieșirii brute din locația de plecare.
   for (const d of deliveries) {
     if (d.status === "Anulat") continue;
     const returnEntries = Array.isArray(d.returns) && d.returns.length > 0
@@ -1339,7 +1409,10 @@ async function appendAuditLog(payload) {
 // pe inregistrarea sursa (receipt.purchaseActNo / transaction.paymentOrderNo), deci re-tiparirea
 // aceluiasi document intoarce ACELASI numar (idempotent). Contractul-cadru nu primeste numar aici.
 const DOCUMENT_NUMBER_TYPES = {
-  purchaseAct: { collection: "receipts", stampField: "purchaseActNo", entityType: "receipt" },
+  // `purchaseAct` SCOS deliberat: actul de achizitie se numeroteaza prin `assignActNumber`
+  // (regula 10 din CLAUDE.md) — sir per firma, pornit la 914, cu verificare de persistenta.
+  // Lasat aici, era un al DOILEA numar, invizibil, stampilat pe aceeasi receptie printr-o
+  // ruta deschisa si managerului, incrementand un contor pe care nimeni nu-l mai citeste.
   paymentOrder: { collection: "transactions", stampField: "paymentOrderNo", entityType: "transaction" }
 };
 
@@ -1430,8 +1503,8 @@ function getReceiptAvailableQuantity(state, receiptId, options = {}) {
     return null;
   }
   // Marfa care nu e in stoc nu e disponibila de livrat. Fara asta, o receptie „Proiect"
-  // (exclusa din stoc) ramanea livrabila, iar scaderea ar fi consumat marfa ALTOR receptii
-  // prin cascada pe locatii, cu rezultatul ascuns de plafonarea la zero.
+  // (exclusa din stoc) ramanea livrabila si scotea din locatie marfa ALTOR receptii
+  // (inainte prin cascada pe locatii, eliminata intre timp).
   if (!isReceiptInStock(receipt)) {
     return 0;
   }
@@ -1729,12 +1802,380 @@ function assertEntity(entity) {
 //  - preliminaryPayableAmount daca e setat (>0) — ex. valoare setata manual de contabil (✎);
 //  - altfel se DERIVA: cantitate (KG) × pret (LEI/KG). Cantitatea interna e in TONE -> ×1000.
 // Pretul se introduce in lei/kg (ex. 6 lei/kg), cantitatea neta 0,8 t = 800 kg -> 800×6 = 4800.
+// Cate TONE se platesc pe aceasta receptie. Sursa UNICA — o foloseste si valoarea de mai
+// jos, si corectia manuala de suma, si extrasul de cont al furnizorului. Cand cele trei
+// calculau fiecare pe cont propriu, extrasul semnat de furnizor nu se mai inchidea
+// aritmetic (cantitate × pret ≠ suma).
+// Regula: implicit masa fara apa; cu `payOnGrossQuantity` se pune apa inapoi — DOAR apa,
+// impuritatile raman scazute (vezi computeReceiptEstimate din receipt-handlers.js).
+function receiptPayableTonnes(r) {
+  // `||`, nu `??`: un `provisionalNetQuantity` de 0 inseamna „nu s-a calculat inca",
+  // nu „zero tone" — receptiile vechi il au lipsa si cad corect pe `quantity`.
+  const net = Number((r && (r.provisionalNetQuantity || r.quantity)) || 0);
+  if (!r || r.payOnGrossQuantity !== true) return net;
+  return net + Number(r.estimatedWaterLoss || 0);
+}
+
 function receiptPayableValue(r) {
   const stored = Number((r && r.preliminaryPayableAmount) || 0);
   if (stored > 0) return stored;
-  const netTonnes = Number((r && (r.provisionalNetQuantity || r.quantity)) || 0);
+  const tonnes = receiptPayableTonnes(r);
   const priceKg = Number((r && r.price) || 0);
-  return netTonnes > 0 && priceKg > 0 ? Number((netTonnes * 1000 * priceKg).toFixed(2)) : 0;
+  return tonnes > 0 && priceKg > 0 ? Number((tonnes * 1000 * priceKg).toFixed(2)) : 0;
+}
+
+// Un singur document, BRUT, fara agregarile din `listReceipts` (alocare FIFO a platilor,
+// clonarea tuturor receptiilor, sortari). Pentru handlerele care au nevoie doar de campuri
+// de pe document: `listReceipts` costa de ordinul a 165x mai mult si arunca tot ce construieste.
+function getReceiptRaw(id) {
+  const state = readReceiptsState();
+  return (state.receipts || []).find((item) => item.id === Number(id)) || null;
+}
+
+// Urmatorul numar de act: max(atribuite) + 1, cu plafon inferior la ACT_NUMBER_START.
+// Derivat din date, nu dintr-un contor separat — un contor se poate desincroniza de la
+// documentele reale (restaurare din backup, scriere pierduta), iar un numar de act refolosit
+// inseamna doua acte cu acelasi numar in dosar.
+// Sir SEPARAT pe firma emitenta. Seria e per firma (`companies[].series`), deci un sir
+// global ar lasa gauri in registrul fiecareia: „PAT 915", „AGR 916", „PAT 917" — in dosarul
+// PAT lipseste 916, imposibil de explicat la control.
+// Se numara si receptiile ANULATE: numarul lor a fost tiparit si nu se refoloseste.
+function nextActNumber(state, companyId) {
+  const maxim = (state.receipts || [])
+    .filter((item) => Number(item.actCompanyId || 0) === Number(companyId || 0))
+    .reduce((max, item) => Math.max(max, Number(item.actNumber || 0)), 0);
+  return Math.max(maxim + 1, ACT_NUMBER_START);
+}
+
+// Numarul NU se intoarce pana nu e DURABIL si purtat de EXACT receptiile actului.
+//
+// Persistenta e un blob JSON unic, scris cu upsert necondiționat (fara versiune, fara
+// compare-and-set) si cu debounce. O scriere concurenta — operatorul salveaza o receptie in
+// timp ce contabilul tipareste — poate reincarca blobul DE DINAINTE de atribuire si il poate
+// suprascrie: hartia iese cu 914, datele nu mai stiu de el, iar actul urmator ia din nou 914.
+//
+// Mitigarea nu elimina cursa (pentru asta e nevoie de alocare atomica in baza), dar o face
+// VIZIBILA. Rulează si dupa scrierea de REPARARE: altfel reparatia insasi putea fi o scriere
+// pierduta, iar receptiile nemarcate ardeau un numar nou mai tarziu.
+async function assertActNumberPersisted(numar, companyId, idsAsteptate, sursa) {
+  await flushPendingWrites();
+  if (!USE_SUPABASE || !kvBackend) return;
+  // Cu alocare ATOMICA, numarul e deja rezervat in Postgres si nu se poate refolosi, iar
+  // `flushPendingWrites` arunca daca scrierea a eșuat. Recitirea blobului INTREG (pana la
+  // zeci de MB, de trei ori per act tiparit) nu mai aduce nimic.
+  // Pe calea veche (derivare din blob) verificarea rămâne singura aparare: acolo numarul
+  // s-ar putea refolosi, deci se plateste citirea.
+  if (sursa === "postgres") return;
+  let persistat = null;
+  try {
+    persistat = await kvBackend.loadKv("receipts", null);
+  } catch (err) {
+    throw new Error(
+      "Nu am putut confirma salvarea numarului de act. Nu tipari actul: reincearca."
+    );
+  }
+  const cuNumar = ((persistat && persistat.receipts) || []).filter(
+    (item) =>
+      Number(item.actNumber || 0) === Number(numar) &&
+      Number(item.actCompanyId || 0) === Number(companyId || 0)
+  );
+  const gasite = cuNumar.map((item) => Number(item.id)).sort((a, b) => a - b).join(",");
+  const asteptate = [...new Set(idsAsteptate.map(Number))].sort((a, b) => a - b).join(",");
+  if (gasite !== asteptate) {
+    // Cu alocare atomica numarul rămâne REZERVAT in Postgres chiar daca blobul s-a pierdut:
+    // nu se refoloseste, deci reincercarea e sigura. Fara ea, reincercarea putea produce un
+    // duplicat — de aceea mesajul e diferit.
+    throw new Error(
+      sursa === "postgres"
+        ? `Numarul ${numar} e rezervat, dar documentul nu s-a salvat. Nu tipari actul: reincearca (numarul nu se refoloseste).`
+        : `Numarul ${numar} nu s-a inregistrat corect (o alta operatie a scris in acelasi timp). Nu tipari actul: reincearca.`
+    );
+  }
+  receiptsCache = persistat;
+}
+
+// Atribuie numarul actului de achizitie. IDEMPOTENT: daca receptia are deja numar, il
+// intoarce neschimbat. Un numar atribuit NU se schimba niciodata — altfel reimprimarea ar
+// da alt numar decat cel din dosar, iar doua acte ar putea purta acelasi numar.
+// `ids` = TOATE receptiile acoperite de act. Un act care acopera mai multe receptii consuma
+// UN numar, dar il primesc toate: marcat doar pe cea mai veche, una dintre celelalte tiparita
+// ulterior individual apare nenumerotata si ARDE un numar nou pentru marfa deja acoperita —
+// dubla invizibila, imposibil de prins din interfata.
+async function assignActNumber(ids, options = {}) {
+  const state = readReceiptsState();
+
+  // Intrare tipizata: `.map(Number)` accepta booleeni si tablouri imbricate.
+  const brute = Array.isArray(ids) ? ids : [ids];
+  // `Number(true)` e 1 si `Number([7])` e 7: fara verificarea de TIP, un boolean sau un
+  // tablou imbricat devine un id valid si marcheaza o receptie la intamplare.
+  if (!brute.length || brute.some((v) => typeof v !== "number" && typeof v !== "string")) {
+    throw new Error("Lista de receptii pentru act e invalida.");
+  }
+  const lista = [...new Set(brute.map(Number))];
+  if (lista.some((id) => !Number.isInteger(id) || id <= 0)) {
+    throw new Error("Lista de receptii pentru act e invalida.");
+  }
+  if (lista.length > 50) {
+    throw new Error("Un act nu poate acoperi mai mult de 50 de receptii.");
+  }
+
+  const receipts = lista.map((id) => {
+    const found = (state.receipts || []).find((item) => item.id === id);
+    if (!found) throw new Error(`Receptia #${id} nu a fost gasita.`);
+    return found;
+  });
+  const receipt = receipts[0];
+
+  const role = normalizeRoleCode(options.actorRole);
+  if (!CAN_ISSUE_ACTS_ROLES.includes(role)) {
+    throw forbiddenError("Doar contabilul sau administratorul pot emite acte de achizitie.");
+  }
+
+  // „In stoc" se verifica INAINTE de orice ieșire: altfel o retiparire cu o receptie-proiect
+  // in selectie scotea hartie pentru marfa care n-a intrat.
+  for (const item of receipts) {
+    if (!isReceiptInStock(item)) {
+      throw new Error(`Receptia #${item.id} nu e in stoc (${item.status}). Nu se emite act pentru ea.`);
+    }
+  }
+
+  // ACT DEJA EMIS. Se intoarce acelasi numar, dar numai daca selectia e EXACT cea acoperita:
+  // o selectie amestecata (acoperit + marfa noua) reactiva actul vechi, tiparea alt conținut
+  // sub acelasi numar fiscal, iar marfa noua ramanea pe niciun act.
+  const dejaEmis = receipts.find((item) => Number(item.actNumber || 0) > 0);
+  if (dejaEmis) {
+    const purtator =
+      receipts.find((item) => item.actFigures) ||
+      (state.receipts || []).find(
+        (item) =>
+          item.actFigures &&
+          Number(item.actNumber) === Number(dejaEmis.actNumber) &&
+          Number(item.actCompanyId || 0) === Number(dejaEmis.actCompanyId || 0)
+      ) ||
+      dejaEmis;
+    const acoperite = [...new Set(
+      ((purtator.actFigures && purtator.actFigures.receiptIds) || [Number(dejaEmis.id)]).map(Number)
+    )];
+    // REIMPRIMARE: selectia e o parte din actul emis (ex. de pe randul unei singure receptii
+    // acoperite). Se intoarce actul INTREG, cu toate randurile lui — nu un act de un rand sub
+    // acelasi numar fiscal.
+    // EMITERE AMESTECATA: unele acoperite, altele nu. Refuzata: altfel actul vechi se reactiva
+    // cu alt conținut sub acelasi numar, iar marfa noua rămânea pe niciun act.
+    // DUPLICAT. Verificarea post-scriere arunca si cere reincercare; dar reincercarea intra
+    // aici, gaseste un numar si il intoarce — deci un numar dublat de o scriere pierduta
+    // trecea drept succes. Doua acte semnate, doi furnizori, acelasi numar in dosar.
+    // Se numara cine poarta numarul: trebuie sa fie exact receptiile actului.
+    const purtatoriiNumarului = (state.receipts || []).filter(
+      (item) =>
+        Number(item.actNumber || 0) === Number(dejaEmis.actNumber) &&
+        Number(item.actCompanyId || 0) === Number(dejaEmis.actCompanyId || 0)
+    );
+    const strainiPeNumar = purtatoriiNumarului.filter(
+      (item) => !acoperite.includes(Number(item.id))
+    );
+    if (strainiPeNumar.length) {
+      throw new Error(
+        `Numarul ${dejaEmis.actSeries || ""} ${dejaEmis.actNumber} e purtat si de receptiile ` +
+        `${strainiPeNumar.map((x) => x.id).join(",")}, care nu fac parte din acest act. ` +
+        "Numar dublat — nu tipari: e nevoie de intervenție pe date."
+      );
+    }
+
+    const neacoperite = lista.filter((id) => !acoperite.includes(id));
+    if (neacoperite.length) {
+      throw new Error(
+        `Receptiile ${acoperite.join(",")} sunt deja pe actul ${dejaEmis.actSeries || ""} ${dejaEmis.actNumber}, iar ${neacoperite.join(",")} nu. Emite un act separat pentru ele sau storneaza actul.`
+      );
+    }
+    // Reparare: o scriere partiala (purtator marcat, restul nu) nu are voie sa treaca drept
+    // succes la reincercare — altfel recepțiile nemarcate ard un numar nou mai tarziu.
+    let reparat = false;
+    const aleActului = (state.receipts || []).filter((item) => acoperite.includes(Number(item.id)));
+    for (const item of aleActului) {
+      if (Number(item.actNumber || 0) !== Number(dejaEmis.actNumber)) {
+        item.actNumber = dejaEmis.actNumber;
+        item.actSeries = dejaEmis.actSeries;
+        item.actCompanyId = dejaEmis.actCompanyId;
+        item.actIssuedAt = dejaEmis.actIssuedAt;
+        reparat = true;
+      }
+      // Referinta, nu copie (vezi mai sus). Purtatorul isi pastreaza captura.
+      if (item.id !== purtator.id && Number(item.actCarrierId || 0) !== Number(purtator.id)) {
+        item.actCarrierId = purtator.id;
+        delete item.actFigures;
+        reparat = true;
+      }
+    }
+    if (reparat) {
+      writeReceiptsState(state);
+      await assertActNumberPersisted(
+        dejaEmis.actNumber,
+        dejaEmis.actCompanyId,
+        acoperite,
+        dejaEmis.actNumberSource
+      );
+    }
+    return purtator;
+  }
+
+  // Numar consumat degeaba = gaura in sirul din dosar, imposibil de explicat la control.
+  if (options.isNaturalPerson !== true) {
+    throw new Error("Actul de achizitie se intocmeste doar la cumpararea de la persoane fizice.");
+  }
+  if (!options.companyId) {
+    throw new Error("Firma emitenta e obligatorie: seria si numarul se inregistreaza pe act.");
+  }
+  // Un act e al UNUI furnizor. Lipsa furnizorului pe ambele parti nu inseamna „acelasi".
+  for (const item of receipts) {
+    if (!Number(item.supplierId)) {
+      throw new Error(`Receptia #${item.id} nu are furnizor. Nu se emite act pe ea.`);
+    }
+    if (Number(item.supplierId) !== Number(receipt.supplierId)) {
+      throw new Error("Actul de achizitie acopera receptiile unui singur furnizor.");
+    }
+  }
+
+  const serie = String(options.series || "").trim();
+  const companie = Number(options.companyId);
+  const acum = new Date().toISOString();
+
+  // Alocare ATOMICA in PostgreSQL, cand migrarea e aplicata: advisory lock pe firma +
+  // cheie primara (firma, numar), deci duplicatul e IMPOSIBIL, nu doar detectat.
+  // Daca functia nu exista (migrarea nu e rulata), se cade pe derivarea din blob — mai
+  // slaba, dar aplicatia merge. Diferenta se vede in `numberSource`, consemnata in audit.
+  let numar = null;
+  let sursaNumar = "blob";
+  if (USE_SUPABASE && kvBackend && typeof kvBackend.allocateActNumber === "function") {
+    numar = await kvBackend.allocateActNumber(companie, serie, lista);
+    if (numar) sursaNumar = "postgres";
+  }
+  if (!numar) {
+    // DUPA migrare, fallback-ul nu mai e plasa de siguranta, e un RISC: PostgREST intoarce
+    // acelasi `PGRST202` si pentru „functia nu exista" si pentru un cache de schema vechi.
+    // Un astfel de eșec tranzitoriu ar face sa se emita un numar din blob, care in Postgres
+    // e deja rezervat — exact duplicatul pe care migrarea il previne.
+    // `ACT_NUMBERS_PG=1` se seteaza DUPA ce migrarea e aplicata si verificata: de atunci,
+    // o alocare care nu trece prin Postgres cade zgomotos, nu tacit.
+    if (REQUIRE_PG_ACT_NUMBERS) {
+      throw new Error(
+        "Numerotarea atomica nu a raspuns (ACT_NUMBERS_PG=1). Nu s-a emis niciun numar: " +
+        "reincearca. Daca se repeta, verifica functia allocate_purchase_act_number."
+      );
+    }
+    numar = nextActNumber(state, companie);
+  }
+
+  // Se ingheata RANDURILE, nu doar totalurile: randul se construia din receptie, deci dupa o
+  // corectie de suma actul se contrazicea pe aceeasi hartie (rand 35.756,10 sub total
+  // 17.878,05, pe un formular care afirma „5 = 3 x 4"). Se pastreaza si denumirea produsului,
+  // DATELE (rubrica „din / от" intra si in codul QR) si identitatea parților: nomenclatorul
+  // se poate redenumi, iar furnizorul se poate schimba dupa emitere.
+  const randuri = receipts.map((item) => {
+    const kg = receiptPayableTonnes(item) * 1000;
+    const brut = Number(item.preliminaryMerchandiseValue || 0) || kg * Number(item.price || 0);
+    const net = Number(item.amountToPay ?? item.preliminaryPayableAmount ?? 0) || brut;
+    return {
+      id: item.id,
+      product: String(item.product || ""),
+      date: item.receivedAt || item.createdAt || "",
+      netKg: Number(kg.toFixed(3)),
+      value: Number(brut.toFixed(2)),
+      netPay: Number(net.toFixed(2))
+    };
+  });
+  const total = randuri.reduce(
+    (acc, r) => ({ kg: acc.kg + r.netKg, brut: acc.brut + r.value, net: acc.net + r.netPay }),
+    { kg: 0, brut: 0, net: 0 }
+  );
+  // Identitatea PARTILOR si antetul FIRMEI se ingheata la fel ca banii. Altfel:
+  //  - IDNP-ul si adresa furnizorului (rubrica legala a formularului) se citeau LIVE, iar
+  //    operatorul creeaza adesea furnizorul doar cu numele, contabilul completeaza IDNP-ul
+  //    dupa ce actul e semnat — retiparirea nu mai era hartia semnata;
+  //  - antetul firmei se lua din selectia de acum, iar la dezactivarea firmei emitente se
+  //    cadea pe prima firma activa: ALT emitent sub acelasi numar.
+  // Datele vin din handler (acolo e nomenclatorul); magazia nu citeste configul.
+  const snapshot = {
+    netKg: Number(total.kg.toFixed(3)),
+    value: Number(total.brut.toFixed(2)),
+    netPay: Number(total.net.toFixed(2)),
+    tax: Math.max(Number((total.brut - total.net).toFixed(2)), 0),
+    rows: randuri,
+    receiptIds: lista,
+    companyId: companie,
+    series: serie,
+    supplierId: Number(receipt.supplierId),
+    supplierName: String((options.supplier && options.supplier.name) || receipt.supplier || ""),
+    supplierIdno: String((options.supplier && options.supplier.idno) || ""),
+    supplierAddress: String((options.supplier && options.supplier.address) || ""),
+    company: {
+      name: String((options.company && options.company.name) || ""),
+      shortName: String((options.company && options.company.shortName) || ""),
+      idno: String((options.company && options.company.idno) || ""),
+      address: String((options.company && options.company.address) || ""),
+      admin: String((options.company && options.company.admin) || ""),
+      logoUrl: String((options.company && options.company.logoUrl) || "")
+    }
+  };
+
+  for (const item of receipts) {
+    item.actNumber = numar;
+    item.actNumberSource = sursaNumar;
+    item.actSeries = serie;
+    item.actCompanyId = companie;
+    item.actIssuedAt = acum;
+    // Captura o SINGURA data, pe purtator. Scrisa pe toate, un act de 50 de receptii
+    // ingrosa blobul cu 364 KB — iar blobul se descarca la FIECARE cerere.
+    // Celelalte primesc o referinta: tiparirea rezolva captura prin purtator, deci nu mai
+    // cade pe recalcul (asta era gaura inchisa anterior prin duplicare).
+    if (item.id === receipt.id) {
+      item.actFigures = snapshot;
+      delete item.actCarrierId;
+    } else {
+      delete item.actFigures;
+      item.actCarrierId = receipt.id;
+    }
+    item.updatedAt = acum;
+  }
+
+  createAuditEntry(state, {
+    entityType: "receipt",
+    entityId: receipt.id,
+    action: "receipt-act-number",
+    reason: `Act de achizitie emis: ${serie} ${numar}`,
+    user: options.changedBy || "dashboard",
+    oldValue: { actNumber: null },
+    newValue: {
+      actNumber: numar,
+      actSeries: serie,
+      receiptIds: lista,
+      numberSource: sursaNumar,
+      // Doar totalurile: captura intreaga (cu toate randurile si antetul firmei) mai era o
+      // copie completa in `auditLogs`, in ACELASI blob care se descarca la fiecare cerere.
+      // Cifrele de pe hartie se citesc de pe document, prin `actFigures` al purtatorului.
+      totals: {
+        netKg: snapshot.netKg,
+        value: snapshot.value,
+        netPay: snapshot.netPay,
+        tax: snapshot.tax
+      }
+    }
+  });
+
+  writeReceiptsState(state);
+
+  // Numarul NU se intoarce pana nu e DURABIL si UNIC in baza.
+  //
+  // Persistenta e un blob JSON unic, scris cu upsert necondiționat (fara versiune, fara
+  // compare-and-set) si cu debounce. Deci o scriere concurenta — operatorul salveaza o
+  // receptie in timp ce contabilul tipareste — poate reincarca blobul DE DINAINTE de
+  // atribuire si il poate suprascrie: hartia iese cu 914, datele nu mai stiu de el, iar
+  // actul urmator ia din nou 914. Doua acte cu acelasi numar in dosarul fiscal.
+  //
+  // Mitigarea nu elimina cursa (pentru asta e nevoie de alocare atomica in baza), dar o
+  // face VIZIBILA: fortam scrierea, recitim din KV si verificam. Daca numarul nu s-a
+  // persistat sau apare de doua ori, aruncam — mai bine fara act decat cu numar dublat.
+  await assertActNumberPersisted(numar, companie, lista, sursaNumar);
+  return receipt;
 }
 
 async function listReceipts() {
@@ -2021,6 +2462,13 @@ async function createReceipt(payload) {
     dryingServiceTotal: sanitizeNumber(payload.dryingServiceTotal),
     preliminaryServicesTotal: sanitizeNumber(payload.preliminaryServicesTotal),
     preliminaryMerchandiseValue: sanitizeNumber(payload.preliminaryMerchandiseValue),
+    // Tarifele aplicate la ACEASTA receptie, inghetate pe document ca normele de produs.
+    cleaningTariff: sanitizeNumber(payload.cleaningTariff),
+    dryingTariff: sanitizeNumber(payload.dryingTariff),
+    // Intelegerea comerciala de pe ACEASTA receptie: s-a platit masa cu apa (fara scaderea
+    // umiditatii peste norma) si nu s-a taxat uscarea. Se pastreaza pe document ca suma sa
+    // fie explicabila si reproductibila mai tarziu.
+    payOnGrossQuantity: payload.payOnGrossQuantity === true,
     withholdingPercent: sanitizeNumber(payload.withholdingPercent),
     withholdingAmount: sanitizeNumber(payload.withholdingAmount),
     preliminaryPayableAmount: sanitizeNumber(payload.preliminaryPayableAmount),
@@ -2076,12 +2524,19 @@ async function completeReceiptWeighing(id, payload = {}) {
   }
 
   const oldValue = { tareWeight: receipt.tareWeight, quantity: receipt.quantity, status: receipt.status };
+  // NU adauga aici `payOnGrossQuantity`: e boolean, iar bucla de mai jos trece totul prin
+  // `sanitizeNumber`. Mai important, baza de plata se stabileste la PRIMA cantarire si se
+  // citeste de pe document — daca ar veni din body-ul cantaririi a doua, oricine ar putea
+  // creste datoria catre furnizor printr-o a doua cerere, fara urma.
   const ESTIMATE_FIELDS = [
     "grossQuantity", "humidity", "impurity", "humidityNorm", "impurityNorm",
     "excessHumidity", "excessImpurity", "estimatedWaterLoss", "estimatedImpurityLoss",
     "provisionalNetQuantity", "cleaningServiceTotal", "dryingServiceTotal",
     "preliminaryServicesTotal", "preliminaryMerchandiseValue", "withholdingPercent",
-    "withholdingAmount", "preliminaryPayableAmount"
+    "withholdingAmount", "preliminaryPayableAmount",
+    // Tarifele de atunci, inghetate ca normele de produs: o corectare de peste luni nu are
+    // voie sa recalculeze serviciile cu tarifele de azi.
+    "cleaningTariff", "dryingTariff"
   ];
 
   receipt.tareWeight = sanitizeNumber(payload.tareWeight);
@@ -2109,7 +2564,16 @@ async function completeReceiptWeighing(id, payload = {}) {
     reason: "A doua cantarire (tara) - finalizare receptie",
     user: payload.changedBy || "dashboard",
     oldValue,
-    newValue: { tareWeight: receipt.tareWeight, quantity: receipt.quantity, status: "Draft" }
+    // Suma se naste ABIA aici: la prima cantarire cantitatea e 0, deci auditul de creare
+    // a salvat sume nule. Fara suma si baza ei, un verificator vede doar „tara 12.000 kg"
+    // si nicio urma a banilor sau a motivului pentru care sunt atatia.
+    newValue: {
+      tareWeight: receipt.tareWeight,
+      quantity: receipt.quantity,
+      status: "Draft",
+      payOnGrossQuantity: receipt.payOnGrossQuantity === true,
+      preliminaryPayableAmount: receipt.preliminaryPayableAmount
+    }
   });
   writeReceiptsState(state);
   return receipt;
@@ -2123,6 +2587,35 @@ async function listProcessings() {
 async function listTransactions() {
   const state = readReceiptsState();
   return (state.transactions || []).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+}
+
+// Pretul de contract si cel de factura sunt ACELASI pret, exprimat in unitati diferite:
+// `contractPrice` e lei/TONA, `priceLei` e lei/KG, `priceForeign` e valuta/TONA.
+// Se deriva din ACELEASI intrari ca `deliveryInvoiceTotals` (public/app.js) — sursa unica a
+// totalului de pe factura — ca sa nu existe doua veritati despre cat datoreaza cumparatorul.
+//
+// NU trece prin `priceLei` la valuta: acolo campul pastreaza lei/TONA, nu lei/kg (vezi
+// recalculul din updateDelivery). Cine il citeste ca lei/kg greseste de 1000x.
+function deliveryTonnePriceFromBilling(delivery) {
+  if (!delivery) return 0;
+  const currency = String(delivery.currency || "MDL").trim().toUpperCase();
+  const foreign = Number(delivery.priceForeign || 0);
+  const rate = Number(delivery.exchangeRate || 0);
+  if (currency !== "MDL" && foreign > 0 && rate > 0) {
+    return foreign * rate; // (valuta/tona) x (lei/valuta) = lei/tona
+  }
+  return Number(delivery.priceLei || 0) * 1000; // (lei/kg) x 1000 = lei/tona
+}
+
+// Pretul pe TONA pe care se calculeaza CREANTA. Sursa unica pentru Incasari, extrasul de
+// cont, raportul de management si tabelul de livrari.
+// Fallback-ul pe datele de facturare vindeca livrarile vechi, la care `contractPrice` a
+// ramas 0 fiindca nu exista niciun camp in interfata prin care sa fie introdus — fara sa
+// rescrie istoricul printr-o migrare.
+function deliveryReceivableTonnePrice(delivery) {
+  const stored = Number((delivery && delivery.contractPrice) || 0);
+  if (stored > 0) return stored;
+  return deliveryTonnePriceFromBilling(delivery);
 }
 
 async function listDeliveries() {
@@ -2165,7 +2658,9 @@ async function getSupplierStatement(partnerId, fromDate, toDate) {
     .filter((r) => Number(r.supplierId) === Number(partnerId))
     .filter((r) => inRange(r.createdAt || r.receivedAt))
     .map((r) => {
-      const net = Number(r.provisionalNetQuantity ?? r.quantity ?? 0);
+      // Cantitatea de pe rand e cea PLATITA, nu cea intrata in stoc: documentul e semnat
+      // de furnizor, deci cantitate × pret trebuie sa dea suma de pe acelasi rand.
+      const net = receiptPayableTonnes(r);
       const price = Number(r.price ?? r.unitPrice ?? 0);
       const amount = receiptPayableValue(r); // preliminaryPayableAmount sau cantitate × pret
       return {
@@ -2213,7 +2708,7 @@ async function getSupplierStatement(partnerId, fromDate, toDate) {
         date: d.createdAt || d.deliveredAt || "",
         product: d.product || "",
         quantity: qty,
-        amount: Number(d.contractPrice || 0) * qty
+        amount: deliveryReceivableTonnePrice(d) * qty
       };
     })
     .sort((a, b) => new Date(a.date) - new Date(b.date));
@@ -2483,6 +2978,23 @@ async function createTransaction(payload) {
     createdAt: new Date().toISOString()
   };
 
+  // Nu se incaseaza pe un document care n-a scos marfa din stoc. Un proiect de livrare are
+  // `deliveredQuantity = 0`, deci tinta e 0: incasarea il marca instant „Incasat", iar
+  // livrarea nu mai putea fi nici preţuita, nici corectata — banii stateau pe un document
+  // care nu exista in realitate. Aceeasi regula ca „ce nu e in stoc nu se poate livra"
+  // (CLAUDE.md, regula 7).
+  if (transaction.referenceType === "delivery" && transaction.deliveryId) {
+    const target = (state.deliveries || []).find((item) => item.id === transaction.deliveryId);
+    if (target && isDeliveryPendingStockExit(target)) {
+      throw new Error(
+        "Livrarea nu a ieșit din stoc (proiect). Confirm-o la cantar inainte de a inregistra incasarea."
+      );
+    }
+    if (target && isVoidedDelivery(target)) {
+      throw new Error("Livrarea este anulata sau returnata integral. Nu se poate incasa pe ea.");
+    }
+  }
+
   if (!Array.isArray(state.transactions)) {
     state.transactions = [];
   }
@@ -2565,7 +3077,7 @@ async function createTransaction(payload) {
         0
       );
       const qty = Number(delivery.deliveredQuantity || delivery.netWeight || 0);
-      const targetAmount = Number(delivery.contractPrice || 0) * qty;
+      const targetAmount = deliveryReceivableTonnePrice(delivery) * qty;
       delivery.collectedAmount = totalCollected;
       delivery.collectionStatus =
         totalCollected <= 0 ? "Neincasat" : totalCollected < targetAmount ? "Partial incasat" : "Incasat";
@@ -2942,7 +3454,7 @@ function recomputeReferenceSettlement(state, transaction) {
     const delivery = (state.deliveries || []).find((d) => d.id === Number(transaction.deliveryId));
     if (!delivery) return;
     const qty = Number(delivery.deliveredQuantity || delivery.netWeight || 0);
-    const target = Number(delivery.contractPrice || 0) * qty;
+    const target = deliveryReceivableTonnePrice(delivery) * qty;
     const collected = txns
       .filter((t) => t.referenceType === "delivery"
         && Number(t.deliveryId) === Number(transaction.deliveryId) && isActiveTransaction(t))
@@ -3066,7 +3578,7 @@ async function createDelivery(payload) {
     throw new Error("Receptia este inchisa. Nu se poate crea livrare.");
   }
   // Ce nu e in stoc nu se poate livra. Fara asta, o receptie „Proiect" (exclusa din stoc)
-  // ramanea livrabila, iar scaderea consuma marfa ALTOR receptii prin cascada pe locatii.
+  // ramanea livrabila si scotea din locatie marfa ALTOR receptii.
   if (receipt && !isReceiptInStock(receipt)) {
     throw new Error(
       `Receptia #${receipt.id} are statusul "${receipt.status}" — marfa nu e inca in stoc. ` +
@@ -3110,15 +3622,14 @@ async function createDelivery(payload) {
     if (plannedQuantity > availableQuantity) {
       throw new Error("Cantitatea planificata depaseste stocul disponibil pentru receptie.");
     }
-    // ...si marfa trebuie sa existe FIZIC. Verificarea e pe PRODUS, nu pe o singura locatie:
-    // marfa receptiei poate fi mutata intre timp prin transfer/procesare, iar scaderea o
-    // urmareste cascadat. Fara asta, o livrare pe locatie si una pe receptie scoteau
-    // amandoua aceeasi marfa — 200 t dintr-un stoc de 100 t, diferenta inghitita de
-    // plafonarea la zero.
-    const physical = getDeliveryAvailableQuantity(state, { product: productName });
+    // ...si marfa trebuie sa existe FIZIC, in locatia din care se scade livrarea — cea a
+    // receptiei. Scaderea nu mai cauta in alte locatii, deci nici verificarea nu o face:
+    // daca marfa receptiei a fost mutata prin transfer/procesare, se livreaza din locatia
+    // noua, fara legatura cu receptia.
+    const physical = getDeliveryAvailableQuantity(state, { product: productName, location: sourceLocation });
     if (Math.round(plannedQuantity * 1000) > Math.round(physical.available * 1000)) {
       throw new Error(
-        `Stoc insuficient pentru ${productName}: disponibil ` +
+        `Stoc insuficient pentru ${productName} in ${sourceLocation}: disponibil ` +
           `${Math.round(physical.available * 1000)} kg, cerut ${Math.round(plannedQuantity * 1000)} kg.`
       );
     }
@@ -3146,12 +3657,33 @@ async function createDelivery(payload) {
     trailer: payload.trailer || "",
     contractNumber: payload.contractNumber || "",
     contractDate: payload.contractDate || "",
-    contractPrice: sanitizeNumber(payload.contractPrice),
+    // ACELASI pret ca pe factura, in lei/TONA. Daca nu vine explicit, se DERIVA din datele
+    // de facturare — nu exista doua preturi. Trimis explicit, trece prin acelasi plafon de
+    // sanitate ca la editare: acceptat necontrolat, o valoare uriasa ajungea direct in
+    // Achitari/Incasari si in raportul de management.
+    contractPrice: (() => {
+      const moneda = normalizeCurrency(payload.currency);
+      const explicit = sanitizeNumber(payload.contractPrice);
+      const curs = moneda === "MDL" ? 1 : sanitizeNumber(payload.exchangeRate);
+      const pretValuta = sanitizeNumber(payload.priceForeign);
+      const derivat = deliveryTonnePriceFromBilling({
+        currency: moneda,
+        priceForeign: pretValuta,
+        exchangeRate: curs,
+        priceLei: pretValuta * curs || sanitizeNumber(payload.priceLei)
+      });
+      const pret = explicit > 0 ? explicit : derivat;
+      const cantitate = sanitizeNumber(payload.deliveredQuantity ?? payload.plannedQuantity);
+      if (pret * cantitate > 1000000000) {
+        throw new Error("Creanta rezultata este nerealist de mare. Verifica pretul si cursul.");
+      }
+      return pret;
+    })(),
     // Câmpuri de facturare (introduse de contabil) — Etapa 4 + Modul B
     seller: payload.seller || "",
     sellerId: payload.sellerId ? Number(payload.sellerId) : null,
     priceForeign: sanitizeNumber(payload.priceForeign),
-    currency: String(payload.currency || "MDL").trim().toUpperCase() || "MDL",
+    currency: normalizeCurrency(payload.currency),
     exchangeRate: sanitizeNumber(payload.exchangeRate) || (String(payload.currency || "MDL").toUpperCase() === "MDL" ? 1 : 0),
     // priceLei calculat din preț valută × curs (sau direct dacă MDL)
     priceLei: sanitizeNumber(payload.priceForeign) * (sanitizeNumber(payload.exchangeRate) || (String(payload.currency || "MDL").toUpperCase() === "MDL" ? 1 : 0)) || sanitizeNumber(payload.priceLei),
@@ -3271,19 +3803,15 @@ async function transitionDelivery(id, newStatus, payload = {}) {
       // Marfa trebuie sa existe FIZIC. Verificarea lipsea complet pe ramura cu receptie,
       // deci se putea confirma un proiect peste marfa deja plecata printr-o livrare pe
       // locatie — 200 t dintr-un stoc de 100 t.
-      // Pe receptie masura e pe PRODUS (marfa poate fi mutata prin transfer/procesare);
-      // pe locatie, pe cilindrul de plecare.
-      const scope = delivery.receiptId
-        ? { product: delivery.product }
-        : { product: delivery.product, location: delivery.location };
+      // Masura e pe cilindrul de plecare — acolo se scade livrarea, cu sau fara receptie.
       const physical = getDeliveryAvailableQuantity(state, {
-        ...scope,
+        product: delivery.product,
+        location: delivery.location,
         excludeDeliveryId: delivery.id
       });
       if (Math.round(extraNeeded * 1000) > Math.round(physical.available * 1000)) {
-        const where = delivery.receiptId ? "" : ` in ${delivery.location}`;
         throw new Error(
-          `Stoc insuficient pentru ${delivery.product}${where}: disponibil ` +
+          `Stoc insuficient pentru ${delivery.product} in ${delivery.location}: disponibil ` +
             `${Math.round(physical.available * 1000)} kg, cerut ${Math.round(extraNeeded * 1000)} kg.`
         );
       }
@@ -3453,6 +3981,11 @@ async function updateDelivery(id, payload = {}) {
     priceLei: delivery.priceLei,
     priceForeign: delivery.priceForeign,
     currency: delivery.currency,
+    exchangeRate: delivery.exchangeRate,
+    vatRate: delivery.vatRate,
+    invoiceDate: delivery.invoiceDate,
+    invoicePaid: delivery.invoicePaid,
+    contractPrice: delivery.contractPrice,
     contractNumber: delivery.contractNumber,
     contractDate: delivery.contractDate,
     vehicle: delivery.vehicle,
@@ -3472,6 +4005,14 @@ async function updateDelivery(id, payload = {}) {
   if (touchesBilling && !CAN_EDIT_BILLING_ROLES.includes(normalizeRoleCode(payload.actorRole))) {
     throw forbiddenError("Datele de facturare pot fi modificate doar de contabil, manager sau administrator.");
   }
+  // `contractPrice` nu se scrie direct: se DERIVA din pret + moneda + curs, ca sa nu existe
+  // doua veritati despre cat datoreaza cumparatorul. Inainte cererea intorcea 200 si arunca
+  // tacit valoarea — un apelant credea ca a salvat un pret care nu s-a salvat niciodata.
+  if (payload.contractPrice !== undefined) {
+    throw new Error(
+      "Pretul de contract nu se seteaza direct: se calculeaza din pretul de pe factura (pret, moneda, curs)."
+    );
+  }
 
   if (payload.invoiceNumber !== undefined) {
     delivery.invoiceNumber = String(payload.invoiceNumber || "").trim();
@@ -3487,7 +4028,7 @@ async function updateDelivery(id, payload = {}) {
     delivery.priceForeign = sanitizeNumber(payload.priceForeign);
   }
   if (payload.currency !== undefined) {
-    delivery.currency = String(payload.currency || "MDL").trim().toUpperCase() || "MDL";
+    delivery.currency = normalizeCurrency(payload.currency);
   }
   if (payload.exchangeRate !== undefined) {
     delivery.exchangeRate = sanitizeNumber(payload.exchangeRate);
@@ -3538,17 +4079,70 @@ async function updateDelivery(id, payload = {}) {
   if (payload.deliveryHumidity !== undefined) {
     delivery.deliveryHumidity = sanitizeNumber(payload.deliveryHumidity);
   }
+  // La MDL cursul e 1, indiferent ce a ramas pe document. Fara asta, cine punea EUR + curs
+  // si apoi comuta pe MDL fara sa goleasca cursul obtinea `priceLei = pret x curs_vechi` —
+  // un pret/kg de zeci de ori mai mare, fara niciun avertisment.
+  if (String(delivery.currency || "MDL").toUpperCase() === "MDL") {
+    delivery.exchangeRate = 1;
+  }
   // Recompute priceLei = preț valută × curs (if both present)
-  if (payload.priceForeign !== undefined || payload.exchangeRate !== undefined) {
+  if (payload.priceForeign !== undefined || payload.exchangeRate !== undefined || payload.currency !== undefined) {
     const pf = Number(delivery.priceForeign || 0);
     const rate = Number(delivery.exchangeRate || (delivery.currency === "MDL" ? 1 : 0));
     if (pf > 0 && rate > 0) {
       delivery.priceLei = pf * rate;
     } else if (payload.priceLei !== undefined) {
       delivery.priceLei = sanitizeNumber(payload.priceLei);
+    } else if (payload.priceForeign !== undefined && pf === 0) {
+      // Pretul golit EXPLICIT (storno de factura) goleste si `priceLei`. Altfel ramanea
+      // valoarea veche, iar creanta se calcula in continuare din ea: factura fara pret,
+      // Incasari cu tinta veche.
+      delivery.priceLei = 0;
     }
   } else if (payload.priceLei !== undefined) {
     delivery.priceLei = sanitizeNumber(payload.priceLei);
+  }
+
+  // Pretul de contract NU e un al doilea pret: e ACELASI pret, in lei/TONA. Se deriva din
+  // datele de facturare ca sa nu existe doua veritati despre cat datoreaza cumparatorul.
+  // Pana acum nu exista NICIUN drum prin care sa fie completat din interfata, deci ramanea 0
+  // si tinta de incasat a fiecarei livrari era zero.
+  const derivedTonnePrice = touchesBilling ? deliveryTonnePriceFromBilling(delivery) : 0;
+  // Pretul GOLIT (factura stornata) nu are voie sa lase creanta veche in picioare: factura
+  // ar arata fara pret, iar Incasarile ar cere in continuare tinta veche — exact „doua
+  // veritati despre cat datoreaza cumparatorul".
+  if (touchesBilling && derivedTonnePrice === 0 && Number(delivery.contractPrice || 0) > 0) {
+    const incasatDeja = Number(delivery.collectedAmount || 0);
+    if (incasatDeja > 0) {
+      throw new Error(
+        `Pe livrare s-au incasat ${incasatDeja.toFixed(2)} lei. Nu se poate goli pretul: storneaza incasarea intai.`
+      );
+    }
+    delivery.contractPrice = 0;
+    delivery.collectionStatus = "Neincasat";
+  }
+  if (derivedTonnePrice > 0) {
+    // Tinta de incasat nu poate cobori sub cat s-a incasat deja: restul ar deveni 0, livrarea
+    // ar aparea „Incasat", iar banii primiti ar dispărea din Achitari/Incasari. Ordinea
+    // corecta e storno de incasare intai — acelasi precedent ca la retur (regula 6).
+    const incasat = Number(delivery.collectedAmount || 0);
+    const qty = Number(delivery.deliveredQuantity || delivery.netWeight || 0);
+    const tintaNoua = derivedTonnePrice * qty;
+    if (incasat > 0 && tintaNoua < incasat) {
+      throw new Error(
+        `Pe livrare s-au incasat deja ${incasat.toFixed(2)} lei, iar pretul nou ar cobori datoria la ${tintaNoua.toFixed(2)} lei. Storneaza incasarea intai.`
+      );
+    }
+    if (tintaNoua > 1000000000) {
+      throw new Error("Creanta rezultata este nerealist de mare. Verifica pretul si cursul.");
+    }
+    delivery.contractPrice = derivedTonnePrice;
+    // Statutul de incasare se reciteste fata de tinta NOUA. Fara asta, o livrare incasata
+    // integral pe pretul vechi ramanea „Incasat" dupa ce datoria a crescut, iar restanta
+    // dispărea din badge si din filtrele pe status. Aceeasi formula ca in `createTransaction`.
+    const incasatAcum = Number(delivery.collectedAmount || 0);
+    delivery.collectionStatus =
+      incasatAcum <= 0 ? "Neincasat" : incasatAcum < tintaNoua ? "Partial incasat" : "Incasat";
   }
 
   delivery.updatedAt = new Date().toISOString();
@@ -3567,6 +4161,11 @@ async function updateDelivery(id, payload = {}) {
       priceLei: delivery.priceLei,
       priceForeign: delivery.priceForeign,
       currency: delivery.currency,
+      exchangeRate: delivery.exchangeRate,
+      vatRate: delivery.vatRate,
+      invoiceDate: delivery.invoiceDate,
+      invoicePaid: delivery.invoicePaid,
+      contractPrice: delivery.contractPrice,
       contractNumber: delivery.contractNumber,
       contractDate: delivery.contractDate,
       vehicle: delivery.vehicle,
@@ -3843,6 +4442,9 @@ async function updateReceiptStatusWithAudit(id, status, payload = {}) {
 
   assertStatusChangePermission(receipt.status, status, payload.actorRole);
   assertReceiptStatusTransition(receipt.status, status);
+  if (status === "Anulat") {
+    assertNoIssuedAct(receipt, "anula");
+  }
   receipt.status = status;
   receipt.updatedAt = new Date().toISOString();
 
@@ -3886,6 +4488,7 @@ async function updateReceiptSupplier(id, partnerId, changedBy) {
   if (!receipt) {
     throw new Error("Receptia nu a fost gasita.");
   }
+  assertNoIssuedAct(receipt, "schimba furnizorul");
 
   const config = readConfigState();
   const partner = (config.partners || []).find((item) => item.id === Number(partnerId));
@@ -3915,6 +4518,166 @@ async function updateReceiptSupplier(id, partnerId, changedBy) {
 // Contabilul ajusteaza valoarea (suma) unei receptii — ex. pretul nu a fost completat de
 // operator (care nu are acces financiar), deci valoarea a ramas 0. Setam preliminaryPayableAmount
 // si derivam pretul/tona pentru afisare. Soldul/statusul platii se recalculeaza on-read in listReceipts.
+// Corectie de CONDITII pe o receptie deja intrata: bifa „plata pe masa cu umiditate" si/sau
+// pretul. Exista fiindca intelegerea se afla uneori dupa ce marfa a fost descarcata, iar pana
+// acum flagul se putea pune DOAR la creare.
+//
+// Diferenta fata de `updateReceiptAmount`: acolo se scrie o suma la liber si pretul se deduce
+// din ea; aici se corecteaza INTRARILE, iar sumele se recalculeaza dupa aceeasi formula ca la
+// creare. Asa documentul ramane explicabil: cantitate × pret = suma, pe act si pe extras.
+//
+// Estimarea vine gata calculata din handler (ca la creare si la a doua cantarire) — stratul
+// de persistenta nu citeste nomenclatorul.
+//
+// STOCUL NU SE ATINGE. Nici bifa, nici pretul nu schimba cate tone au intrat in cilindru.
+async function correctReceiptTerms(id, payload = {}) {
+  const state = readReceiptsState();
+  const receipt = state.receipts.find((item) => item.id === Number(id));
+  if (!receipt) {
+    throw new Error("Receptia nu a fost gasita.");
+  }
+
+  // Fail-closed pe rol, ca la corectia de inventar: e o rescriere de bani pe un document
+  // deja inregistrat, nu o operatie de zi cu zi.
+  const role = normalizeRoleCode(payload.actorRole);
+  if (!CAN_CORRECT_TERMS_ROLES.includes(role)) {
+    throw forbiddenError("Doar contabilul sau administratorul poate corecta conditiile unei receptii.");
+  }
+  if (receipt.status === "Anulat") {
+    throw new Error("Receptia este anulata. Nu se pot corecta conditiile.");
+  }
+  if (receipt.status === "Inchis") {
+    throw new Error("Receptia este inchisa. Redeschide-o intai, apoi corecteaza conditiile.");
+  }
+  if (receipt.status === "In descarcare") {
+    throw new Error("Receptia asteapta a doua cantarire. Finalizeaz-o intai.");
+  }
+  // Un proiect nu e in stoc si nu are datorie — nu are ce conditii sa i se corecteze
+  // (regula 7). Sursa unica, ca peste tot.
+  if (!isReceiptInStock(receipt)) {
+    throw new Error("Receptia nu e in stoc (proiect/anulata). Nu se pot corecta conditiile.");
+  }
+
+  const reason = String(payload.reason || "").trim().slice(0, 200);
+  if (!reason) {
+    throw new Error("Motivul este obligatoriu la corectarea conditiilor.");
+  }
+
+  const estimate = payload.estimate;
+  if (!estimate || typeof estimate !== "object") {
+    throw new Error("Recalcularea sumelor lipseste.");
+  }
+
+  const oldValue = {
+    payOnGrossQuantity: receipt.payOnGrossQuantity === true,
+    price: Number(receipt.price || 0),
+    preliminaryPayableAmount: Number(receipt.preliminaryPayableAmount || 0)
+  };
+
+  const newFlag = payload.payOnGrossQuantity === true;
+  if (typeof payload.price !== "number" && typeof payload.price !== "string") {
+    throw new Error("Pretul trebuie sa fie un numar.");
+  }
+  const newPrice = sanitizeNumber(payload.price);
+  if (!(newPrice >= 0)) {
+    throw new Error("Pretul trebuie sa fie un numar pozitiv.");
+  }
+  // Acelasi plafon de sanitate ca la corectia manuala de suma: o tastare gresita nu are
+  // voie sa produca o datorie de ordinul miliardelor.
+  if (Number(estimate.preliminaryPayableAmount || 0) > 1000000000) {
+    throw new Error("Suma rezultata este nerealist de mare. Verifica pretul.");
+  }
+  // STOCUL nu are voie sa se miste. In fluxul normal recalculul da exact aceeasi cantitate
+  // (marfa si umiditatea nu se schimba); daca difera, documentul nu mai respecta formula —
+  // atunci cade ZGOMOTOS, nu muta tacit stocul (acelasi principiu ca la createStockSummary).
+  const stocVechi = Math.round(Number(receipt.provisionalNetQuantity || 0) * 1000);
+  const stocNou = Math.round(Number(estimate.provisionalNetQuantity || 0) * 1000);
+  if (stocVechi !== stocNou) {
+    throw new Error(
+      `Corectarea ar schimba cantitatea din stoc (${stocVechi} kg -> ${stocNou} kg). Refuzat: o corectare de conditii nu atinge marfa.`
+    );
+  }
+  if (newFlag === oldValue.payOnGrossQuantity && newPrice === oldValue.price) {
+    throw new Error("Nu s-a schimbat nimic: aceeasi bifa si acelasi pret.");
+  }
+
+  // Datoria nu poate cobori sub cat s-a achitat deja: restul ar deveni 0, receptia ar aparea
+  // „Achitat", iar banii dati in plus ar disparea din evidenta. Ordinea corecta e storno de
+  // plata intai, corectare dupa — acelasi precedent ca la retur pe livrare cu incasari.
+  const dejaAchitat = Number(receipt.paidAmount || 0);
+  const sumaNoua = Number(estimate.preliminaryPayableAmount || 0);
+  if (dejaAchitat > 0 && sumaNoua < dejaAchitat) {
+    throw new Error(
+      `Pe receptie s-au achitat deja ${dejaAchitat.toFixed(2)} lei, iar corectarea ar cobori datoria la ${sumaNoua.toFixed(2)} lei. Storneaza plata intai.`
+    );
+  }
+
+  receipt.payOnGrossQuantity = newFlag;
+  receipt.price = newPrice;
+  // Aceleasi campuri ca la creare, ca documentul sa nu ramana cu jumatati din calculul vechi.
+  // DOAR bani. Campurile de STOC (`provisionalNetQuantity`, apa, impuritatile) si cele
+  // inghetate la receptie (norme, tarife, procentul de retinere) NU se rescriu: o corectie
+  // de conditii schimba pretul si baza de plata, nu marfa si nu istoria.
+  const RECALCULATED = [
+    "cleaningServiceTotal", "dryingServiceTotal", "preliminaryServicesTotal",
+    "preliminaryMerchandiseValue", "withholdingAmount", "preliminaryPayableAmount"
+  ];
+  for (const field of RECALCULATED) {
+    if (estimate[field] !== undefined) {
+      receipt[field] = sanitizeNumber(estimate[field]);
+    }
+  }
+
+  const target = Number(receipt.preliminaryPayableAmount || 0);
+
+  const now = new Date().toISOString();
+  // Istoricul ramane PE DOCUMENT, nu doar in audit: cine deschide receptia peste un an
+  // trebuie sa vada de ce suma e cea care e, fara sa caute in alt ecran.
+  if (!Array.isArray(receipt.termCorrections)) receipt.termCorrections = [];
+  receipt.termCorrections.push({
+    at: now,
+    by: payload.changedBy || "dashboard",
+    reason,
+    // Daca suma fusese pusa manual cu ✎, corectarea o inlocuieste — se consemneaza, altfel
+    // pe document raman doua justificari care se contrazic.
+    replacedManualAmount: Array.isArray(receipt.amountCorrections) && receipt.amountCorrections.length > 0,
+    oldPayOnGrossQuantity: oldValue.payOnGrossQuantity,
+    newPayOnGrossQuantity: newFlag,
+    oldPrice: oldValue.price,
+    newPrice,
+    oldAmount: oldValue.preliminaryPayableAmount,
+    newAmount: target
+  });
+  // Istoricul complet ramane in audit; pe documentul citit la fiecare cerere pastram
+  // ultimele intrari, ca sa nu creasca nelimitat blobul trimis la fiecare `/api/receipts`.
+  if (receipt.termCorrections.length > 20) {
+    receipt.termCorrections = receipt.termCorrections.slice(-20);
+  }
+  marcheazaDivergentaAct(
+    receipt,
+    `Conditii corectate (${newFlag ? "plata pe masa cu apa" : "plata pe masa fara apa"}, ` +
+    `pret ${newPrice} lei/kg): ${reason}`
+  );
+  receipt.updatedAt = now;
+
+  createAuditEntry(state, {
+    entityType: "receipt",
+    entityId: receipt.id,
+    action: "receipt-correct-terms",
+    reason: `Corectare conditii: ${reason}`,
+    user: payload.changedBy || "dashboard",
+    oldValue,
+    newValue: {
+      payOnGrossQuantity: newFlag,
+      price: newPrice,
+      preliminaryPayableAmount: target
+    }
+  });
+
+  writeReceiptsState(state);
+  return receipt;
+}
+
 async function updateReceiptAmount(id, amount, changedBy, note) {
   const state = readReceiptsState();
   const receipt = state.receipts.find((item) => item.id === Number(id));
@@ -3940,12 +4703,31 @@ async function updateReceiptAmount(id, amount, changedBy, note) {
     throw new Error("Valoarea introdusa este nerealist de mare.");
   }
 
-  const oldValue = { preliminaryPayableAmount: receipt.preliminaryPayableAmount, price: receipt.price };
+  const oldValue = {
+    preliminaryPayableAmount: receipt.preliminaryPayableAmount,
+    preliminaryMerchandiseValue: receipt.preliminaryMerchandiseValue,
+    withholdingAmount: receipt.withholdingAmount,
+    price: receipt.price
+  };
   const now = new Date().toISOString();
   receipt.preliminaryPayableAmount = value; // valoare manuala (>0) -> are prioritate in receiptPayableValue
-  const netTonnes = Number(receipt.provisionalNetQuantity ?? receipt.quantity ?? 0);
-  if (netTonnes > 0) {
-    receipt.price = Number((value / (netTonnes * 1000)).toFixed(4)); // lei / kg, pentru afisare in act
+  // Suma introdusa e cea DE PLATA (neta, dupa impozitul retinut la sursa) — exact cifra din
+  // coloana Valoare, din Achitari si din extras. Din ea derivam BRUTUL si RETINEREA, cu cota
+  // INGHETATA pe document, si abia apoi pretul (lei/kg BRUT). Altfel documentul nu se mai
+  // inchide aritmetic: pe actul de achizitie „cantitate × pret" dadea suma neta, iar rubrica
+  // „Retineri la buget" arata 0,00 pe o receptie de la care impozitul chiar s-a retinut.
+  const percent = Number(receipt.withholdingPercent || 0);
+  const payableTonnes = receiptPayableTonnes(receipt);
+  const gross = percent > 0 && percent < 100
+    ? Number((value / (1 - percent / 100)).toFixed(2))
+    : value;
+  receipt.preliminaryMerchandiseValue = gross;
+  receipt.withholdingAmount = Number((gross - value).toFixed(2));
+  if (payableTonnes > 0) {
+    // Pret INFORMATIV (lei/kg BRUT), cu 4 zecimale. Cifra care conteaza pe act e valoarea
+    // bruta de mai sus: actul isi deriva pretul afisat din ea, ca „cantitate × pret = valoare"
+    // sa fie adevarat pe hartie chiar si dupa rotunjire.
+    receipt.price = Number((gross / (payableTonnes * 1000)).toFixed(4));
   }
   // Istoric corectari (fiecare corectare pastreaza comentariul + cine/cand).
   if (!Array.isArray(receipt.amountCorrections)) receipt.amountCorrections = [];
@@ -3957,6 +4739,7 @@ async function updateReceiptAmount(id, amount, changedBy, note) {
     note: comment
   });
   receipt.amountNote = comment; // ultima justificare, pentru afisare rapida
+  marcheazaDivergentaAct(receipt, `Suma corectata manual la ${value.toFixed(2)} lei: ${comment}`);
   receipt.updatedAt = now;
 
   createAuditEntry(state, {
@@ -3966,7 +4749,13 @@ async function updateReceiptAmount(id, amount, changedBy, note) {
     reason: `Corectare valoare: ${comment}`,
     user: changedBy || "dashboard",
     oldValue,
-    newValue: { preliminaryPayableAmount: receipt.preliminaryPayableAmount, price: receipt.price, note: comment }
+    newValue: {
+      preliminaryPayableAmount: receipt.preliminaryPayableAmount,
+      preliminaryMerchandiseValue: receipt.preliminaryMerchandiseValue,
+      withholdingAmount: receipt.withholdingAmount,
+      price: receipt.price,
+      note: comment
+    }
   });
 
   writeReceiptsState(state);
@@ -4027,6 +4816,19 @@ function reassignPartnerReferences(oldId, newId, changedBy) {
   const newName = String(target.name || "");
 
   const state = readReceiptsState();
+  // O receptie cu act EMIS nu-si schimba furnizorul nici prin fuziune de parteneri. Garda
+  // exista pe `updateReceiptSupplier`, dar acest drum o ocolea: dupa fuziune, `actFigures`
+  // pastra numele si IDNP-ul partenerului A, iar receptia arata partenerul B — document si
+  // registru pe doi furnizori diferiti, sub acelasi numar de act.
+  const cuActEmis = (state.receipts || []).filter(
+    (r) => Number(r.supplierId) === from && Number(r.actNumber || 0) > 0
+  );
+  if (cuActEmis.length) {
+    throw new Error(
+      `Receptiile ${cuActEmis.map((r) => `#${r.id} (act ${r.actSeries || ""} ${r.actNumber})`).join(", ")} ` +
+      "au acte de achizitie emise. Fuziunea le-ar schimba furnizorul sub acelasi numar de act."
+    );
+  }
   const counts = {
     receipts: 0,
     transactions: 0,
@@ -4247,14 +5049,20 @@ async function reopenReceipt(id, payload = {}) {
   return receipt;
 }
 
-async function getStats() {
+// `receiptsGata` = receptiile DEJA calculate de apelant. `listReceipts` face alocarea FIFO a
+// platilor per partener (cu sortare per grup) si cloneaza fiecare receptie; rulata de doua ori
+// in aceeasi cerere, dubla degeaba cea mai scumpa agregare din aplicatie.
+async function getStats(receiptsGata) {
   const openingDocuments = await listOpeningDocuments();
-  const receipts = await listReceipts();
+  const receipts = Array.isArray(receiptsGata) ? receiptsGata : await listReceipts();
   const processings = await listProcessings();
   const transactions = await listTransactions();
   const deliveries = await listDeliveries();
   const complaints = await listComplaints();
-  const auditLogs = await listAuditLogs();
+  // NU `listAuditLogs()`: acela SORTEAZA tot jurnalul (zeci de mii de intrari, cu
+  // `new Date()` in comparator) pentru doua numere care se obtin cu o singura trecere —
+  // o treime din costul lui `getStats`. Sortarea e necesara doar la AFISAREA jurnalului.
+  const auditLogs = readReceiptsState().auditLogs || [];
   const partnerAdvances = await listPartnerAdvances();
   const transfers = await listTransfers();
   const stockCorrections = await listStockCorrections();
@@ -4284,11 +5092,9 @@ async function getStats() {
 // locatie. De acolo venea supra-livrarea (200 t dintr-un stoc de 100 t), iar diferenta era
 // inghitita de plafonarea la zero din `createStockSummary`.
 //
-//  `location` lipsa -> pe PRODUS, peste toate locatiile. Masura corecta pentru livrarile
-//                      legate de o receptie: marfa poate fi mutata prin transfer/procesare,
-//                      iar scaderea o urmareste cascadat. O verificare pe o singura locatie
-//                      ar refuza gresit exact acest caz legitim.
-//  `location` dat   -> pe acel cilindru, pentru livrarile care pleaca dintr-o locatie anume.
+//  `location` lipsa -> pe PRODUS, peste toate locatiile (doar informativ).
+//  `location` dat   -> pe acel cilindru. Garda pentru ORICE livrare: scaderea se face doar
+//                      din locatia livrarii, deci si verificarea.
 //  `excludeDeliveryId` -> scoate documentul care tocmai se creeaza/confirma, ca sa nu
 //                      concureze cu el insusi.
 //  `summary`        -> stocul deja calculat de apelant (evita un recalcul complet).
@@ -4306,19 +5112,14 @@ function getDeliveryAvailableQuantity(state, options = {}) {
 
   // Rezervari: documente care nu au scazut inca stocul, dar sunt deja promise.
   //
-  // Pe scopul LOCATIE numaram doar livrarile libere. O livrare legata de receptie isi tine
-  // `location` inghetat pe cilindrul receptiei si nu-l actualizeaza niciodata — daca marfa
-  // e mutata prin transfer/procesare, rezervarea ar ramane pironita pe cilindrul vechi si ar
-  // bloca marfa ALTEI receptii ajunsa acolo intre timp.
-  // Supra-livrarea nu se redeschide: poarta care conteaza e cea de la CONFIRMARE (acolo
-  // pleaca marfa efectiv), iar acolo livrarile pe receptie se verifica pe PRODUS, peste
-  // toate locatiile. Verificarea de la creare ramane o avertizare timpurie, nu garda finala.
+  // Pe scopul LOCATIE numaram toate livrarile din acea locatie, cu sau fara receptie: si
+  // livrarea pe receptie se scade din `location` ei, deci acolo isi rezerva marfa.
   const reservedPending = (state.deliveries || [])
     .filter(
       (d) =>
         (excludeId === null || d.id !== excludeId) &&
         d.product === product &&
-        (location ? !d.receiptId && sameLocation(d.location, location) : true) &&
+        (location ? sameLocation(d.location, location) : true) &&
         Number(d.deliveredQuantity || 0) === 0 &&
         DELIVERY_STATUSES_RESERVING.includes(d.status)
     )
@@ -4495,6 +5296,40 @@ async function cancelTransfer(id, options = {}) {
 
 // Anulare receptie (admin/manager). Receptia anulata e deja exclusa din stoc.
 // Blocata daca are livrari active (altfel ar lasa stocul inconsistent).
+// Un act de achizitie EMIS e hartie semnata, cu numar, in dosarul fiscal. Orice operatie
+// care ar face documentul sa nu mai corespunda hartiei lasa numarul orfan: „Anulat" in
+// aplicatie (ascuns pe unele roluri) si o gaura in sir, imposibil de explicat la control.
+// Sursa UNICA: garda era scrisa doar in `cancelReceipt`, iar ruta de status o ocolea.
+// Cifrele actului sunt INGHEȚATE pe hartie, deci o corectie ulterioara nu le schimba — dar
+// atunci REGISTRUL pleaca de sub hartie: retinerea la sursa declarata pe act nu mai e cea din
+// evidenta. Nu se blocheaza (decizia utilizatorului, 06.10.2026): se MARCHEAZA, ca divergenta
+// sa fie vizibila si explicabila, nu descoperita la control.
+function marcheazaDivergentaAct(receipt, motiv) {
+  if (!(Number((receipt && receipt.actNumber) || 0) > 0)) return;
+  if (!Array.isArray(receipt.actDivergences)) receipt.actDivergences = [];
+  receipt.actDivergences.push({
+    at: new Date().toISOString(),
+    reason: String(motiv || "").trim().slice(0, 200),
+    actNumber: receipt.actNumber,
+    actSeries: receipt.actSeries || "",
+    // Cifrele de pe hartie, ca sa se vada fata de ce a divergat registrul.
+    actValue: Number((receipt.actFigures && receipt.actFigures.value) || 0),
+    actNetPay: Number((receipt.actFigures && receipt.actFigures.netPay) || 0)
+  });
+  // Pe document se pastreaza ultimele 20; istoricul complet rămâne in audit.
+  if (receipt.actDivergences.length > 20) {
+    receipt.actDivergences = receipt.actDivergences.slice(-20);
+  }
+}
+
+function assertNoIssuedAct(receipt, operatie) {
+  if (Number((receipt && receipt.actNumber) || 0) > 0) {
+    throw new Error(
+      `Pe aceasta receptie s-a emis actul ${receipt.actSeries || ""} ${receipt.actNumber}. Nu se poate ${operatie}: storneaza actul intai.`
+    );
+  }
+}
+
 async function cancelReceipt(id, options = {}) {
   const state = readReceiptsState();
   const receipt = state.receipts.find((item) => item.id === Number(id));
@@ -4504,6 +5339,7 @@ async function cancelReceipt(id, options = {}) {
   if (receipt.status === "Anulat") {
     return receipt;
   }
+  assertNoIssuedAct(receipt, "anula");
   const reason = String(options.reason || "").trim();
   if (!reason) {
     throw new Error("Motivul anularii este obligatoriu.");
@@ -4835,6 +5671,104 @@ async function listStockCorrections() {
   );
 }
 
+// Praful din cilindri: resturi de cateva kg, pozitive sau negative, rămase din rotunjiri si
+// din documente retroactive. Nu sunt marfa, dar colorează ecranul in roșu si nu se pot inchide
+// decat una cu una.
+//
+// Se asaza la ZERO prin ACEEASI corectie de inventar ca manual (`createStockCorrection`):
+// fiecare rand primeste urma in audit si intra in coloana „Corectii inventar" in AMBELE
+// ecrane. Nu se scrie direct in stoc — regula 8 cere ca orice pierdere sa fie recunoscuta.
+function stockDustThresholdKg() {
+  const din = Number((readConfigState().systemSettings || {}).stockDustThresholdKg);
+  return Number.isFinite(din) && din > 0 && din <= 50 ? din : 5;
+}
+
+async function clearStockDust(payload = {}) {
+  const currentUser = payload.currentUser || {};
+  if (normalizeRoleCode(currentUser.roleCode) !== "admin") {
+    throw forbiddenError("Doar administratorul poate corecta stocul.");
+  }
+  // ABSENT => valoarea implicita. Dar un 0 TRIMIS explicit nu are voie sa cada pe 5: ar
+  // insemna „n-am cerut nimic" si ar curata totusi. Aceeasi capcana ca la `countedQuantity`.
+  const pragBrut = payload.thresholdKg;
+  const prag =
+    pragBrut === undefined || pragBrut === null || String(pragBrut).trim() === ""
+      ? stockDustThresholdKg()
+      : Number(String(pragBrut).replace(",", ".").trim());
+  if (!Number.isFinite(prag) || prag <= 0 || prag > 50) {
+    throw new Error("Pragul trebuie sa fie un numar intre 0 si 50 kg.");
+  }
+  const reason = requiredText(payload.changeReason || payload.reason, "Motivul corectiei");
+
+  // Sumarul se calculeaza O SINGURA data si se injecteaza in fiecare corectie. Inainte,
+  // fiecare rand il recalcula complet (~77 ms la 3 ani de date): 160 de rânduri insemnau
+  // ~25-40 s pe platforma, adica timeout si LOT PIERDUT dupa ce calculul se facuse.
+  const state = readReceiptsState();
+  const summary = stockSummaryFromState(state);
+  const praf = (summary.byLocation || []).filter((line) => {
+    const kg = Math.abs(Number(line.quantity || 0) * 1000);
+    return kg > 0 && kg < prag;
+  });
+
+  // Plafon per apel. Motivul e CPU, nu scrierile: salvarile se coaleseaza pe cheie, deci N
+  // corectii dau O scriere. Dar fiecare corectie era o agregare completa peste tot blobul —
+  // de aceea sumarul se calculeaza o data si se injecteaza. Plafonul rămâne ca plasa de
+  // siguranta: pe serverless un timeout la jumatate ar lasa operatia partial aplicata, cu
+  // raspunsul pierdut (datele rămân curate, fiecare rand e o corectie auditata separat).
+  const MAX_PER_APEL = 100;
+  const deFacut = praf.slice(0, MAX_PER_APEL);
+  const rest = Math.max(praf.length - deFacut.length, 0);
+
+  const corectate = [];
+  const sarite = [];
+  const perechiFacute = new Set();
+  for (const line of deFacut) {
+    // Produsul se potriveste case-insensitive la corectie, dar randurile de stoc se grupeaza
+    // pe denumirea exacta. „Grau" si „grau" in aceeasi locatie rezolva la ACELASI rand
+    // canonic: primul se corecteaza, al doilea ar gasi delta 0 si ar aborta tot lotul.
+    const cheie = `${String(line.location || "").trim().toLowerCase()}::${String(line.product || "").trim().toLowerCase()}`;
+    if (perechiFacute.has(cheie)) continue;
+    perechiFacute.add(cheie);
+    // Secvential, cu sumarul injectat si scrierea amanata: o singura trecere peste stoc si o
+    // singura scriere de blob la final, in loc de N recalculari si N rescrieri.
+    // Un rand care cade NU are voie sa abandoneze lotul: cele dinainte sunt deja corectate,
+    // iar o aruncare le-ar lasa aplicate fara ca omul sa afle ce s-a facut.
+    let corectie = null;
+    try {
+      corectie = await createStockCorrection({
+        location: line.location,
+        product: line.product,
+        countedQuantity: 0,
+        changeReason: `${reason} (rest sub ${prag} kg)`,
+        currentUser,
+        changedBy: payload.changedBy,
+        summary,
+        deferWrite: true
+      });
+    } catch (error) {
+      sarite.push({
+        location: line.location,
+        product: line.product,
+        error: error.message || "corectie eșuata"
+      });
+      continue;
+    }
+    corectate.push({
+      location: line.location,
+      product: line.product,
+      kg: Math.round(Number(line.quantity || 0) * 1000 * 1000) / 1000,
+      correctionId: corectie && corectie.id
+    });
+  }
+  // O singura scriere, la final. ATENTIE: daca vreodata `createStockCorrection` ajunge sa
+  // faca I/O real (un log, o verificare in baza), debounce-ul s-ar declansa la mijlocul
+  // buclei si s-ar trece la N rescrieri ale blobului intreg.
+  if (corectate.length) {
+    writeReceiptsState(state);
+  }
+  return { thresholdKg: prag, cleared: corectate, skipped: sarite, remaining: rest };
+}
+
 async function createStockCorrection(payload = {}) {
   const state = readReceiptsState();
   const currentUser = payload.currentUser || {};
@@ -4869,7 +5803,12 @@ async function createStockCorrection(payload = {}) {
   // locatie+produs nu exista, o greseala de scriere ar crea stoc fantoma in loc sa corecteze
   // randul real. Potrivirea pe produs e case-insensitive (ca la locatie), iar valorile
   // canonice se preiau din stoc, ca sa se potriveasca sigur la recalcul.
-  const summary = stockSummaryFromState(state);
+  // Sumarul se poate INJECTA: la curatarea in masa, recalculul complet al stocului per rand
+  // costa ~77 ms, deci 160 de rânduri ar depasi limita de 30 s a platformei si tot lotul s-ar
+  // pierde DUPA ce calculul s-a facut. Corectia e un offset constant per pereche
+  // locatie+produs, iar randurile curatate sunt perechi distincte — acelasi sumar e valabil
+  // pentru toate.
+  const summary = payload.summary || stockSummaryFromState(state);
   const line = summary.byLocation.find(
     (i) =>
       sameLocation(i.location, location) &&
@@ -4936,7 +5875,11 @@ async function createStockCorrection(payload = {}) {
     newValue: { location: canonicalLocation, product: canonicalProduct, quantity: counted, delta }
   });
 
-  writeReceiptsState(state);
+  // `deferWrite`: apelantul scrie o singura data, la final. O scriere per rand ar rescrie
+  // blobul intreg de N ori.
+  if (payload.deferWrite !== true) {
+    writeReceiptsState(state);
+  }
   return correction;
 }
 
@@ -5017,7 +5960,12 @@ async function updateUserPasswordById(userId, password) {
   user.passwordSalt = passwordRecord.salt;
   user.passwordHash = passwordRecord.hash;
   user.requirePasswordChange = false;
-  user.updatedAt = new Date().toISOString();
+  // Parola schimbata => sesiunile emise INAINTE nu mai sunt valabile. Tokenul e stateless,
+  // deci singura cale de a-l invalida e sa stim de cand incolo nu mai e bun (verificat in
+  // `attachCurrentUser`). Fara asta, cineva cu tokenul furat il folosea pana la expirare,
+  // desi parola fusese deja schimbata.
+  user.sessionsRevokedAt = new Date().toISOString();
+  user.updatedAt = user.sessionsRevokedAt;
   writeConfigState(state);
   return sanitizeUserForClient(user);
 }
@@ -5171,7 +6119,7 @@ async function createConfigEntry(entity, payload) {
   const passwordRecord =
     entity === "users"
       ? createPasswordRecord(
-          normalized.password || defaultUserPassword,
+          normalized.password || defaultUserPasswordValue(),
           { mode: passwordExplicit ? "strict" : "lenient" }
         )
       : null;
@@ -5309,9 +6257,19 @@ async function updateConfigEntry(entity, id, payload) {
   }
 
   const adminResetPassword = entity === "users" && normalized.password;
+  // Dezactivarea, schimbarea rolului sau resetarea parolei de catre admin taie sesiunile
+  // existente. Altfel un cont dezactivat sau retrogradat pastra drepturile vechi pana la
+  // expirarea tokenului — pana la 12 ore.
+  const taieSesiuni =
+    entity === "users" &&
+    (adminResetPassword ||
+      normalized.active === false ||
+      (normalized.roleCode !== undefined &&
+        normalizeRoleCode(normalized.roleCode) !== normalizeRoleCode(existing.roleCode)));
 
   Object.assign(existing, normalized, {
-    updatedAt: new Date().toISOString()
+    updatedAt: new Date().toISOString(),
+    ...(taieSesiuni ? { sessionsRevokedAt: new Date().toISOString() } : {})
   });
 
   if (adminResetPassword) {
@@ -5372,7 +6330,32 @@ async function updateSystemSettings(payload) {
     closeOfDayHour: sanitizeNumber(payload.closeOfDayHour ?? state.systemSettings.closeOfDayHour),
     reportChannel: String(payload.reportChannel || state.systemSettings.reportChannel).trim(),
     reportAudience: normalizeReportAudience(payload.reportAudience || state.systemSettings.reportAudience),
-    defaultCurrency: String(payload.defaultCurrency || state.systemSettings.defaultCurrency).trim()
+    defaultCurrency: String(payload.defaultCurrency || state.systemSettings.defaultCurrency).trim(),
+    // `systemSettings` se reconstruieste din lista, deci un camp nemenționat aici se PIERDE
+    // la prima salvare de setari. Pragul se pastreaza, iar o valoare in afara intervalului
+    // (0, 50] e ignorata — nu scrie peste o setare buna cu una invalida.
+    stockDustThresholdKg: (() => {
+      const cerut = Number(payload.stockDustThresholdKg);
+      if (Number.isFinite(cerut) && cerut > 0 && cerut <= 50) return cerut;
+      const curent = Number(state.systemSettings.stockDustThresholdKg);
+      return Number.isFinite(curent) && curent > 0 && curent <= 50 ? curent : 5;
+    })(),
+    // Conturile 1C: un cont are forma „241.1" / „5348". Se pastreaza valoarea curenta daca
+    // nu vine nimic valid — `systemSettings` se reconstruieste din lista, deci un camp
+    // nemenționat aici se PIERDE la prima salvare de setari.
+    ...(() => {
+      const cont = (cheie, implicit) => {
+        const cerut = String(payload[cheie] || "").trim();
+        if (/^[0-9][0-9.]{1,11}$/.test(cerut)) return cerut;
+        const curent = String(state.systemSettings[cheie] || "").trim();
+        return /^[0-9][0-9.]{1,11}$/.test(curent) ? curent : implicit;
+      };
+      return {
+        account1cCash: cont("account1cCash", "241.1"),
+        account1cSupplier: cont("account1cSupplier", "544.32"),
+        account1cTax: cont("account1cTax", "534.3")
+      };
+    })()
   };
   writeConfigState(state);
   const receiptsState = readReceiptsState();
@@ -5460,7 +6443,7 @@ async function getDashboardSnapshot(dateValue = new Date().toISOString().slice(0
     if (isVoidedDelivery(item)) return sum; // livrarea anulată/returnată nu mai e de încasat
     if (isDeliveryPendingStockExit(item)) return sum; // proiectul nu e marfă plecată
     const qty = Number(item.deliveredQuantity || item.netWeight || 0);
-    const target = Number(item.contractPrice || 0) * qty;
+    const target = deliveryReceivableTonnePrice(item) * qty;
     const collected = Number(item.collectedAmount || 0);
     return sum + Math.max(target - collected, 0);
   }, 0);
@@ -5498,11 +6481,720 @@ async function getDashboardSnapshot(dateValue = new Date().toISOString().slice(0
 
 function toCsvField(value) {
   if (value === null || value === undefined) return "";
-  const str = String(value);
+  let str = String(value);
+  // Injectie de formule in Excel: o celula care incepe cu `= + - @`, TAB sau CR e
+  // interpretata ca FORMULA. Se neutralizeaza doar ce nu e numar, ca sa nu se strice
+  // valorile negative. Aceeasi regula ca in `trimiteCsv1c`.
+  // AMBELE teste pe valoarea trimuita (oglinda din `trimiteCsv1c`): testand „periculos" pe
+  // sirul netrimuit, „ =1+1" nu era nici numar, nici periculos, si scapa neneutralizat.
+  const curat = str.trim();
+  if (str && !/^-?\d+(?:[.,]\d+)?$/.test(curat) && /^[=+\-@\t\r]/.test(curat)) {
+    str = `'${str}`;
+  }
   if (/[",\n\r]/.test(str)) {
     return `"${str.replace(/"/g, '""')}"`;
   }
   return str;
+}
+
+// ============================================================================
+// EXPORT PENTRU 1C — act de achizitie (recepții de la persoane fizice)
+//
+// Varianta „intermediara": contabilul incarca fisierul in 1C prin prelucrarea obisnuita de
+// import. NU generam direct `ФайлОбмена`: acolo 1C potriveste obiectele dupa GUID
+// (`СинхронизироватьПоИдентификатору`), iar GUID-uri inventate de noi ar CREA furnizori si
+// produse duplicate la fiecare import.
+//
+// Coloanele oglindesc documentul `ПрихНалоговаяНакладная` / `ВидОперации = АктЗакупки`:
+// numarul si data actului, contrapartida cu codul fiscal, nomenclatorul, cantitatea, pretul,
+// valoarea, cota si impozitul reținut, suma de plata, depozitul.
+//
+// Impozitul: in 1C se ia din ORDINUL DE PLATA (`РасходныйКассовый`, campul `Нал05`), nu de pe
+// act. Il punem totusi in export, ca sa poata fi confruntat — pe exemplul real,
+// 8090,43 lei x 6% = 485,43, exact cat scrie in ordinul de plata.
+//
+// CIFRELE: pe un act EMIS se exporta cele INGHEȚATE la emitere (`actFigures`), nu recalculul
+// de acum. Altfel exportul ar contrazice hartia semnata si dosarul.
+const EXPORT_1C_COLUMNS = [
+  "Seria act", "Nr. act", "Data act", "Furnizor", "Cod fiscal / IDNP",
+  "Produs", "Cantitate (kg)", "Unitate", "Pret (lei/kg)", "Valoare (lei)",
+  "Cota impozit (%)", "Impozit retinut (lei)", "Spre plata (lei)",
+  "Depozit", "Temei", "Nr. recepție", "Observatii export"
+];
+
+async function exportPurchaseActsFor1c(options = {}) {
+  const state = readReceiptsState();
+  const config = readConfigState();
+  const from = String(options.from || "").trim();
+  const to = String(options.to || "").trim();
+  // Implicit: DOAR actele neincarcate in 1C, indiferent de data — altfel un act facut de
+  // depozitar dupa ora 17 s-ar pierde intre intervale, sau ar fi incarcat de doua ori.
+  const doarNoi = options.onlyNew !== false;
+  // Selectie explicita: exact documentele cerute, chiar daca sunt deja marcate (reincarcare).
+  const selectie = Array.isArray(options.receiptIds) && options.receiptIds.length
+    ? new Set(options.receiptIds.map(Number))
+    : null;
+  const inInterval = (value) => {
+    const zi = String(value || "").slice(0, 10);
+    if (!zi) return false;
+    if (from && zi < from) return false;
+    if (to && zi > to) return false;
+    return true;
+  };
+
+  // Index pe id, construit O DATA: `find` in bucla facea exportul patratic (753 ms la 3 ani,
+  // 5 ms cu index — acelasi tipar deja folosit corect in `listReceipts`).
+  const receptiiPeId = new Map((state.receipts || []).map((r) => [Number(r.id), r]));
+  // Si parteneri: `find` in bucla facea exportul O(acte x parteneri) — 55 ms la 20.000 de
+  // acte si 3.000 de parteneri, iar cazul rau (furnizor scos din nomenclator) scana toata
+  // lista la fiecare act. Acelasi tipar ca mai sus.
+  const parteneriPeId = new Map((config.partners || []).map((x) => [Number(x.id), x]));
+
+  const randuri = [];
+  for (const receipt of state.receipts || []) {
+    if (!esteActExportabil1c(receipt)) continue;
+    if (selectie) {
+      if (!selectie.has(Number(receipt.id))) continue;
+    } else {
+      if (doarNoi && String(receipt.exported1cAt || "").trim()) continue;
+      if (!inInterval(dataAct1c(receipt))) continue;
+    }
+
+    const cifre = receipt.actFigures;
+
+    const partener = parteneriPeId.get(Number(cifre.supplierId || receipt.supplierId));
+    const cota = Number(receipt.withholdingPercent || 0);
+    // Codul fiscal e CHEIA de potrivire in 1C, nu o cifra de bani: aici conteaza sa fie
+    // ACELASI pe act si in nomenclatorul de furnizori, altfel 1C creeaza un furnizor nou si
+    // actul rămâne nelegat. Se exporta cel CURENT (cu care furnizorul intra in 1C), iar daca
+    // difera de cel inghetat pe act, se semnaleaza — hartia semnata are alt cod, deci actul
+    // ar trebui reemis.
+    const codCurent = String((partener && partener.idno) || "").trim();
+    const codInghetat = String(cifre.supplierIdno || "").trim();
+    const motive = [];
+    if (codInghetat && codCurent && codInghetat !== codCurent) {
+      motive.push(`ATENTIE: pe actul semnat codul fiscal e ${codInghetat}, in nomenclator e ${codCurent}`);
+    } else if (!codCurent) {
+      motive.push("ATENTIE: furnizorul nu are cod fiscal in nomenclator — 1C nu il poate potrivi");
+    }
+    // Cifrele de pe hartie sunt inghetate, deci actul ramane valabil — dar REGISTRUL a plecat
+    // de sub el: retinerea la sursa declarata pe act nu mai e cea din evidenta (CLAUDE.md,
+    // regula 10b). In 1C a ramas cifra veche, deci actul trebuie reincarcat.
+    const divergente = Array.isArray(receipt.actDivergences) ? receipt.actDivergences.length : 0;
+    if (divergente) {
+      motive.push(
+        `ATENTIE: receptia a fost corectata dupa emiterea actului (${divergente} divergenta/e) — ` +
+        "cifrele din 1C nu mai sunt cele din registru"
+      );
+    }
+    const modificat = avertismentModificat1c(receipt);
+    if (modificat) motive.push(modificat);
+    const avertisment = motive.join("; ");
+
+    for (const rand of cifre.rows || []) {
+      const sursa = receptiiPeId.get(Number(rand.id)) || receipt;
+      const kg = Number(rand.netKg || 0);
+      const valoare = Number(rand.value || 0);
+      randuri.push({
+        "Seria act": cifre.series || receipt.actSeries || "",
+        "Nr. act": receipt.actNumber,
+        "Data act": String(rand.date || receipt.actIssuedAt || "").slice(0, 10),
+        Furnizor: cifre.supplierName || receipt.supplier || "",
+        "Cod fiscal / IDNP": codCurent || codInghetat,
+        Produs: rand.product || sursa.product || "",
+        "Cantitate (kg)": kg.toFixed(3).replace(/\.?0+$/, ""),
+        Unitate: "kg",
+        // Pretul se DERIVA din valoare si cantitate, ca pe act: „cantitate x pret = valoare"
+        // trebuie sa fie adevarat si in export, nu doar pe hartie.
+        "Pret (lei/kg)": kg > 0 ? (valoare / kg).toFixed(4) : "",
+        "Valoare (lei)": valoare.toFixed(2),
+        // Cota se afiseaza intreaga doar daca E intreaga: 6,5% rotunjit la „7" ar face ca
+        // fisierul de acte sa arate alta cota decat cel de ordine de plata, pe aceeasi
+        // receptie. Aceeasi regula ca in `exportPaymentsFor1c`.
+        "Cota impozit (%)": cota ? (Number.isInteger(cota) ? cota.toFixed(0) : String(cota)) : "",
+        "Impozit retinut (lei)": (Number(rand.value || 0) - Number(rand.netPay || 0)).toFixed(2),
+        "Spre plata (lei)": Number(rand.netPay || 0).toFixed(2),
+        Depozit: sursa.location || "",
+        Temei: sursa.note || "",
+        "Nr. recepție": rand.id,
+        "Observatii export": avertisment,
+        _id: receipt.id
+      });
+    }
+  }
+
+  // Ordine de dosar: pe numar de act, crescator.
+  randuri.sort((a, b) => Number(a["Nr. act"]) - Number(b["Nr. act"]));
+  return { columns: EXPORT_1C_COLUMNS, rows: randuri };
+}
+
+// ============================================================================
+// EXPORT PENTRU 1C — furnizori (`СправочникСсылка.Контрагenty`)
+//
+// Se incarca in 1C INAINTEA actelor: asa fiecare act gaseste furnizorul deja existent, deci
+// nu rămâne niciun camp gol si nu se creeaza dubluri.
+//
+// Cheia de potrivire e CODUL FISCAL (`ФискКод` in 1C — IDNP la persoane fizice), nu
+// denumirea: o diferenta de scriere („Testov" / „Furnizor Testov") ar crea un al doilea
+// furnizor. Un furnizor fara cod fiscal NU se exporta — ar intra in 1C nepotrivit cu nimic.
+//
+// Coloanele oglindesc exact ce are un contragent persoana fizica in exportul real din 1C:
+// `ФискКод`, `Наименование`, `НаименованиеПолное`, `ВидКонтрагента` (ЧастноеЛицо),
+// `ЮрАдрес`, `НеРезидент`, telefoane.
+// Un SINGUR colator, construit o data. `localeCompare` per comparatie construia intern
+// colatorul la fiecare apel: 134 ms vs 4 ms la 3.000 de furnizori — platiti la fiecare
+// deschidere a tabului „Furnizori".
+const COLATOR_RO = new Intl.Collator("ro", { sensitivity: "base" });
+
+const EXPORT_1C_SUPPLIER_COLUMNS = [
+  "Cod fiscal / IDNP", "Denumire", "Denumire completa", "Tip contraparte",
+  "Adresa juridica", "Telefon", "Nerezident", "Banca", "IBAN", "Profil fiscal",
+  "Observatii export"
+];
+
+async function exportSuppliersFor1c(options = {}) {
+  const state = readReceiptsState();
+  const config = readConfigState();
+  const from = String(options.from || "").trim();
+  const to = String(options.to || "").trim();
+  const doarDinActe = options.onlyFromActs !== false;
+  // DOAR FURNIZORII NOI: cei care nu au fost inca marcati ca incarcati in 1C. Aplicatia nu
+  // poate STI ce e in 1C, deci marcajul il pune omul, dupa un import reusit — altfel un
+  // import eșuat ar face furnizorii sa dispara din export si actele n-ar mai gasi pe nimeni.
+  const doarNoi = options.onlyNew !== false;
+  const selectie = Array.isArray(options.partnerIds) && options.partnerIds.length
+    ? new Set(options.partnerIds.map(Number))
+    : null;
+
+  // Furnizorii care apar pe ACTELE din perioada: exact cei de care 1C are nevoie ca sa
+  // poata primi actele. Fara perioada, toti furnizorii cu cod fiscal.
+  let idUri = null;
+  if (doarDinActe) {
+    idUri = new Set();
+    for (const receipt of state.receipts || []) {
+      if (!(Number(receipt.actNumber || 0) > 0)) continue;
+      if (Number(receipt.actCarrierId || 0) > 0) continue;
+      const zi = String(receipt.actIssuedAt || receipt.createdAt || "").slice(0, 10);
+      if (from && zi < from) continue;
+      if (to && zi > to) continue;
+      const id = Number((receipt.actFigures && receipt.actFigures.supplierId) || receipt.supplierId);
+      if (id) idUri.add(id);
+    }
+  }
+
+  // Harta pe nume NORMALIZAT, construita o data: `find` cu `.trim().toLowerCase()` pe ambele
+  // capete, pentru fiecare dintre cei 3.000 de parteneri, insemna ~12.000 de alocari de siruri
+  // pe cerere.
+  const profilePeNume = new Map(
+    (config.fiscalProfiles || []).map((f) => [String(f.name || "").trim().toLowerCase(), f])
+  );
+  const randuri = [];
+  for (const p of config.partners || []) {
+    if (!String(p.role || "").match(/furnizor|ambele/i)) continue;
+    if (selectie) {
+      if (!selectie.has(Number(p.id))) continue;
+    } else {
+      if (idUri && !idUri.has(Number(p.id))) continue;
+      if (doarNoi && String(p.exported1cAt || "").trim()) continue;
+    }
+    const cod = String(p.idno || "").trim();
+    // Fara cod fiscal nu are cu ce sa fie potrivit in 1C: ar intra ca furnizor nou si ar
+    // produce exact dublura pe care exportul o evita.
+    if (!cod) continue;
+
+    const prof = profilePeNume.get(String(p.fiscalProfile || "").trim().toLowerCase());
+    // Persoana fizica = cea la care se retine impozit la sursa (acelasi criteriu ca pe act).
+    const persoanaFizica = Number((prof || {}).withholdingPercent || 0) > 0;
+
+    randuri.push({
+      "Cod fiscal / IDNP": cod,
+      Denumire: String(p.name || "").trim(),
+      "Denumire completa": String(p.name || "").trim(),
+      "Tip contraparte": persoanaFizica ? "ЧастноеЛицо" : "ЮридическоеЛицо",
+      "Adresa juridica": String(p.address || "").trim(),
+      Telefon: String(p.phone || "").trim(),
+      Nerezident: "false",
+      Banca: String(p.bankName || "").trim(),
+      IBAN: String(p.iban || "").trim(),
+      "Profil fiscal": String(p.fiscalProfile || "").trim(),
+      "Observatii export": avertismentModificat1c(p),
+      _id: p.id
+    });
+  }
+
+  randuri.sort((a, b) => COLATOR_RO.compare(a.Denumire, b.Denumire));
+  return { columns: EXPORT_1C_SUPPLIER_COLUMNS, rows: randuri };
+}
+
+// ============================================================================
+// EXPORT PENTRU 1C — ordine de plata (`ДокументСсылка.РасходныйКассовый`)
+//
+// Conturile sunt CITITE din exportul real al utilizatorului (РКО.xml), nu ghicite:
+//   СчетКассы      241.1  Касса в национальной валюте        — de unde iese banul
+//   СчетПолучателя 544.32 Прочие текущие начисленные обязат. — datoria catre furnizor
+//   СчетНалог      534.3  Обязательства по подоходному налогу, удержанному у источника
+//
+// Aritmetica, verificata pe acelasi fisier: `Сумма` e BRUTUL, `Нал05` e impozitul reținut
+// (8090,43 x 6% = 485,43), iar din casa iese diferenta (7605,00).
+//
+// Plata se leaga de FURNIZOR si de contul contabil (asa lucreaza 1C). Numarul actului intra
+// in „Temei", ca sa se poata confrunta cu dosarul — in 1C plata nu refera documentul direct.
+const EXPORT_1C_PAYMENT_COLUMNS = [
+  "Nr. plata", "Data", "Tip plata", "Furnizor", "Cod fiscal / IDNP",
+  "Suma plata (lei)", "Suma bruta (lei)", "Cota impozit (%)", "Impozit retinut (lei)",
+  "Cont casa", "Cont furnizor", "Cont impozit",
+  "Temei", "Acte acoperite", "Observatii export"
+];
+
+// Implicite citite din exportul real. Se pot schimba din nomenclator (`systemSettings`),
+// ca sa nu fie scrise in cod: un alt plan de conturi nu trebuie sa ceara modificare de cod.
+const CONTURI_1C_IMPLICITE = { casa: "241.1", furnizor: "544.32", impozit: "534.3" };
+
+function conturi1c() {
+  const set = readConfigState().systemSettings || {};
+  return {
+    casa: String(set.account1cCash || CONTURI_1C_IMPLICITE.casa).trim(),
+    furnizor: String(set.account1cSupplier || CONTURI_1C_IMPLICITE.furnizor).trim(),
+    impozit: String(set.account1cTax || CONTURI_1C_IMPLICITE.impozit).trim()
+  };
+}
+
+// Tranzactii care NU sunt plati catre furnizor si nu au ce caută intr-un ordin de casa.
+const SURSE_PLATA_EXCLUSE = new Set([
+  "advance-applied",      // realocare de avans: nu sunt bani noi, ar dubla plata
+  "complaint-adjustment"  // ajustare de factura pe o reclamatie; partenerul poate fi CLIENTUL
+]);
+
+// SURSA UNICA pentru „ce intra in exportul 1C".
+//
+// DE CE: criteriul era scris de doua ori — o data in `listPending1c` (lista pe care omul
+// bifeaza) si o data in fiecare export (ce ajunge efectiv in fisier) — si cele doua au
+// DIVERGAT. O tranzactie `complaint-adjustment` aparea in lista, se bifa, CSV-ul nu avea
+// randul ei, iar „Am incarcat in 1C" o marca: document scos din coada fara sa fi ajuns
+// vreodata in 1C, tacut. Acelasi tipar la acte (lista cerea doar `actNumber`, exportul cerea
+// si `actFigures`).
+// Daca adaugi un criteriu nou, pune-l AICI — nu in bucla de export.
+function estePlataExportabila1c(t) {
+  if (!t || t.direction !== "payment") return false;
+  if (!isActiveTransaction(t)) return false;
+  if (SURSE_PLATA_EXCLUSE.has(String(t.source || ""))) return false;
+  // O plata legata de o LIVRARE are ca partener CUMPARATORUL, nu furnizorul: exportata, ar
+  // intra in 1C pe contul de datorie catre furnizor (544.32) cu numele clientului. Acelasi
+  // motiv pentru care `complaint-adjustment` e exclusa mai sus.
+  if (String(t.referenceType || "") === "delivery") return false;
+  return true;
+}
+
+function esteActExportabil1c(r) {
+  if (!r) return false;
+  // Doar acte EMISE: un act neemis nu are numar, deci nu are ce cauta in contabilitate.
+  if (!(Number(r.actNumber || 0) > 0)) return false;
+  if (!isReceiptInStock(r)) return false;
+  // Captura sta pe PURTATOR; celelalte receptii ale actului au doar referinta. Se exporta
+  // o data per act — altfel acelasi act ar aparea de N ori.
+  if (Number(r.actCarrierId || 0) > 0) return false;
+  // Fara cifrele inghetate la emitere nu avem ce exporta: recalculul ar putea contrazice
+  // hartia semnata (CLAUDE.md, regula 10).
+  if (!r.actFigures) return false;
+  return true;
+}
+
+// Data dupa care se filtreaza un act. Aceeasi in lista si in export: altfel descarcarea pe
+// perioada scotea alte documente decat cele afisate.
+function dataAct1c(r) {
+  return (r || {}).actIssuedAt || (r || {}).receivedAt || (r || {}).createdAt;
+}
+
+// Documentul a fost MODIFICAT dupa ce a fost incarcat in 1C: acolo a ramas o cifra care la
+// noi nu mai exista. Se semnaleaza pe toate cele trei exporturi, nu doar la plati.
+function avertismentModificat1c(doc) {
+  const incarcat = String((doc || {}).exported1cAt || "").trim();
+  const modificat = String((doc || {}).updatedAt || "").trim();
+  return incarcat && modificat && modificat > incarcat
+    ? "ATENTIE: documentul a fost MODIFICAT dupa incarcarea in 1C — reincarca-l"
+    : "";
+}
+
+// Brutul reconstituit din net, cu cota retinuta la sursa. Aceeasi garda ca in
+// `updateReceiptAmount`: o cota de 100 ar da `Infinity`, una peste 100 un brut negativ.
+function brutDinNet1c(net, cota) {
+  const c = Number(cota);
+  if (!Number.isFinite(c) || !(c > 0) || !(c < 100)) return null;
+  return Number(net) / (1 - c / 100);
+}
+
+async function exportPaymentsFor1c(options = {}) {
+  const state = readReceiptsState();
+  const config = readConfigState();
+  const conturi = conturi1c();
+  const from = String(options.from || "").trim();
+  const to = String(options.to || "").trim();
+  const doarNoi = options.onlyNew !== false;
+  const selectie = Array.isArray(options.transactionIds) && options.transactionIds.length
+    ? new Set(options.transactionIds.map(Number))
+    : null;
+
+  // Indecsi construiti O DATA: doua `find` liniare per tranzactie faceau exportul patratic
+  // (931 ms la 3 ani, 10 ms cu indecsi).
+  const parteneriPeId = new Map((config.partners || []).map((p) => [Number(p.id), p]));
+  const receptiiPeId = new Map((state.receipts || []).map((r) => [Number(r.id), r]));
+
+  const randuri = [];
+  for (const t of state.transactions || []) {
+    if (!estePlataExportabila1c(t)) continue;
+    const zi = String(t.createdAt || "").slice(0, 10);
+    if (!zi) continue;
+    if (selectie) {
+      if (!selectie.has(Number(t.id))) continue;
+    } else {
+      if (doarNoi && String(t.exported1cAt || "").trim()) continue;
+      if (from && zi < from) continue;
+      if (to && zi > to) continue;
+    }
+
+    const partener = parteneriPeId.get(Number(t.partnerId));
+    const receptie = receptiiPeId.get(Number(t.receiptId));
+
+    // BANUL CARE A IESIT, nu suma atribuita: `appliedAmount` e PLAFONAT la datoria recepției
+    // referite, iar surplusul devine avans. Pe o plata „una pentru toate receptiile" (fluxul
+    // normal), exportul ar fi scos mai putin decat a ieșit din casa, iar 241.1 ar fi rămas
+    // umflat cu diferenta. `||`, nu `??`: un `appliedAmount` de 0 nu inseamna plata de 0.
+    const platit = Number(t.amount || 0);
+    const atribuit = Number(t.appliedAmount || 0);
+    const avans = Number(t.advanceAmount || 0);
+    // Tipul LIPSA nu inseamna numerar. `paymentType` e optional la creare
+    // (`src/transaction-handlers.js` il valideaza doar daca e nevid), iar presupunerea
+    // „gol = numerar" trecea plata pe ramura sigura si INVENTA brutul si impozitul pe un
+    // document despre care nu se stie daca a iesit din casa.
+    const tipPlata = String(t.paymentType || "").trim();
+
+    // RECONSTITUIREA BRUTULUI se face DOAR cand e sigur:
+    //  - plata e in NUMERAR (un ordin de casa; transferul si barterul nu ies din 241.1);
+    //  - e legata de O receptie, integral atribuita ei (fara avans, fara stingere FIFO a
+    //    altor receptii cu alte cote);
+    //  - cota e cea INGHEȚATA pe acea receptie.
+    // In orice alt caz NU se inventeaza cifre: coloanele rămân goale si rândul poarta un
+    // avertisment, ca omul sa completeze manual. Mai bine o celula goala decat un impozit
+    // care nu s-a reținut.
+    const avertismente = [];
+    const esteNumerar = /numerar/i.test(tipPlata);
+    const cotaReceptie = Number((receptie || {}).withholdingPercent);
+    const integralPeReceptie =
+      Boolean(receptie) &&
+      String(t.referenceType || "") === "receipt" &&
+      avans <= 0 &&
+      Math.abs(atribuit - platit) < 0.005;
+    const brutPosibil = brutDinNet1c(platit, cotaReceptie);
+    const sigur = esteNumerar && integralPeReceptie && brutPosibil !== null;
+
+    let brut = "";
+    let impozit = "";
+    let cotaAfisata = "";
+    if (sigur) {
+      const b = brutPosibil;
+      brut = b.toFixed(2);
+      impozit = (b - platit).toFixed(2);
+      // Cota se afiseaza intreaga doar daca E intreaga: 6,5% rotunjit la „7" ar face ca 1C
+      // sa recalculeze altceva decat brutul exportat.
+      cotaAfisata = Number.isInteger(cotaReceptie)
+        ? cotaReceptie.toFixed(0)
+        : String(cotaReceptie);
+    } else {
+      if (!esteNumerar) {
+        avertismente.push(
+          tipPlata
+            ? `plata e „${tipPlata}", nu numerar — nu intra pe contul de casa; verifica documentul si contul`
+            : "plata nu are tip inregistrat — nu se poate sti daca a iesit din casa; verifica documentul si contul"
+        );
+      }
+      if (String(t.referenceType || "") !== "receipt") {
+        avertismente.push(
+          `plata nu e legata de o receptie (${t.referenceType || "fara referinta"}) — impozitul se completeaza manual`
+        );
+      } else if (!receptie) {
+        avertismente.push("receptia referita nu a fost gasita — impozitul se completeaza manual");
+      } else if (avans > 0) {
+        avertismente.push(
+          `plata include un avans de ${avans.toFixed(2)} lei — brutul si impozitul se completeaza manual`
+        );
+      } else if (Math.abs(atribuit - platit) >= 0.005) {
+        avertismente.push(
+          `plata stinge mai multe receptii (atribuit ${atribuit.toFixed(2)} din ${platit.toFixed(2)} lei) — ` +
+          "cotele pot diferi, impozitul se completeaza manual"
+        );
+      } else if (!(cotaReceptie > 0)) {
+        avertismente.push("receptia nu are cota de retinere — verifica profilul fiscal");
+      }
+    }
+
+    // Documentul din dosar care justifica plata.
+    const acte = receptie && Number(receptie.actNumber || 0) > 0
+      ? `${receptie.actSeries || ""} ${receptie.actNumber}`.trim()
+      : "";
+    if (!acte && String(t.referenceType || "") === "receipt") {
+      avertismente.push("plata nu are act de achizitie emis");
+    }
+
+    const cod = String((partener || {}).idno || "").trim();
+    if (!cod) avertismente.push("furnizorul nu are cod fiscal — 1C nu il poate potrivi");
+
+    // Document schimbat DUPA ce a fost incarcat in 1C: contabilul trebuie sa afle, altfel
+    // 1C pastreaza o cifra care nu mai exista la noi.
+    const marcat = String(t.exported1cAt || "").trim();
+    if (marcat && String(t.updatedAt || "") > marcat) {
+      avertismente.push("MODIFICAT dupa incarcarea in 1C — verifica si corecteaza acolo");
+    }
+
+    randuri.push({
+      "Nr. plata": t.id,
+      Data: zi,
+      "Tip plata": tipPlata,
+      Furnizor: String(t.partner || (partener || {}).name || "").trim(),
+      "Cod fiscal / IDNP": cod,
+      "Suma plata (lei)": platit.toFixed(2),
+      "Suma bruta (lei)": brut,
+      "Cota impozit (%)": cotaAfisata,
+      "Impozit retinut (lei)": impozit,
+      "Cont casa": esteNumerar ? conturi.casa : "",
+      "Cont furnizor": conturi.furnizor,
+      "Cont impozit": sigur ? conturi.impozit : "",
+      Temei: String(t.note || "plata cereale").trim(),
+      "Acte acoperite": acte,
+      "Observatii export": avertismente.join("; "),
+      _id: t.id
+    });
+  }
+
+  randuri.sort((a, b) => String(a.Data).localeCompare(String(b.Data)) || a["Nr. plata"] - b["Nr. plata"]);
+  return { columns: EXPORT_1C_PAYMENT_COLUMNS, rows: randuri };
+}
+
+// ============================================================================
+// MARCAJUL „incarcat in 1C" — pe furnizori, pe acte si pe plati
+//
+// Criteriul de „nou" NU e data creării, e MARCAJUL. Un furnizor poate fi in aplicatie de
+// trei luni si tot sa nu fie in 1C; un act facut de depozitar dupa ora 17 trebuie sa apara
+// in exportul de MAINE, nu sa se piarda intre intervale de date. De aceea exportul scoate
+// implicit „ce nu e incarcat", indiferent de data.
+//
+// Marcajul il pune OMUL, dupa un import reusit: aplicatia nu are cum sa afle daca 1C a
+// primit documentele, iar un marcaj automat pe descarcare le-ar scoate din export chiar
+// daca importul a cazut.
+// Lista PROPRIE, nu `CAN_EDIT_BILLING_ROLES`: marcajul decide ce ajunge in contabilitate,
+// deci cine il pune trebuie sa poata si CITI exportul. Managerul are drepturi de facturare
+// dar nu are acces la export — ar fi putut marca documente pe care nu le vede, scotandu-le
+// implicit din export (sa nu ajunga niciodata in 1C) sau readucandu-le (import dublu).
+// Reutilizarea listei de facturare ar insemna ca o viitoare largire a acelor drepturi
+// largeste TACIT si astea.
+const CAN_EXPORT_1C_ROLES = ["accountant", "accountant-sef", "admin"];
+
+// Harta fara prototip: `kind: "__proto__"` trecea garda `TIPURI_1C[tip]` (proprietatile de
+// pe prototip sunt truthy) si ajungea la o colectie inexistenta, raspunzand 200 in loc de
+// eroare.
+const TIPURI_1C = Object.assign(Object.create(null), {
+  suppliers: { colectie: "partners", sursa: "config", eticheta: "furnizori" },
+  receipts: { colectie: "receipts", sursa: "receipts", eticheta: "acte de achizitie" },
+  payments: { colectie: "transactions", sursa: "receipts", eticheta: "ordine de plata" }
+});
+
+function colectie1c(tip) {
+  const def = Object.prototype.hasOwnProperty.call(TIPURI_1C, tip) ? TIPURI_1C[tip] : null;
+  if (!def) throw new Error(`Tip necunoscut pentru export 1C: ${tip}.`);
+  const state = def.sursa === "config" ? readConfigState() : readReceiptsState();
+  return { def, state, lista: state[def.colectie] || [] };
+}
+
+function idUri1c(brute, maxim = 500) {
+  const arr = Array.isArray(brute) ? brute : [];
+  if (!arr.length || arr.some((v) => typeof v !== "number" && typeof v !== "string")) {
+    throw new Error("Lista de documente e invalida.");
+  }
+  if (arr.length > maxim) {
+    throw new Error(`Prea multe documente intr-o singura operatie (max ${maxim}).`);
+  }
+  const idUri = [...new Set(arr.map(Number))].filter((n) => Number.isInteger(n) && n > 0);
+  if (!idUri.length) throw new Error("Lista de documente e invalida.");
+  return idUri;
+}
+
+// `reset: true` STERGE marcajul — pentru reincarcare, cand un document corectat trebuie
+// trimis din nou in 1C. Separat de marcare, ca sa fie o actiune deliberata.
+async function setExported1c(payload = {}) {
+  const currentUser = payload.currentUser || {};
+  if (!CAN_EXPORT_1C_ROLES.includes(normalizeRoleCode(currentUser.roleCode))) {
+    throw forbiddenError("Doar contabilul sau administratorul pot marca documentele pentru 1C.");
+  }
+  const { def, state, lista } = colectie1c(payload.kind);
+  const idUri = idUri1c(payload.ids);
+  // `Set`, nu `includes`: 30.000 de tranzactii x 500 de id-uri = 15 milioane de comparatii.
+  const cautate = new Set(idUri);
+  const reset = payload.reset === true;
+  const acum = new Date().toISOString();
+
+  const atinse = [];
+  for (const item of lista) {
+    if (!cautate.has(Number(item.id))) continue;
+    const marcat = String(item.exported1cAt || "").trim();
+    if (reset) {
+      if (!marcat) continue;
+      // Data primei incarcari se pastreaza in audit: altfel pista fiscala se pierde.
+      item.exported1cPrevAt = marcat;
+      delete item.exported1cAt;
+    } else {
+      if (marcat) continue; // deja marcat — nu se rescrie data primului import
+      item.exported1cAt = acum;
+    }
+    atinse.push({
+      id: item.id,
+      name: item.name || item.supplier || item.partner || "",
+      prevAt: reset ? marcat : null
+    });
+  }
+  if (!atinse.length) return { changed: [] };
+
+  if (def.sursa === "config") writeConfigState(state);
+
+  const receiptsState = def.sursa === "config" ? readReceiptsState() : state;
+  createAuditEntry(receiptsState, {
+    entityType: def.colectie === "partners" ? "partner" : def.colectie.replace(/s$/, ""),
+    entityId: atinse[0].id,
+    action: reset ? "unmarked-1c" : "marked-1c",
+    reason: `${reset ? "Marcaj 1C ANULAT" : "Marcat ca incarcat in 1C"} (${def.eticheta}): ` +
+      atinse.map((a) => `#${a.id} ${a.name}`).join(", ").slice(0, 400),
+    user: payload.changedBy || "dashboard",
+    oldValue: { exported1cAt: reset ? atinse.map((a) => a.prevAt).filter(Boolean)[0] || null : null },
+    newValue: { exported1cAt: reset ? null : acum, count: atinse.length }
+  });
+  writeReceiptsState(receiptsState);
+  return { changed: atinse };
+}
+
+// Ce e de incarcat in 1C: lista pentru bifare in interfata. Arata si cele deja incarcate
+// (`includeExported`), ca sa se poata reincarca un document corectat.
+async function listPending1c(options = {}) {
+  const tip = options.kind;
+  const from = String(options.from || "").trim();
+  const to = String(options.to || "").trim();
+  const includeMarcate = options.includeExported === true;
+  const inInterval = (zi) => {
+    const d = String(zi || "").slice(0, 10);
+    if (!d) return false;
+    if (from && d < from) return false;
+    if (to && d > to) return false;
+    return true;
+  };
+
+  if (tip === "suppliers") {
+    const config = readConfigState();
+    return (config.partners || [])
+      .filter((p) => String(p.role || "").match(/furnizor|ambele/i))
+      .filter((p) => String(p.idno || "").trim())
+      .filter((p) => includeMarcate || !String(p.exported1cAt || "").trim())
+      .map((p) => ({
+        id: p.id, label: p.name, extra: p.idno, date: "",
+        exported1cAt: p.exported1cAt || null
+      }))
+      .sort((a, b) => COLATOR_RO.compare(String(a.label), String(b.label)));
+  }
+
+  const state = readReceiptsState();
+
+  if (tip === "receipts") {
+    return (state.receipts || [])
+      // ACELASI predicat ca exportul (`esteActExportabil1c`) si aceeasi data (`dataAct1c`):
+      // cand divergeau, un act aparea in lista, se bifa, nu intra in CSV, iar „Am incarcat
+      // in 1C" il marca — document scos din coada fara sa fi ajuns vreodata in 1C.
+      .filter(esteActExportabil1c)
+      .filter((r) => includeMarcate || !String(r.exported1cAt || "").trim())
+      .filter((r) => (from || to ? inInterval(dataAct1c(r)) : true))
+      .map((r) => ({
+        id: r.id,
+        label: `${r.actSeries || ""} ${r.actNumber} · ${r.supplier || ""}`.trim(),
+        extra: currencyLike(Number(r.amountToPay ?? r.preliminaryPayableAmount ?? 0)),
+        date: String(dataAct1c(r) || "").slice(0, 10),
+        exported1cAt: r.exported1cAt || null
+      }))
+      .sort((a, b) => String(a.date).localeCompare(String(b.date)) || a.id - b.id);
+  }
+
+  if (tip === "payments") {
+    return (state.transactions || [])
+      .filter(estePlataExportabila1c)
+      .filter((t) => includeMarcate || !String(t.exported1cAt || "").trim())
+      .filter((t) => (from || to ? inInterval(t.createdAt) : true))
+      .map((t) => ({
+        id: t.id,
+        label: `Plata #${t.id} · ${t.partner || ""}`.trim(),
+        // BANUL CARE A IESIT, ca in export. `appliedAmount` e PLAFONAT la datoria receptiei
+        // referite: pe o supraplata de 5.000 lei tabelul arata 7.605, CSV-ul scotea 12.605,
+        // iar contabilul compara cu 1C si cifrele nu coincideau, fara explicatie pe ecran.
+        extra: currencyLike(Number(t.amount || 0)),
+        date: String(t.createdAt || "").slice(0, 10),
+        exported1cAt: t.exported1cAt || null
+      }))
+      .sort((a, b) => String(a.date).localeCompare(String(b.date)) || a.id - b.id);
+  }
+
+  throw new Error(`Tip necunoscut pentru export 1C: ${tip}.`);
+}
+
+function currencyLike(n) {
+  return `${Number(n || 0).toFixed(2)} lei`;
+}
+
+// Potrivirea DE PORNIRE cu lista de furnizori descarcata din 1C: tot ce exista deja acolo se
+// marcheaza, ca primul export sa nu scoata si furnizorii vechi.
+// Potrivirea e 1C -> aplicatie, pe COD FISCAL: lista din 1C are istoric, deci mai mulți
+// furnizori decat aplicatia; cei din 1C care nu-s la noi nu ne interesează.
+async function markSuppliersByFiscalCodes(payload = {}) {
+  const currentUser = payload.currentUser || {};
+  if (!CAN_EXPORT_1C_ROLES.includes(normalizeRoleCode(currentUser.roleCode))) {
+    throw forbiddenError("Doar contabilul sau administratorul pot marca furnizorii pentru 1C.");
+  }
+  const brute = Array.isArray(payload.fiscalCodes) ? payload.fiscalCodes : [];
+  if (!brute.length) throw new Error("Lista de coduri fiscale e goala.");
+  if (brute.length > 20000) throw new Error("Lista e prea mare (max 20.000 de coduri).");
+
+  const coduri = new Set(
+    brute.map((c) => String(c || "").replace(/[^0-9]/g, "").trim()).filter(Boolean)
+  );
+  if (!coduri.size) throw new Error("Niciun cod fiscal valid in lista.");
+
+  const config = readConfigState();
+  const acum = new Date().toISOString();
+  const marcati = [];
+  const negasiti = [];
+  for (const p of config.partners || []) {
+    if (!String(p.role || "").match(/furnizor|ambele/i)) continue;
+    const cod = String(p.idno || "").replace(/[^0-9]/g, "").trim();
+    if (!cod) continue;
+    if (!coduri.has(cod)) {
+      if (!String(p.exported1cAt || "").trim()) negasiti.push({ id: p.id, name: p.name, idno: cod });
+      continue;
+    }
+    if (String(p.exported1cAt || "").trim()) continue;
+    p.exported1cAt = acum;
+    marcati.push({ id: p.id, name: p.name, idno: cod });
+  }
+
+  if (marcati.length) {
+    writeConfigState(config);
+    const state = readReceiptsState();
+    createAuditEntry(state, {
+      entityType: "partner",
+      entityId: marcati[0].id,
+      action: "suppliers-matched-1c",
+      reason: `Potrivire de pornire cu lista din 1C: ${marcati.length} furnizori marcati`,
+      user: payload.changedBy || "dashboard",
+      oldValue: { exported1cAt: null },
+      newValue: { exported1cAt: acum, count: marcati.length }
+    });
+    writeReceiptsState(state);
+  }
+  // `negasiti` = furnizorii NOȘTRI care nu sunt in 1C: exact cei de incarcat la primul
+  // export. Plafonat — interfata afiseaza oricum primele, iar lista completa se vede in
+  // tabelul de export.
+  return { matched: marcati, missing: negasiti.slice(0, 100), missingTotal: negasiti.length };
 }
 
 async function exportResourceAsCsv(resource, roleCode) {
@@ -5643,6 +7335,12 @@ module.exports = {
   createTransfer,
   createUser,
   updateEntityNote,
+  exportPaymentsFor1c,
+  exportPurchaseActsFor1c,
+  exportSuppliersFor1c,
+  listPending1c,
+  markSuppliersByFiscalCodes,
+  setExported1c,
   exportResourceAsCsv,
   findUserByUsername,
   getConfig,
@@ -5671,6 +7369,7 @@ module.exports = {
   listUsers,
   reopenReceipt,
   runMigrationIfNeeded,
+  clearStockDust,
   createStockCorrection,
   isDeliveryPendingStockExit,
   listStockCorrections,
@@ -5688,6 +7387,13 @@ module.exports = {
   updateReceiptStatusWithAudit,
   completeReceiptWeighing,
   updateReceiptSupplier,
+  assignActNumber,
+  correctReceiptTerms,
+  // Expusa pentru testul care verifica ca `actReceiptFigures` din public/app.js nu a divergat.
+  receiptPayableTonnes,
+  deliveryReceivableTonnePrice,
+  deliveryTonnePriceFromBilling,
+  getReceiptRaw,
   updateReceiptAmount,
   updateSystemSettings,
   updateTransaction,
