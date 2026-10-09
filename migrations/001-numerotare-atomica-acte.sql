@@ -27,16 +27,19 @@
 
 create table if not exists public.purchase_act_numbers (
   company_id  integer     not null,
-  number      integer     not null,
   series      text        not null default '',
+  number      integer     not null,
   receipt_ids jsonb       not null default '[]'::jsonb,
   issued_at   timestamptz not null default now(),
-  primary key (company_id, number)
+  -- Cheia include SERIA: fiecare serie isi are propriul sir, pornit de la 1. Fara ea,
+  -- trecerea la o serie noua ar continua numerotarea seriei vechi, iar „AA 1" n-ar putea
+  -- coexista cu „PAT 1" in registru.
+  primary key (company_id, series, number)
 );
 
 comment on table public.purchase_act_numbers is
-  'Registrul numerelor de act de achiziție. Cheia primară (company_id, number) face '
-  'duplicatul imposibil. Seria e per firmă, deci fiecare firmă are propriul șir.';
+  'Registrul numerelor de act de achiziție. Cheia primară (company_id, series, number) face '
+  'duplicatul imposibil. Fiecare pereche firmă+serie are propriul șir.';
 
 -- Șirul pornește de la 914: actul din 02.10.2026, numerotat pe
 -- hârtie. Actele de dinainte rămân nenumerotate în aplicație — au numere scrise
@@ -48,13 +51,15 @@ comment on table public.purchase_act_numbers is
 -- deja tipărite și semnate. Marcajul face repornirea imposibilă chiar dacă registrul
 -- e golit.
 create table if not exists public.purchase_act_watermark (
-  company_id  integer     not null primary key,
+  company_id  integer     not null,
+  series      text        not null default '',
   last_number integer     not null,
-  updated_at  timestamptz not null default now()
+  updated_at  timestamptz not null default now(),
+  primary key (company_id, series)
 );
 
 comment on table public.purchase_act_watermark is
-  'Cel mai mare număr de act emis per firmă. Monoton crescător: un delete pe '
+  'Cel mai mare număr de act emis per firmă ȘI serie. Monoton crescător: un delete pe '
   'purchase_act_numbers nu poate reporni numerotarea.';
 
 create or replace function public.allocate_purchase_act_number(
@@ -69,36 +74,45 @@ set search_path = public
 as $$
 declare
   v_number integer;
+  v_series text := upper(trim(coalesce(p_series, '')));
+  -- Praguri inferioare PE SERIE, oglinda lui `PRAGURI_SERIE` din `src/local-storage.js`.
+  -- „PAT" are pe hartie 1-913 scrise de mana, deci sirul ei porneste de la 914. O serie
+  -- noua n-are istorie pe hartie si porneste curat de la 1.
+  v_prag integer := case when v_series = 'PAT' then 913 else 0 end;
 begin
   if p_company_id is null then
     raise exception 'Firma emitenta e obligatorie';
   end if;
 
-  -- Serializează alocările pentru ACEEAȘI firmă, pe durata tranzacției. Firme
-  -- diferite nu se blochează între ele.
-  -- Varianta cu DOUĂ argumente, ca să avem spațiu de nume propriu: cheile mici
-  -- (1, 2, 3 — id-uri de firmă) stau altfel în spațiul GLOBAL de advisory locks,
-  -- unde orice extensie sau job care ia `pg_advisory_lock(1)` s-ar bloca reciproc
-  -- cu alocarea de acte, fără nicio legătură logică.
-  perform pg_advisory_xact_lock(hashtext('purchase_act_number'), p_company_id);
+  -- Serializeaza alocarile pentru ACEEASI firma+serie, pe durata tranzactiei. Perechi
+  -- diferite nu se blocheaza intre ele.
+  -- Varianta cu DOUA argumente, ca sa avem spatiu de nume propriu: cheile mici (1, 2, 3 —
+  -- id-uri de firma) stau altfel in spatiul GLOBAL de advisory locks, unde orice extensie
+  -- sau job care ia `pg_advisory_lock(1)` s-ar bloca reciproc cu alocarea de acte, fara
+  -- nicio legatura logica.
+  perform pg_advisory_xact_lock(
+    hashtext('purchase_act_number'),
+    hashtext(p_company_id::text || ':' || v_series)
+  );
 
-  -- Cel mai mare dintre: ce e în registru acum și marcajul de nivel. Așa un `delete`
-  -- pe registru nu poate reporni numerotarea peste numere deja tipărite.
+  -- Cel mai mare dintre: ce e in registru acum, marcajul de nivel si pragul seriei. Asa un
+  -- `delete` pe registru nu poate reporni numerotarea peste numere deja tiparite.
   select greatest(
            coalesce((select max(number) from public.purchase_act_numbers
-                      where company_id = p_company_id), 913),
+                      where company_id = p_company_id and series = v_series), 0),
            coalesce((select last_number from public.purchase_act_watermark
-                      where company_id = p_company_id), 913)
+                      where company_id = p_company_id and series = v_series), 0),
+           v_prag
          ) + 1
     into v_number;
 
-  insert into public.purchase_act_numbers (company_id, number, series, receipt_ids)
-  values (p_company_id, v_number, coalesce(p_series, ''), coalesce(p_receipt_ids, '[]'::jsonb));
+  insert into public.purchase_act_numbers (company_id, series, number, receipt_ids)
+  values (p_company_id, v_series, v_number, coalesce(p_receipt_ids, '[]'::jsonb));
 
-  -- Marcajul crește doar: `greatest` împiedică scăderea chiar dacă s-ar apela în altă ordine.
-  insert into public.purchase_act_watermark (company_id, last_number)
-  values (p_company_id, v_number)
-  on conflict (company_id) do update
+  -- Marcajul creste doar: `greatest` impiedica scaderea chiar daca s-ar apela in alta ordine.
+  insert into public.purchase_act_watermark (company_id, series, last_number)
+  values (p_company_id, v_series, v_number)
+  on conflict (company_id, series) do update
     set last_number = greatest(public.purchase_act_watermark.last_number, excluded.last_number),
         updated_at  = now();
 
@@ -107,8 +121,8 @@ end;
 $$;
 
 comment on function public.allocate_purchase_act_number is
-  'Alocă atomic următorul număr de act pentru o firmă. Advisory lock + cheie primară: '
-  'două cereri concurente nu pot primi același număr.';
+  'Alocă atomic următorul număr de act pentru o pereche firmă+serie. Advisory lock + cheie '
+  'primară: două cereri concurente nu pot primi același număr.';
 
 -- RLS pe tabel: service role îl ocolește (așa trebuie), dar dacă vreodată cheia
 -- anon/publishable ajunge să citească baza, registrul nu se expune.
@@ -140,28 +154,28 @@ revoke all on table public.purchase_act_watermark from anon, authenticated;
 -- există. Idempotent: `on conflict do nothing`.
 -- ============================================================================
 
-insert into public.purchase_act_numbers (company_id, number, series, receipt_ids, issued_at)
+insert into public.purchase_act_numbers (company_id, series, number, receipt_ids, issued_at)
 select
-  coalesce((r->>'actCompanyId')::integer, 0)          as company_id,
-  (r->>'actNumber')::integer                          as number,
-  coalesce(r->>'actSeries', '')                       as series,
-  coalesce(r->'actFigures'->'receiptIds', '[]'::jsonb) as receipt_ids,
-  coalesce((r->>'actIssuedAt')::timestamptz, now())   as issued_at
+  coalesce((r->>'actCompanyId')::integer, 0)            as company_id,
+  upper(trim(coalesce(r->>'actSeries', '')))            as series,
+  (r->>'actNumber')::integer                            as number,
+  coalesce(r->'actFigures'->'receiptIds', '[]'::jsonb)  as receipt_ids,
+  coalesce((r->>'actIssuedAt')::timestamptz, now())     as issued_at
 from public.kv_storage k
 cross join lateral jsonb_array_elements(k.value->'receipts') as r
 where k.key = 'receipts'
   and (r->>'actNumber') is not null
   and (r->>'actNumber') ~ '^[0-9]+$'
   and (r->>'actNumber')::integer > 0
-on conflict (company_id, number) do nothing;
+on conflict (company_id, series, number) do nothing;
 
 -- Marcajul pornește de la cel mai mare număr semănat: altfel un `delete` imediat după
 -- migrare ar readuce numerotarea la 914.
-insert into public.purchase_act_watermark (company_id, last_number)
-select company_id, max(number)
+insert into public.purchase_act_watermark (company_id, series, last_number)
+select company_id, series, max(number)
   from public.purchase_act_numbers
- group by company_id
-on conflict (company_id) do update
+ group by company_id, series
+on conflict (company_id, series) do update
   set last_number = greatest(public.purchase_act_watermark.last_number, excluded.last_number),
       updated_at  = now();
 
@@ -170,10 +184,11 @@ on conflict (company_id) do update
 --
 -- Ce s-a semănat din actele deja emise (ar trebui să coincidă cu dosarul de hârtie):
 --   select company_id, series, min(number), max(number), count(*)
---     from public.purchase_act_numbers group by company_id, series order by company_id;
+--     from public.purchase_act_numbers group by company_id, series order by company_id, series;
 --
--- Următorul număr care se va aloca pentru firma 1:
---   select coalesce(max(number), 913) + 1 from public.purchase_act_numbers where company_id = 1;
+-- Următorul număr pentru firma 1, seria AA (serie nouă, deci pornește de la 1):
+--   select coalesce(max(number), 0) + 1 from public.purchase_act_numbers
+--    where company_id = 1 and series = 'AA';
 --
 -- Marcajul de nivel (nu scade niciodată):
 --   select * from public.purchase_act_watermark order by company_id;
@@ -183,4 +198,10 @@ on conflict (company_id) do update
 --   select public.allocate_purchase_act_number(999, 'TEST', '[]'::jsonb);
 --   delete from public.purchase_act_numbers   where company_id = 999;
 --   delete from public.purchase_act_watermark where company_id = 999;
+--
+-- ⚠️ Rulează ACEASTĂ versiune a migrării, nu una mai veche: cheia include acum SERIA.
+-- Dacă ai rulat deja varianta fără serie, șterge întâi ambele tabele și funcția:
+--   drop function if exists public.allocate_purchase_act_number(integer, text, jsonb);
+--   drop table if exists public.purchase_act_numbers;
+--   drop table if exists public.purchase_act_watermark;
 -- ============================================================================

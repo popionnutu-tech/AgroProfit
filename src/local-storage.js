@@ -387,7 +387,10 @@ function ziLucratoare(valoare) {
 // O SERIE NOUA nu are istorie pe hirtie, deci porneste curat de la 1. Asa s-a si ales
 // trecerea la „AA" (decizia utilizatorului, 09.10.2026): seria se schimba in nomenclatorul
 // firmei, iar sirul reporneste singur, fara sa atinga numerele deja tiparite pe „PAT".
-const PRAGURI_SERIE = Object.assign(Object.create(null), { PAT: 913 });
+// Sint trecute AMBELE serii istorice. Un prag pus din greseala pe o serie FARA istorie
+// lasa o GAURA in sir (porneste de la 914) - neplacut, dar explicabil. Un prag LIPSA pe o
+// serie CU istorie da DUBLURI pe hirtii semnate. Se greseste in directia sigura.
+const PRAGURI_SERIE = Object.assign(Object.create(null), { AP: 913, PAT: 913 });
 
 function pragSerie(serie) {
   const cheie = String(serie || "").trim().toUpperCase();
