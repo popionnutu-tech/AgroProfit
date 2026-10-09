@@ -1462,7 +1462,7 @@ const DOCUMENT_NUMBER_TYPES = {
 // e 7 si `Number(true)` e 1, deci fara verificare de tip un boolean ar bifa o receptie la
 // intimplare. Plafon de 200 — o plata care acopera mai mult inseamna ca s-a bifat tot din
 // greseala.
-function acoperireDinPayload(payload) {
+function acoperireDinPayload(payload, state) {
   const brute = Array.isArray((payload || {}).receiptIds) ? payload.receiptIds : [];
   if (!brute.length) return [];
   if (brute.length > 200) {
@@ -1480,6 +1480,55 @@ function acoperireDinPayload(payload) {
     const e = new Error("Lista de receptii acoperite e invalida.");
     e.statusCode = 400;
     throw e;
+  }
+  if (!state) return idUri;
+
+  // COERENTA, verificata la SCRIERE. Alocarea de la citire filtreaza oricum receptiile
+  // straine sau care nu sint in stoc — dar le ignora TACIT: contabilul bifeaza receptia 13,
+  // primeste 201, si banii se duc FIFO in alta parte. Pentru o operatie cu efect financiar,
+  // o intrare inghitita in tacere e mai rea decat un refuz.
+  //
+  // In plus, trei consumatori citesc `receiptId` SINGULAR si ar deveni incoerenti: exportul
+  // 1C (care reconstituie impozitul din cota receptiei referite), ordinul de plata tiparit
+  // (care numeste o singura receptie) si garzile de corectare a sumei.
+  const partener = Number(payload.partnerId);
+  const peId = new Map((state.receipts || []).map((r) => [Number(r.id), r]));
+  const lipsa = [];
+  const straine = [];
+  const faraDatorie = [];
+  for (const id of idUri) {
+    const r = peId.get(id);
+    if (!r) { lipsa.push(id); continue; }
+    if (Number.isFinite(partener) && Number(r.supplierId) !== partener) { straine.push(id); continue; }
+    // „Proiect" si „Anulat" nu au datorie (regula 7): bifate, ar parea platite.
+    if (!isReceiptInStock(r)) faraDatorie.push(id);
+  }
+  const refuza = (mesaj) => {
+    const e = new Error(mesaj);
+    e.statusCode = 400;
+    throw e;
+  };
+  if (lipsa.length) refuza(`Receptii inexistente in lista acoperita: ${lipsa.join(", ")}.`);
+  if (straine.length) {
+    refuza(
+      `Receptiile ${straine.join(", ")} sint ale altui furnizor. ` +
+      "O plata nu poate stinge datoria altcuiva."
+    );
+  }
+  if (faraDatorie.length) {
+    refuza(
+      `Receptiile ${faraDatorie.join(", ")} nu sint in stoc (proiect sau anulate), ` +
+      "deci nu au datorie de achitat."
+    );
+  }
+  // Documentul pe care s-a inregistrat plata trebuie sa fie si acoperit de ea: altfel
+  // ordinul de plata tiparit numeste o receptie pe care banii n-o ating.
+  const singular = Number(payload.receiptId);
+  if (Number.isFinite(singular) && singular > 0 && !idUri.includes(singular)) {
+    refuza(
+      `Receptia #${singular}, pe care e inregistrata plata, lipseste din lista acoperita. ` +
+      "Bifeaz-o sau inregistreaza plata pe alta receptie."
+    );
   }
   return idUri;
 }
@@ -3052,11 +3101,6 @@ async function createProcessing(payload) {
     id: nextId(state.processings),
     movement: true,
     receiptId: payload.receiptId ? Number(payload.receiptId) : null,
-    // Receptiile pe care plata le acopera EXPLICIT, bifate de contabil. Gol = fara alegere,
-    // deci banii se distribuie FIFO pe tot partenerul, ca pina acum.
-    // Se tipizeaza AICI, la intrare: `acoperire1Plata` arunca tot ce nu e intreg pozitiv,
-    // iar o lista invalida n-are voie sa ajunga pe document.
-    receiptIds: acoperireDinPayload(payload),
     product: productName,
     lot: payload.lot || "",
     sourceLocation,
@@ -3107,7 +3151,7 @@ async function createTransaction(payload) {
     // deci banii se distribuie FIFO pe tot partenerul, ca pina acum.
     // Se tipizeaza AICI, la intrare: `acoperire1Plata` arunca tot ce nu e intreg pozitiv,
     // iar o lista invalida n-are voie sa ajunga pe document.
-    receiptIds: acoperireDinPayload(payload),
+    receiptIds: acoperireDinPayload(payload, state),
     deliveryId: payload.deliveryId ? Number(payload.deliveryId) : null,
     openingDebtId: payload.openingDebtId || "",
     partnerId: Number(payload.partnerId),
