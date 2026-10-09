@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 
 const { withIsolatedWorkspace } = require("../test-support/isolated-runtime");
 const { computeReceiptEstimate } = require("../src/receipt-handlers");
-const { construiesteXmlFurnizori, esc, curataControl, dataLocala1c } =
+const { construiesteXmlFurnizori, MAX_FURNIZORI_XML, esc, curataControl, dataLocala1c } =
   require("../src/export-1c-xml");
 
 // Un parser minimal, cat sa putem CITI inapoi ce am scris. Nu validam schema 1C (n-avem cum
@@ -132,6 +132,35 @@ test("XML: fara cod fiscal sau fara denumire, furnizorul NU se exporta", () => {
   // Numerotarea ramane densa: 1 pentru singurul exportat, nu 4.
   assert.match(xml, /<Объект Нпп="1"/);
   assert.ok(!xml.includes('Нпп="2"'), "numerele nu sar peste randurile sarite");
+});
+
+test("XML: un fisier prea mare e REFUZAT cu mesaj, nu lasat sa cada pe platforma", () => {
+  // Masurat: ~3.400 octeti per furnizor, deci plafonul de 4,5 MB al raspunsului serverless
+  // se atinge pe la 1.330. Pe calea normala `MAX_IDS_1C` tine, dar `GET ?all=1&format=xml`
+  // o ocoleste. Eroarea platformei e opaca; asta spune ce sa faci.
+  const prea = Array.from({ length: MAX_FURNIZORI_XML + 1 }, (_, i) => ({
+    cod: String(2000000000000 + i), denumire: `F${i}`, persoanaFizica: true
+  }));
+  assert.throws(() => construiesteXmlFurnizori(prea, { acum: ACUM }), /Prea multi furnizori/);
+  // Exact la plafon trece.
+  const laLimita = prea.slice(0, MAX_FURNIZORI_XML);
+  const xml = construiesteXmlFurnizori(laLimita, { acum: ACUM });
+  parseaza(xml);
+  assert.equal(cheiDinXml(xml).length, MAX_FURNIZORI_XML);
+});
+
+test("XML: numele si tipurile de proprietati raman intacte dupa ce nu mai sint escapate", () => {
+  // Escaparea a fost scoasa de pe LITERALI (41% din timpul de constructie). Daca cineva pune
+  // vreodata acolo o valoare din date, testul asta nu-l prinde — dar prinde o stricare
+  // accidentala a numelor, care ar face fisierul de necitit pentru 1C.
+  const xml = construiesteXmlFurnizori(
+    [{ cod: "2000000000001", denumire: "X", persoanaFizica: true }],
+    { acum: ACUM }
+  );
+  for (const nume of ["ФискКод", "Наименование", "ВидКонтрагента", "ЮрАдрес", "Телефоны"]) {
+    assert.ok(xml.includes(`Имя="${nume}"`), `lipseste proprietatea ${nume}`);
+  }
+  assert.ok(!xml.includes("&amp;quot;"), "numele nu trebuie sa fie dublu-escapate");
 });
 
 test("XML: data e LOCALA, nu UTC", () => {
