@@ -2320,8 +2320,20 @@ async function assignActNumber(ids, options = {}) {
   return receipt;
 }
 
-async function listReceipts() {
-  const state = readReceiptsState();
+// SURSA UNICA pentru „cit s-a achitat pe fiecare receptie".
+//
+// Era scrisa doar in `listReceipts`, deci orice alt cod care avea nevoie de suma achitata
+// citea `receipt.paidAmount` de pe document — un cimp scris DOAR pe receptia singulara pe
+// care s-a inregistrat plata. Cu stingere FIFO sau cu acoperire aleasa de om, o receptie
+// poate fi integral achitata printr-o plata inregistrata pe ALTA: pe document `paidAmount`
+// ramine 0, desi in evidenta e „Achitat".
+//
+// Garda din `correctReceiptTerms` („datoria nu poate cobori sub cit s-a achitat") citea exact
+// acel cimp, deci se putea ocoli tacit — scenariul pe care regula 9 din CLAUDE.md il
+// interzice explicit („storno de plata intai").
+//
+// Intoarce o harta id-receptie -> suma alocata si ultima data de plata per partener.
+function alocaPlatiPeReceptii(state) {
   const receiptById = new Map();
   for (const r of state.receipts || []) receiptById.set(Number(r.id), r);
 
@@ -2410,7 +2422,18 @@ async function listReceipts() {
       remaining -= applied;
     }
   }
+  return { paidByReceipt, lastPaymentByPartner };
+}
 
+// Cit s-a achitat EFECTIV pe o receptie, din aceeasi sursa ca ecranele. Nu `receipt.paidAmount`.
+function sumaAchitataPeReceptie(state, receiptId) {
+  const { paidByReceipt } = alocaPlatiPeReceptii(state);
+  return Number(paidByReceipt.get(Number(receiptId)) || 0);
+}
+
+async function listReceipts() {
+  const state = readReceiptsState();
+  const { paidByReceipt, lastPaymentByPartner } = alocaPlatiPeReceptii(state);
   const enriched = (state.receipts || []).map((r) => {
     const target = receiptPayableValue(r);
     const paid = Number(paidByReceipt.get(Number(r.id)) || 0);
@@ -4794,7 +4817,10 @@ async function correctReceiptTerms(id, payload = {}) {
   // Datoria nu poate cobori sub cat s-a achitat deja: restul ar deveni 0, receptia ar aparea
   // „Achitat", iar banii dati in plus ar disparea din evidenta. Ordinea corecta e storno de
   // plata intai, corectare dupa — acelasi precedent ca la retur pe livrare cu incasari.
-  const dejaAchitat = Number(receipt.paidAmount || 0);
+  // Suma DERIVATA, din aceeasi sursa ca ecranele — nu `receipt.paidAmount`, care e scris
+  // doar pe receptia pe care s-a inregistrat plata. O receptie stinsa printr-o plata
+  // facuta pe alta (FIFO sau acoperire aleasa) avea 0 acolo si ocolea garda.
+  const dejaAchitat = sumaAchitataPeReceptie(state, receipt.id);
   const sumaNoua = Number(estimate.preliminaryPayableAmount || 0);
   if (dejaAchitat > 0 && sumaNoua < dejaAchitat) {
     throw new Error(

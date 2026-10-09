@@ -201,7 +201,7 @@ test("lista de receptii acoperite e TIPIZATA, nu se inghite ce nu e numar", asyn
   });
 });
 
-test("bifele pe receptiile ALTUI furnizor sint ignorate, nu aplicate", async () => {
+test("bifele pe receptiile ALTUI furnizor sint RESPINSE, nu inghitite tacit", async () => {
   await withIsolatedWorkspace(async ({ load }) => {
     const storage = load("src/local-storage.js");
     const [r1] = await furnizorCu(storage, [1000]);
@@ -222,15 +222,22 @@ test("bifele pe receptiile ALTUI furnizor sint ignorate, nu aplicate", async () 
     const initiale = await storage.listReceipts();
     const datorie = Number(initiale.find((x) => x.id === r1.id).amountToPay);
 
-    // Plata e a furnizorului 1; bifa pe receptia furnizorului 2 nu are voie sa o stinga.
-    await storage.createTransaction({
-      referenceType: "receipt", receiptId: r1.id, receiptIds: [r1.id, strain.id],
-      partnerId: 1, supplierId: 1, partner: "Furnizor Testov",
-      direction: "payment", amount: datorie, paymentType: "Numerar"
-    });
+    // Plata e a furnizorului 1; bifa pe receptia furnizorului 2 se REFUZA la scriere.
+    // Ignorata tacit, contabilul primea 201 si credea ca a acoperit-o, iar banii plecau
+    // FIFO in alta parte — pentru o operatie cu efect financiar, tacerea e mai rea decit
+    // un refuz.
+    await assert.rejects(
+      () => storage.createTransaction({
+        referenceType: "receipt", receiptId: r1.id, receiptIds: [r1.id, strain.id],
+        partnerId: 1, supplierId: 1, partner: "Furnizor Testov",
+        direction: "payment", amount: datorie, paymentType: "Numerar"
+      }),
+      /altui furnizor/
+    );
 
+    // Nimic nu s-a inregistrat.
     const st = statusuri(await storage.listReceipts());
-    assert.equal(st[r1.id], "Achitat");
+    assert.equal(st[r1.id], "Neachitat");
     assert.equal(st[strain.id], "Neachitat", "banii unui furnizor nu sting datoria altuia");
   });
 });
