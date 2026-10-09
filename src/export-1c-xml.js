@@ -96,7 +96,23 @@ function curataControl(valoare) {
 
 // O proprietate simpla. Valoarea goala NU se scrie ca `<Значение></Значение>`: 1C asteapta
 // `<Пусто/>`, exact cum scrie si el la export.
+// `nume` si `tip` ajung in ATRIBUTE, neescapate. Sint literali din cod azi — dar prima
+// proprietate dinamica (un camp de nomenclator, o proprietate per-firma) ar deschide
+// injectie directa in atribut. Asertiunea prinde asta la prima rulare, nu la prima factura
+// gresita. Un singur `test()` per proprietate, fata de 5 `replace()` cat costa escaparea.
+const CARACTERE_INTERZISE_IN_NUME = /[&<>"']/;
+
+function verificaNumeLiteral(nume, tip) {
+  if (CARACTERE_INTERZISE_IN_NUME.test(nume) || CARACTERE_INTERZISE_IN_NUME.test(tip)) {
+    throw new Error(
+      `Nume sau tip de proprietate invalid pentru XML: ${JSON.stringify(nume)} / ` +
+      `${JSON.stringify(tip)}. Acestea trebuie sa fie literali, nu date.`
+    );
+  }
+}
+
 function proprietate(nume, tip, valoare) {
+  verificaNumeLiteral(nume, tip);
   const v = curataControl(valoare).trim();
   const corp = v === "" ? "\t\t<Пусто/>\n" : `\t\t<Значение>${esc(v)}</Значение>\n`;
   // `nume` si `tip` sint LITERALI din codul de mai jos, nu date — nu pot contine niciodata
@@ -110,6 +126,7 @@ function proprietate(nume, tip, valoare) {
 // Se scriu EXPLICIT, nu se omit: exportul real al lui 1C le contine pe toate, iar un obiect
 // incomplet poate fi incarcat cu campuri ramase din alta sursa.
 function referintaGoala(nume, tip) {
+  verificaNumeLiteral(nume, tip);
   // Literali, ca mai sus — fara escapare.
   return `\t<Свойство Имя="${nume}" Тип="${tip}">\n\t\t<Пусто/>\n\t</Свойство>\n`;
 }
@@ -185,7 +202,7 @@ function dataLocala1c(d) {
  * SEPARAT (`СправочникСсылка.РасчетныеСчета`), referit prin `ОснРасчСчет`. Trimis ca text
  * in obiectul contrapartii, ar fi ignorat tacut. Se completeaza manual in 1C.
  * @param {Object} optiuni { acum: Date }  — injectabila, ca testul sa fie determinist
- * @returns {string} XML complet, gata de scris in fisier
+ * @returns {{xml: string, scrise: number, sarite: number}}
  */
 function construiesteXmlFurnizori(randuri, optiuni = {}) {
   const lista = Array.isArray(randuri) ? randuri : [];
@@ -208,14 +225,31 @@ function construiesteXmlFurnizori(randuri, optiuni = {}) {
 
   const obiecte = [];
   let nrq = 0;
+  let sarite = 0;
   for (const rand of lista) {
     const cod = curataControl((rand || {}).cod).trim();
     const denumire = curataControl((rand || {}).denumire).trim();
     // Fara cod fiscal, 1C nu l-ar putea lega de nimic — ar intra ca furnizor nou, nepotrivit
-    // cu niciun act. Fara denumire, cheia e incompleta. Aceeasi regula ca la CSV.
-    if (!cod || !denumire) continue;
+    // cu niciun act. Fara denumire, cheia (cod + denumire) e incompleta.
+    if (!cod || !denumire) {
+      sarite += 1;
+      continue;
+    }
     nrq += 1;
     obiecte.push(obiectContragent(nrq, rand));
+  }
+
+  // INVARIANTA. Un fisier valid si GOL e cel mai periculos rezultat posibil: 1C il importa
+  // fara sa se planga (n-are ce importa), omul apasa „Am incarcat in 1C", iar furnizorii ies
+  // DEFINITIV din coada fara sa fi ajuns vreodata acolo — actele lor raman apoi fara
+  // contraparte. Exact lantul descris la regula 13 din CLAUDE.md.
+  // S-a intamplat prin cuplarea pe denumirile de coloane; acum se citesc chei structurale,
+  // dar garda ramane: e ultima aparare, si cade ZGOMOTOS.
+  if (lista.length > 0 && obiecte.length === 0) {
+    throw new Error(
+      `Niciun furnizor nu a putut fi scris in fisier, desi au fost ceruti ${lista.length}. ` +
+      "Probabil le lipseste codul fiscal sau denumirea. Verifica nomenclatorul."
+    );
   }
 
   // `Ид правил` trebuie sa fie acelasi cu cel din blocul de reguli, altfel 1C refuza fisierul.
@@ -231,9 +265,13 @@ function construiesteXmlFurnizori(randuri, optiuni = {}) {
 
   // BOM UTF-8: exportul real al lui 1C il are, iar fara el unele versiuni citesc fisierul
   // ca ANSI si strica diacriticele din denumiri.
-  return (
-    "﻿" + antet + reguliSchimb() + "\n" + obiecte.join("\n") + "\n</ФайлОбмена>\n"
-  );
+  const xml =
+    "﻿" + antet + reguliSchimb() + "\n" + obiecte.join("\n") + "\n</ФайлОбмена>\n";
+
+  // `scrise`/`sarite`, nu doar XML-ul: interfata raporta cate documente au fost BIFATE, nu
+  // cate au intrat efectiv in fisier. Acelasi precedent ca `skipped` de la curatarea
+  // resturilor de stoc (CLAUDE.md, regula 8).
+  return { xml, scrise: obiecte.length, sarite };
 }
 
 module.exports = {

@@ -6721,7 +6721,14 @@ async function exportSuppliersFor1c(options = {}) {
       IBAN: String(p.iban || "").trim(),
       "Profil fiscal": String(p.fiscalProfile || "").trim(),
       "Observatii export": avertismentModificat1c(p),
-      _id: p.id
+      _id: p.id,
+      // CHEI STRUCTURALE, pentru consumatorii care nu sint Excel (exportul XML).
+      // Denumirile de mai sus sint etichete PENTRU OM: se pot redenumi oricand, iar o
+      // redenumire ar face exportul XML sa scoata un fisier valid si GOL — masurat.
+      // Prefixul `_` le tine in afara CSV-ului (`trimiteCsv1c` le sterge pe toate).
+      _cod: cod,
+      _denumire: String(p.name || "").trim(),
+      _persoanaFizica: persoanaFizica
     });
   }
 
