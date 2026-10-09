@@ -376,7 +376,23 @@ function ziLucratoare(valoare) {
 // din 02.10.2026, care pe hartie are numarul 914 — deci sirul porneste de acolo. Actele de
 // DINAINTE rămân nenumerotate in aplicatie: au deja numere scrise de mana si nu se rescrie
 // nimic din ce e deja semnat (decizia utilizatorului, 03.10.2026).
-const ACT_NUMBER_START = 914;
+// Praguri inferioare, PE SERIE. Numerotarea e per (firma, serie), iar fiecare serie isi
+// porneste propriul sir de la 1 — cu o exceptie: seria care era deja in uz cand aplicatia a
+// preluat numerotarea.
+//
+// „PAT" are pe hartie numerele 1-913, scrise de mana. Primul act emis din aplicatie a fost
+// 914 (02.10.2026). Daca seria aceea ar reporni de la 1, actele noi s-ar suprapune peste
+// dosarul vechi — doua hirtii semnate cu acelasi numar, imposibil de explicat la control.
+//
+// O SERIE NOUA nu are istorie pe hirtie, deci porneste curat de la 1. Asa s-a si ales
+// trecerea la „AA" (decizia utilizatorului, 09.10.2026): seria se schimba in nomenclatorul
+// firmei, iar sirul reporneste singur, fara sa atinga numerele deja tiparite pe „PAT".
+const PRAGURI_SERIE = Object.assign(Object.create(null), { PAT: 913 });
+
+function pragSerie(serie) {
+  const cheie = String(serie || "").trim().toUpperCase();
+  return Object.prototype.hasOwnProperty.call(PRAGURI_SERIE, cheie) ? PRAGURI_SERIE[cheie] : 0;
+}
 // Se seteaza DUPA ce migrarea de numerotare atomica e aplicata si verificata. De atunci,
 // derivarea din blob (mai slaba) nu mai e acceptata ca rezerva.
 const REQUIRE_PG_ACT_NUMBERS =
@@ -1992,7 +2008,8 @@ function getReceiptRaw(id) {
   return (state.receipts || []).find((item) => item.id === Number(id)) || null;
 }
 
-// Urmatorul numar de act: max(atribuite) + 1, cu plafon inferior la ACT_NUMBER_START.
+// Urmatorul numar de act: max(atribuite pe aceeasi firma SI aceeasi serie) + 1, cu prag
+// inferior pe serie (vezi `PRAGURI_SERIE`).
 // Derivat din date, nu dintr-un contor separat — un contor se poate desincroniza de la
 // documentele reale (restaurare din backup, scriere pierduta), iar un numar de act refolosit
 // inseamna doua acte cu acelasi numar in dosar.
@@ -2000,11 +2017,15 @@ function getReceiptRaw(id) {
 // global ar lasa gauri in registrul fiecareia: „PAT 915", „AGR 916", „PAT 917" — in dosarul
 // PAT lipseste 916, imposibil de explicat la control.
 // Se numara si receptiile ANULATE: numarul lor a fost tiparit si nu se refoloseste.
-function nextActNumber(state, companyId) {
+function nextActNumber(state, companyId, series) {
+  const serie = String(series || "").trim().toUpperCase();
   const maxim = (state.receipts || [])
     .filter((item) => Number(item.actCompanyId || 0) === Number(companyId || 0))
+    // Sir separat si pe SERIE: altfel trecerea la o serie noua ar continua de la 915, in loc
+    // sa porneasca de la 1, iar intoarcerea la seria veche ar lasa gauri in ea.
+    .filter((item) => String(item.actSeries || "").trim().toUpperCase() === serie)
     .reduce((max, item) => Math.max(max, Number(item.actNumber || 0)), 0);
-  return Math.max(maxim + 1, ACT_NUMBER_START);
+  return Math.max(maxim, pragSerie(serie)) + 1;
 }
 
 // Numarul NU se intoarce pana nu e DURABIL si purtat de EXACT receptiile actului.
@@ -2222,7 +2243,7 @@ async function assignActNumber(ids, options = {}) {
         "reincearca. Daca se repeta, verifica functia allocate_purchase_act_number."
       );
     }
-    numar = nextActNumber(state, companie);
+    numar = nextActNumber(state, companie, serie);
   }
 
   // Se ingheata RANDURILE, nu doar totalurile: randul se construia din receptie, deci dupa o
