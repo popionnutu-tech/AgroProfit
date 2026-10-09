@@ -138,6 +138,10 @@ function trimiteCsv1c(res, columns, rows, numeFisier) {
   if (typeof res.setHeader === "function") {
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", `attachment; filename="${numeFisier}"`);
+    // ACELEASI date personale ca in XML — IDNP-uri, adrese, telefoane, IBAN-uri si sume
+    // pentru persoane fizice. Fara asta, fisierul ramane in cache-ul de disc al browserului
+    // de pe statia contabilului, mult dupa ce a fost sters din Descarcari.
+    res.setHeader("Cache-Control", "no-store");
   }
   if (typeof res.status === "function") res.status(200);
   else res.statusCode = 200;
