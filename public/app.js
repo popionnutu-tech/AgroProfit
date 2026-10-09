@@ -137,11 +137,30 @@ const stockDustHintEl = document.getElementById("stock-dust-hint");
 // Criteriul de „de incarcat" NU e data, e MARCAJUL: un act facut de depozitar dupa ora 17
 // apare la urmatorul export, fara sa fie incarcat de doua ori si fara sa se piarda intre
 // intervale de date. Marcajul il pune omul, dupa un import reusit.
+// `xml: true` = tipul are si formatul nativ de schimb 1C. Deocamdata doar furnizorii:
+// actele si platile se leaga prin GUID de produs, depozit si firma, iar acele GUID-uri
+// exista numai in 1C si inca nu sint captate in nomenclator. Pana atunci, selectorul se
+// ascunde pe acele taburi — altfel omul ar cere XML si ar primi CSV, fara sa afle.
 const EXPORT_1C_TIPURI = {
-  suppliers: { ruta: "/api/exports/suppliers-1c", eticheta: "Furnizori", fisier: "furnizori" },
+  suppliers: { ruta: "/api/exports/suppliers-1c", eticheta: "Furnizori", fisier: "furnizori", xml: true },
   receipts: { ruta: "/api/exports/purchase-acts-1c", eticheta: "Acte de achiziție", fisier: "acte-achizitie" },
   payments: { ruta: "/api/exports/payments-1c", eticheta: "Ordine de plată", fisier: "ordine-plata" }
 };
+
+// Formatul cerut, mărginit la ce suporta tipul curent.
+function export1cFormat() {
+  const def = EXPORT_1C_TIPURI[export1cTip] || {};
+  const sel = document.getElementById("export-1c-format");
+  const ales = sel ? String(sel.value || "csv") : "csv";
+  return def.xml && ales === "xml" ? "xml" : "csv";
+}
+
+function actualizeazaSelectorFormat1c() {
+  const wrap = document.getElementById("export-1c-format-wrap");
+  if (!wrap) return;
+  const def = EXPORT_1C_TIPURI[export1cTip] || {};
+  wrap.hidden = !def.xml;
+}
 let export1cTip = "suppliers";
 let export1cItems = [];
 let export1cTotal = 0;
@@ -164,6 +183,7 @@ function randeazaExport1c() {
     const btn = document.getElementById(`export-1c-tab-${tip}`);
     if (btn) btn.classList.toggle("cell-btn-primary", tip === export1cTip);
   }
+  actualizeazaSelectorFormat1c();
   if (!export1cItems.length) {
     body.innerHTML =
       '<tr><td colspan="5" class="muted-count">Nimic de încărcat — toate documentele sunt deja marcate.</td></tr>';
@@ -265,7 +285,8 @@ if (document.getElementById("export-1c-body")) {
       // `fetch`, nu navigare: avem nevoie de raspuns ca sa putem descarca exact selectia.
       descarca.disabled = true;
       try {
-        const res = await fetch(`${def.ruta}?includeExported=1`, {
+        const format = export1cFormat();
+        const res = await fetch(`${def.ruta}?includeExported=1&format=${format}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ ids })
@@ -275,10 +296,11 @@ if (document.getElementById("export-1c-body")) {
           throw new Error(err.error || "Nu am putut descărca.");
         }
         const text = await res.text();
-        const url = URL.createObjectURL(new Blob([text], { type: "text/csv;charset=utf-8" }));
+        const tip = format === "xml" ? "application/xml;charset=utf-8" : "text/csv;charset=utf-8";
+        const url = URL.createObjectURL(new Blob([text], { type: tip }));
         const a = document.createElement("a");
         a.href = url;
-        a.download = `${def.fisier}-1c-${new Date().toISOString().slice(0, 10)}.csv`;
+        a.download = `${def.fisier}-1c-${new Date().toISOString().slice(0, 10)}.${format}`;
         a.click();
         URL.revokeObjectURL(url);
         export1cHint(
