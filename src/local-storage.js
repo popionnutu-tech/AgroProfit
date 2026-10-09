@@ -6710,7 +6710,10 @@ async function exportSuppliersFor1c(options = {}) {
       "Cod fiscal / IDNP": cod,
       Denumire: String(p.name || "").trim(),
       "Denumire completa": String(p.name || "").trim(),
-      "Tip contraparte": persoanaFizica ? "ЧастноеЛицо" : "ЮридическоеЛицо",
+      // Valorile enumerarii sint cele pe care le scrie 1C INSUSI (verificat in exportul
+      // real al utilizatorului: 2.491 x Организация, 763 x ЧастноеЛицо, zero ЮридическоеЛицо).
+      // Cu valoarea gresita, 1C nu recunoaste tipul si contraparte ramane neclasificata.
+      "Tip contraparte": persoanaFizica ? "ЧастноеЛицо" : "Организация",
       "Adresa juridica": String(p.address || "").trim(),
       Telefon: String(p.phone || "").trim(),
       Nerezident: "false",

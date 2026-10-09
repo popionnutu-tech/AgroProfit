@@ -1,3 +1,5 @@
+const { construiesteXmlFurnizori } = require("./export-1c-xml");
+
 const {
   exportPaymentsFor1c,
   listPending1c,
@@ -142,6 +144,28 @@ function trimiteCsv1c(res, columns, rows, numeFisier) {
   res.end("\ufeff" + csv);
 }
 
+// Formatul NATIV de schimb al lui 1C. Se incarca direct, fara potrivire de coloane.
+// Acelasi drum ca `trimiteCsv1c` — difera doar tipul de continut si corpul.
+function trimiteXml1c(res, xml, numeFisier) {
+  if (typeof res.setHeader === "function") {
+    res.setHeader("Content-Type", "application/xml; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${numeFisier}"`);
+    // Fisierul contine IDNP-uri, adrese si telefoane. Fara asta ramane in cache-ul de disc
+    // al browserului de pe statia contabilului.
+    res.setHeader("Cache-Control", "no-store");
+  }
+  if (typeof res.status === "function") res.status(200);
+  else res.statusCode = 200;
+  // BOM-ul e pus de constructor, ca in exportul real al lui 1C.
+  res.end(xml);
+}
+
+// `?format=xml` -> formatul nativ 1C; orice altceva -> CSV.
+// CSV-ul ramane IMPLICIT deliberat: e verificat pe import real, XML-ul e optiunea noua.
+function formatCerut(req) {
+  return String((req.query || {}).format || "").trim().toLowerCase() === "xml" ? "xml" : "csv";
+}
+
 async function exportPurchaseActs1cHandler(req, res) {
   try {
     const q = req.query || {};
@@ -192,7 +216,23 @@ async function exportSuppliers1cHandler(req, res) {
       onlyNew: !["1", "true"].includes(String((req.query || {}).includeExported || "").toLowerCase()),
       partnerIds: idsDinCerere(req)
     });
-    trimiteCsv1c(res, columns, rows, `furnizori-1c-${new Date().toISOString().slice(0, 10)}.csv`);
+    const zi = new Date().toISOString().slice(0, 10);
+    if (formatCerut(req) === "xml") {
+      // Coloanele CSV sint denumiri pentru OM; constructorul XML vrea campuri. Traducerea
+      // se face AICI, nu in magazie: exportul ramane o singura sursa de date, iar cele doua
+      // formate nu pot diverge pe continut.
+      const xml = construiesteXmlFurnizori(
+        rows.map((r) => ({
+          cod: r["Cod fiscal / IDNP"],
+          denumire: r.Denumire,
+          persoanaFizica: r["Tip contraparte"] === "ЧастноеЛицо",
+          adresa: r["Adresa juridica"],
+          telefon: r.Telefon
+        }))
+      );
+      return trimiteXml1c(res, xml, `furnizori-1c-${zi}.xml`);
+    }
+    trimiteCsv1c(res, columns, rows, `furnizori-1c-${zi}.csv`);
   } catch (error) {
     console.error("Failed to export suppliers for 1C:", error.message);
     return sendJson(res, error.statusCode || 400, {
@@ -290,6 +330,7 @@ module.exports = {
   exportPurchaseActs1cHandler,
   exportSuppliers1cHandler,
   trimiteCsv1c,
+  trimiteXml1c,
   exportResourceHandler,
   getDashboardHandler,
   getDeliveryDefaultsHandler,
