@@ -315,3 +315,95 @@ test("XML si CSV scot ACELASI continut, in forme diferite", async () => {
     assert.match(xml, /<Значение>s\. Testeni<\/Значение>/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Prin HANDLER, nu prin constructor.
+//
+// Testul de mai sus („XML si CSV scot ACELASI continut") rescrie maparea rand->camp a
+// TREIA oara, deci apara doar impotriva unei redenumiri uitate in magazie si lasa
+// descoperit cazul invers: redenumire facuta in magazie SI in test, uitata in handler.
+// Masurat de verificarea de arhitectura: atunci handlerul intorcea 200 cu un fisier valid
+// si ZERO obiecte, iar marcajul scotea furnizorii definitiv din coada.
+// Singura aparare care acopera ambele e sa treci prin handlerul real.
+// ---------------------------------------------------------------------------
+
+function raspunsFals() {
+  const antete = {};
+  // `sendJson` are doua cai: `res.status().json()` daca ambele exista, altfel scrie direct
+  // in `res.statusCode`. Fake-ul trebuie sa le acopere pe amandoua, altfel codul de eroare
+  // se pierde si testul trece degeaba.
+  return {
+    antete,
+    statusCode: 0,
+    corp: "",
+    get cod() { return this.statusCode; },
+    setHeader(k, v) { antete[k] = String(v); },
+    status(c) { this.statusCode = c; return this; },
+    end(text) { this.corp = text == null ? "" : String(text); }
+  };
+}
+
+test("handlerul real scoate XML cu furnizorul inauntru, nu un fisier gol", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    await receptieEmisa(storage);
+
+    // Se incarca handlerul DUPA magazie, ca sa prinda aceeasi instanta de stare.
+    const handlers = load("src/report-extensions-handlers.js");
+    const res = raspunsFals();
+    await handlers.exportSuppliers1cHandler(
+      { query: { format: "xml", all: "1" }, body: {}, currentUser: { roleCode: "admin" } },
+      res
+    );
+
+    assert.equal(res.cod, 200, `handlerul a raspuns ${res.cod}: ${res.corp.slice(0, 200)}`);
+    assert.match(res.antete["Content-Type"] || "", /xml/);
+    assert.match(res.antete["Content-Disposition"] || "", /\.xml"$/);
+    assert.equal(res.antete["Cache-Control"], "no-store");
+    // Cheia reparatiei: fisierul chiar CONTINE furnizorul.
+    assert.equal(res.antete["X-Export-Scrise"], "1");
+    assert.equal(res.antete["X-Export-Sarite"], "0");
+    parseaza(res.corp);
+    assert.deepEqual(cheiDinXml(res.corp), [["2000000000001", "Furnizor Testov"]]);
+  });
+});
+
+test("handlerul scoate CSV cand nu se cere alt format, fara campuri interne", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    await receptieEmisa(storage);
+    const handlers = load("src/report-extensions-handlers.js");
+    const res = raspunsFals();
+    await handlers.exportSuppliers1cHandler(
+      { query: { all: "1" }, body: {}, currentUser: { roleCode: "admin" } },
+      res
+    );
+    assert.equal(res.cod, 200);
+    assert.match(res.antete["Content-Type"] || "", /csv/);
+    assert.equal(res.antete["Cache-Control"], "no-store", "CSV-ul duce aceleasi date personale");
+    // Cheile structurale (`_cod`, `_denumire`, `_persoanaFizica`) sint pentru XML, nu pentru
+    // fisierul contabilului.
+    assert.ok(!res.corp.includes("_cod"), "campurile interne nu au ce cauta in CSV");
+    assert.ok(!res.corp.includes("_denumire"));
+    assert.ok(res.corp.includes("2000000000001"));
+  });
+});
+
+test("`format=xml` pe acte si plati e REFUZAT, nu servit tacut ca CSV", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    await receptieEmisa(storage);
+    const handlers = load("src/report-extensions-handlers.js");
+    for (const h of ["exportPurchaseActs1cHandler", "exportPayments1cHandler"]) {
+      const res = raspunsFals();
+      await handlers[h](
+        { query: { format: "xml" }, body: {}, currentUser: { roleCode: "admin" } },
+        res
+      );
+      // Fara garda, raspunsul era 200 cu CSV inauntru si extensia `.xml` pe fisier — iar
+      // contabilul ducea in 1C un fisier care nu se poate importa, convins ca e XML.
+      assert.equal(res.cod, 400, `${h} trebuia sa refuze formatul`);
+      assert.match(res.corp, /doar pentru furnizori/);
+    }
+  });
+});
