@@ -64,13 +64,28 @@ function esc(valoare) {
     .replace(/'/g, "&apos;");
 }
 
-// Caracterele de control sint ILEGALE in XML 1.0 chiar escapate (`&#1;` nu e valid). Un
-// parser strict respinge fisierul intreg, iar 1C nu spune pe ce rand. Se curata la sursa.
-// Se pastreaza TAB, LF si CR, singurele admise.
+// Caracterele pe care XML 1.0 nu le admite se SCOT la sursa.
+//
+// Nu e o masura de prudenta: escaparea NU ajuta (`&#1;` si `&#xFFFF;` sint la fel de
+// invalide ca octetul brut), iar un singur astfel de caracter face parserul sa respinga
+// FISIERUL INTREG — nu randul. 1C nu spune pe ce pozitie, deci cauti cu ochiul intr-un
+// fisier de 100 KB.
+//
+// Multimea admisa, din gramatica XML 1.0 (productia `Char`):
+//     #x9 | #xA | #xD | [#x20-#xD7FF] | [#xE000-#xFFFD] | [#x10000-#x10FFFF]
+// Deci se scot:
+//   - controalele C0, mai putin TAB/LF/CR;
+//   - DEL (legal in 1.0, interzis in 1.1 — se scoate oricum, nu are ce cauta intr-un nume);
+//   - U+FFFE si U+FFFF, care cad in afara intervalului `[#xE000-#xFFFD]`;
+//   - surogatele NEPERECHE. Perechile valide se pastreaza: ele formeaza emoji si caractere
+//     din planurile superioare, perfect legale. Doar jumatatile orfane — care apar din
+//     taierea unui sir la mijlocul unei perechi — sint invalide.
 function curataControl(valoare) {
-  // eslint-disable-next-line no-control-regex
   return String(valoare === null || valoare === undefined ? "" : valoare)
-    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "");
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\uFFFE\uFFFF]/g, "")
+    .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/g, "")
+    .replace(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "");
 }
 
 // O proprietate simpla. Valoarea goala NU se scrie ca `<Значение></Значение>`: 1C asteapta
