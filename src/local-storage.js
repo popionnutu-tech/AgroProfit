@@ -1458,6 +1458,28 @@ const DOCUMENT_NUMBER_TYPES = {
   paymentOrder: { collection: "transactions", stampField: "paymentOrderNo", entityType: "transaction" }
 };
 
+// Receptiile pe care o plata le acopera EXPLICIT, alese de om la inregistrare.
+//
+// Lista goala = fara alegere: plata intra in oala partenerului si se distribuie FIFO, exact
+// ca inainte. Asa platile vechi (care n-au campul) se comporta neschimbat.
+//
+// `receiptId` (singular) ramane pentru compatibilitate — e documentul pe care a fost
+// inregistrata plata si pe care il citesc ordinul de plata tiparit si exportul 1C. NU se
+// deduce din el o acoperire: o plata veche inregistrata pe receptia 12 stingea FIFO si
+// receptia 7, iar transformarea lui in „acoperire" ar rescrie retroactiv istoricul.
+function acoperire1Plata(t) {
+  const brute = Array.isArray((t || {}).receiptIds) ? t.receiptIds : [];
+  const curate = [];
+  const vazute = new Set();
+  for (const v of brute) {
+    const n = Number(v);
+    if (!Number.isInteger(n) || n <= 0 || vazute.has(n)) continue;
+    vazute.add(n);
+    curate.push(n);
+  }
+  return curate;
+}
+
 function allocateDocumentNumber(docType, refId, companyId, changedBy) {
   const meta = DOCUMENT_NUMBER_TYPES[docType];
   if (!meta) {
@@ -2233,6 +2255,9 @@ async function listReceipts() {
   // indiferent de receptia pe care a fost inregistrata.
   const paidByPartner = new Map();
   const lastPaymentByPartner = new Map();
+  // Plati cu ACOPERIRE ALEASA de om (`receiptIds`): se aloca intai, si DOAR pe receptiile
+  // bifate. Vezi mai jos de ce exista.
+  const platiTintite = [];
   for (const t of state.transactions || []) {
     if (t.referenceType !== "receipt" || t.direction !== "payment") continue;
     if (t.stornata === true) continue; // storned payments don't count
@@ -2242,6 +2267,8 @@ async function listReceipts() {
     const partnerId = t.partnerId != null ? Number(t.partnerId) : (r ? Number(r.supplierId) : NaN);
     if (Number.isNaN(partnerId)) continue;
     paidByPartner.set(partnerId, (paidByPartner.get(partnerId) || 0) + Number(t.amount || 0));
+    const tinte = acoperire1Plata(t);
+    if (tinte.length) platiTintite.push({ partnerId, suma: Number(t.amount || 0), tinte });
     const when = t.createdAt || t.transactedAt || "";
     const prev = lastPaymentByPartner.get(partnerId);
     if (!prev || String(when) > String(prev)) lastPaymentByPartner.set(partnerId, when);
@@ -2257,16 +2284,54 @@ async function listReceipts() {
     if (!receiptsByPartner.has(pid)) receiptsByPartner.set(pid, []);
     receiptsByPartner.get(pid).push(r);
   }
+  // ÎNTÂI platile cu acoperire ALEASA de om, si numai pe receptiile bifate.
+  //
+  // DE CE: fara ele, toti banii unui furnizor se imprastiau FIFO pe receptiile lui, de la cea
+  // mai veche. Era corect ca sold total, dar contabilul nu putea spune „plata asta acopera
+  // recepțiile 12, 14 si 15, nu si 13" — iar ordinul de plata si discutia cu furnizorul se
+  // poarta exact pe acele documente.
+  //
+  // Restul (surplusul si platile fara bifa) ramane in oala partenerului si se distribuie FIFO
+  // dedesubt — deci banii NU dispar niciodata, indiferent ce s-a bifat.
+  const ramasPartener = new Map();
+  for (const [pid, suma] of paidByPartner) ramasPartener.set(pid, suma);
+
+  for (const plata of platiTintite) {
+    // In interiorul selectiei tot de la cea mai veche: daca suma nu ajunge pentru toate
+    // bifate, se sting in ordine, nu partial peste tot.
+    const tinte = plata.tinte
+      .map((id) => receiptById.get(Number(id)))
+      .filter((r) => r && isReceiptInStock(r) && Number(r.supplierId) === plata.partnerId)
+      .sort((a, b) =>
+        (new Date(a.createdAt || a.receivedAt) - new Date(b.createdAt || b.receivedAt)) ||
+        (Number(a.id) - Number(b.id))
+      );
+    let disponibil = plata.suma;
+    for (const r of tinte) {
+      if (disponibil <= 0) break;
+      const target = receiptPayableValue(r);
+      const dejaPus = Number(paidByReceipt.get(Number(r.id)) || 0);
+      const aplicat = Math.max(0, Math.min(target - dejaPus, disponibil));
+      if (aplicat <= 0) continue;
+      paidByReceipt.set(Number(r.id), dejaPus + aplicat);
+      disponibil -= aplicat;
+      ramasPartener.set(plata.partnerId, Number(ramasPartener.get(plata.partnerId) || 0) - aplicat);
+    }
+  }
+
+  // APOI restul, FIFO pe tot partenerul (comportamentul dinainte, neatins pentru platile
+  // vechi — care nu au `receiptIds` si deci cad integral aici).
   for (const [pid, list] of receiptsByPartner) {
     // FIFO: cea mai veche recepție întâi; la timestamp egal, ordonăm după id (determinist).
     list.sort((a, b) =>
       (new Date(a.createdAt || a.receivedAt) - new Date(b.createdAt || b.receivedAt)) || (Number(a.id) - Number(b.id))
     );
-    let remaining = Number(paidByPartner.get(pid) || 0);
+    let remaining = Math.max(0, Number(ramasPartener.get(pid) || 0));
     for (const r of list) {
       const target = receiptPayableValue(r);
-      const applied = Math.max(0, Math.min(target, remaining));
-      paidByReceipt.set(Number(r.id), applied);
+      const dejaPus = Number(paidByReceipt.get(Number(r.id)) || 0);
+      const applied = Math.max(0, Math.min(target - dejaPus, remaining));
+      paidByReceipt.set(Number(r.id), dejaPus + applied);
       remaining -= applied;
     }
   }
