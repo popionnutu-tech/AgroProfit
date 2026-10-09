@@ -2383,16 +2383,31 @@ function alocaPlatiPeReceptii(state) {
   const ramasPartener = new Map();
   for (const [pid, suma] of paidByPartner) ramasPartener.set(pid, suma);
 
+  // ORDINEA FIFO se calculeaza O SINGURA DATA, aici, si se retine ca RANG.
+  //
+  // Inainte, fiecare plata cu bife isi re-sorta propriile tinte, cu `new Date` in comparator.
+  // Aceleasi receptii se sortau de zeci de mii de ori: 87% din costul adaugat erau obiectele
+  // `Date` construite in comparator. La plafonul de 200 de bife, `listReceipts` ajungea la
+  // 12 secunde — pe cea mai apelata functie din aplicatie, intr-o functie serverless
+  // plafonata la 30.
+  // Cu rangul precalculat, comparatia devine o scadere de intregi, iar bucla FIFO de
+  // dedesubt foloseste aceeasi lista deja sortata.
+  const rangFifo = new Map();
+  for (const [, list] of receiptsByPartner) {
+    // FIFO: cea mai veche recepție întâi; la timestamp egal, ordonăm după id (determinist).
+    list.sort((a, b) =>
+      (new Date(a.createdAt || a.receivedAt) - new Date(b.createdAt || b.receivedAt)) || (Number(a.id) - Number(b.id))
+    );
+    list.forEach((r, i) => rangFifo.set(Number(r.id), i));
+  }
+
   for (const plata of platiTintite) {
     // In interiorul selectiei tot de la cea mai veche: daca suma nu ajunge pentru toate
-    // bifate, se sting in ordine, nu partial peste tot.
+    // bifate, se sting in ordine, nu partial peste tot. Aceeasi ordine ca FIFO, citita din rang.
     const tinte = plata.tinte
       .map((id) => receiptById.get(Number(id)))
       .filter((r) => r && isReceiptInStock(r) && Number(r.supplierId) === plata.partnerId)
-      .sort((a, b) =>
-        (new Date(a.createdAt || a.receivedAt) - new Date(b.createdAt || b.receivedAt)) ||
-        (Number(a.id) - Number(b.id))
-      );
+      .sort((a, b) => (rangFifo.get(Number(a.id)) || 0) - (rangFifo.get(Number(b.id)) || 0));
     // Plafonat la cit mai e in potul partenerului. Potul poate fi mai mic decat plata
     // (o ajustare NEGATIVA de reclamatie pe acelasi furnizor scade din el), iar fara
     // plafon alocam mai multi bani decat s-au primit net — receptia aparea „Achitat"
@@ -2416,10 +2431,7 @@ function alocaPlatiPeReceptii(state) {
   // APOI restul, FIFO pe tot partenerul (comportamentul dinainte, neatins pentru platile
   // vechi — care nu au `receiptIds` si deci cad integral aici).
   for (const [pid, list] of receiptsByPartner) {
-    // FIFO: cea mai veche recepție întâi; la timestamp egal, ordonăm după id (determinist).
-    list.sort((a, b) =>
-      (new Date(a.createdAt || a.receivedAt) - new Date(b.createdAt || b.receivedAt)) || (Number(a.id) - Number(b.id))
-    );
+    // Lista e DEJA sortata FIFO mai sus, cand s-a calculat rangul. Nu se re-sorteaza.
     let remaining = Math.max(0, Number(ramasPartener.get(pid) || 0));
     for (const r of list) {
       const target = receiptPayableValue(r);
@@ -3201,6 +3213,9 @@ function datorieRamasaPartener(state, transaction, receipt) {
 
 async function createTransaction(payload) {
   const state = readReceiptsState();
+  // O SINGURA data: functia construieste o harta peste toate receptiile (~2 ms la 3 ani)
+  // si face validarea de coerenta. Iesirea timpurie pe lista goala e inauntru.
+  const acoperire = acoperireDinPayload(payload, state);
   const transaction = {
     id: nextId(state.transactions),
     referenceType:
@@ -3214,7 +3229,11 @@ async function createTransaction(payload) {
     // deci banii se distribuie FIFO pe tot partenerul, ca pina acum.
     // Se tipizeaza AICI, la intrare: `acoperire1Plata` arunca tot ce nu e intreg pozitiv,
     // iar o lista invalida n-are voie sa ajunga pe document.
-    receiptIds: acoperireDinPayload(payload, state),
+    // Se scrie DOAR cand exista bife. `"receiptIds":[]` pe fiecare tranzactie insemna 16
+    // octeti x 30.000 de documente = ~470 KB de greutate moarta in blobul descarcat la
+    // FIECARE cerere. Cititorul (`acoperire1Plata`) trateaza oricum campul absent ca lista
+    // goala, deci omiterea nu costa nimic.
+    ...(acoperire.length ? { receiptIds: acoperire } : {}),
     deliveryId: payload.deliveryId ? Number(payload.deliveryId) : null,
     openingDebtId: payload.openingDebtId || "",
     partnerId: Number(payload.partnerId),
