@@ -1458,6 +1458,32 @@ const DOCUMENT_NUMBER_TYPES = {
   paymentOrder: { collection: "transactions", stampField: "paymentOrderNo", entityType: "transaction" }
 };
 
+// Tipizarea listei de acoperire la INTRARE. Acelasi tipar ca `idUri1cStrict`: `Number([7])`
+// e 7 si `Number(true)` e 1, deci fara verificare de tip un boolean ar bifa o receptie la
+// intimplare. Plafon de 200 — o plata care acopera mai mult inseamna ca s-a bifat tot din
+// greseala.
+function acoperireDinPayload(payload) {
+  const brute = Array.isArray((payload || {}).receiptIds) ? payload.receiptIds : [];
+  if (!brute.length) return [];
+  if (brute.length > 200) {
+    const e = new Error("Prea multe receptii pe o singura plata (max 200).");
+    e.statusCode = 400;
+    throw e;
+  }
+  if (brute.some((v) => typeof v !== "number" && typeof v !== "string")) {
+    const e = new Error("Lista de receptii acoperite e invalida.");
+    e.statusCode = 400;
+    throw e;
+  }
+  const idUri = [...new Set(brute.map((v) => Number(String(v).trim())))];
+  if (idUri.some((n) => !Number.isInteger(n) || n <= 0)) {
+    const e = new Error("Lista de receptii acoperite e invalida.");
+    e.statusCode = 400;
+    throw e;
+  }
+  return idUri;
+}
+
 // Receptiile pe care o plata le acopera EXPLICIT, alese de om la inregistrare.
 //
 // Lista goala = fara alegere: plata intra in oala partenerului si se distribuie FIFO, exact
@@ -3026,6 +3052,11 @@ async function createProcessing(payload) {
     id: nextId(state.processings),
     movement: true,
     receiptId: payload.receiptId ? Number(payload.receiptId) : null,
+    // Receptiile pe care plata le acopera EXPLICIT, bifate de contabil. Gol = fara alegere,
+    // deci banii se distribuie FIFO pe tot partenerul, ca pina acum.
+    // Se tipizeaza AICI, la intrare: `acoperire1Plata` arunca tot ce nu e intreg pozitiv,
+    // iar o lista invalida n-are voie sa ajunga pe document.
+    receiptIds: acoperireDinPayload(payload),
     product: productName,
     lot: payload.lot || "",
     sourceLocation,
@@ -3072,6 +3103,11 @@ async function createTransaction(payload) {
           ? "opening-debt"
           : "receipt",
     receiptId: payload.receiptId ? Number(payload.receiptId) : null,
+    // Receptiile pe care plata le acopera EXPLICIT, bifate de contabil. Gol = fara alegere,
+    // deci banii se distribuie FIFO pe tot partenerul, ca pina acum.
+    // Se tipizeaza AICI, la intrare: `acoperire1Plata` arunca tot ce nu e intreg pozitiv,
+    // iar o lista invalida n-are voie sa ajunga pe document.
+    receiptIds: acoperireDinPayload(payload),
     deliveryId: payload.deliveryId ? Number(payload.deliveryId) : null,
     openingDebtId: payload.openingDebtId || "",
     partnerId: Number(payload.partnerId),
