@@ -278,6 +278,7 @@ module.exports = {
   construiesteXmlFurnizori,
   MAX_FURNIZORI_XML,
   // exportate pentru teste
+  verificaNumeLiteral,
   esc,
   curataControl,
   dataLocala1c

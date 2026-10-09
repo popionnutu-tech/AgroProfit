@@ -39,11 +39,15 @@ function cheiDinXml(xml) {
 
 const ACUM = new Date(2026, 9, 9, 14, 30, 0);
 
+// Constructorul intoarce `{ xml, scrise, sarite }`. Testele de mai jos verifica forma
+// fisierului; cele care verifica numaratoarea folosesc rezultatul intreg.
+function xmlDin(randuri, optiuni = { acum: ACUM }) {
+  return construiesteXmlFurnizori(randuri, optiuni).xml;
+}
+
 test("XML: cheia e perechea cod fiscal + denumire, cum o cere 1C", () => {
-  const xml = construiesteXmlFurnizori(
-    [{ cod: "2000000000001", denumire: "Furnizor Testov", persoanaFizica: true }],
-    { acum: ACUM }
-  );
+  const xml = xmlDin(
+    [{ cod: "2000000000001", denumire: "Furnizor Testov", persoanaFizica: true }], { acum: ACUM });
   parseaza(xml);
   assert.deepEqual(cheiDinXml(xml), [["2000000000001", "Furnizor Testov"]]);
   // Regula din 1C: ce exista deja acolo NU se suprascrie.
@@ -55,20 +59,16 @@ test("XML: cheia e perechea cod fiscal + denumire, cum o cere 1C", () => {
 test("XML: o firma primeste Организация, nu ЮридическоеЛицо", () => {
   // Valoarea gresita nu da eroare la import — contraparte ramane doar neclasificata, deci
   // greseala se vede abia in 1C, dupa ce marfa a intrat.
-  const xml = construiesteXmlFurnizori(
-    [{ cod: "1003600000000", denumire: "Agro SRL", persoanaFizica: false }],
-    { acum: ACUM }
-  );
+  const xml = xmlDin(
+    [{ cod: "1003600000000", denumire: "Agro SRL", persoanaFizica: false }], { acum: ACUM });
   assert.match(xml, /<Значение>Организация<\/Значение>/);
   assert.ok(!xml.includes("ЮридическоеЛицо"), "valoarea inexistenta in 1C nu are ce cauta aici");
 });
 
 test("XML: caracterele speciale dintr-o denumire nu rup fisierul", () => {
   const nume = 'Ion & Fiii <SRL> "Agro" \'test\'';
-  const xml = construiesteXmlFurnizori(
-    [{ cod: "1003600000001", denumire: nume, persoanaFizica: false }],
-    { acum: ACUM }
-  );
+  const xml = xmlDin(
+    [{ cod: "1003600000001", denumire: nume, persoanaFizica: false }], { acum: ACUM });
   parseaza(xml);
   // Escapat la scriere...
   assert.match(xml, /Ion &amp; Fiii &lt;SRL&gt;/);
@@ -81,10 +81,8 @@ test("XML: caracterele speciale dintr-o denumire nu rup fisierul", () => {
 test("XML: caracterele de control sint SCOASE, nu escapate", () => {
   // `&#1;` nu e valid in XML 1.0 nici escapat: un parser strict refuza fisierul INTREG,
   // iar 1C nu spune pe ce rand. Se curata la sursa.
-  const xml = construiesteXmlFurnizori(
-    [{ cod: "2000000000002", denumire: `Ana${String.fromCharCode(1)}Maria`, persoanaFizica: true }],
-    { acum: ACUM }
-  );
+  const xml = xmlDin(
+    [{ cod: "2000000000002", denumire: `Ana${String.fromCharCode(1)}Maria`, persoanaFizica: true }], { acum: ACUM });
   parseaza(xml);
   assert.equal(cheiDinXml(xml)[0][1], "AnaMaria");
   assert.ok(!/&#\d+;/.test(xml), "nicio referinta numerica de caracter de control");
@@ -121,7 +119,7 @@ test("XML: U+FFFE, U+FFFF si surogatele orfane nu rup fisierul; emoji-ul valid r
 test("XML: fara cod fiscal sau fara denumire, furnizorul NU se exporta", () => {
   // Fara cod, 1C nu l-ar putea lega de nimic: ar intra ca furnizor nou, nepotrivit cu
   // niciun act. Fara denumire, cheia e incompleta. Aceeasi regula ca la CSV.
-  const xml = construiesteXmlFurnizori([
+  const xml = xmlDin([
     { cod: "", denumire: "Fara cod", persoanaFizica: true },
     { cod: "   ", denumire: "Doar spatii", persoanaFizica: true },
     { cod: "2000000000003", denumire: "", persoanaFizica: true },
@@ -153,10 +151,8 @@ test("XML: numele si tipurile de proprietati raman intacte dupa ce nu mai sint e
   // Escaparea a fost scoasa de pe LITERALI (41% din timpul de constructie). Daca cineva pune
   // vreodata acolo o valoare din date, testul asta nu-l prinde — dar prinde o stricare
   // accidentala a numelor, care ar face fisierul de necitit pentru 1C.
-  const xml = construiesteXmlFurnizori(
-    [{ cod: "2000000000001", denumire: "X", persoanaFizica: true }],
-    { acum: ACUM }
-  );
+  const xml = xmlDin(
+    [{ cod: "2000000000001", denumire: "X", persoanaFizica: true }], { acum: ACUM });
   for (const nume of ["ФискКод", "Наименование", "ВидКонтрагента", "ЮрАдрес", "Телефоны"]) {
     assert.ok(xml.includes(`Имя="${nume}"`), `lipseste proprietatea ${nume}`);
   }
@@ -166,19 +162,15 @@ test("XML: numele si tipurile de proprietati raman intacte dupa ce nu mai sint e
 test("XML: data e LOCALA, nu UTC", () => {
   // `toISOString()` ar da UTC: in Moldova un export de la 01:00 ar cadea in ziua precedenta.
   assert.equal(dataLocala1c(new Date(2026, 0, 2, 1, 5, 9)), "2026-01-02T01:05:09");
-  const xml = construiesteXmlFurnizori(
-    [{ cod: "2000000000005", denumire: "X", persoanaFizica: true }],
-    { acum: new Date(2026, 0, 2, 1, 5, 9) }
-  );
+  const xml = xmlDin(
+    [{ cod: "2000000000005", denumire: "X", persoanaFizica: true }], { acum: new Date(2026, 0, 2, 1, 5, 9) });
   assert.match(xml, /ДатаВыгрузки="2026-01-02T01:05:09"/);
 });
 
 test("XML: fisierul poarta regulile de conversie, cu acelasi Id ca in antet", () => {
   // Fara reguli, 1C nu stie sa interpreteze obiectele; cu alt Id, refuza fisierul.
-  const xml = construiesteXmlFurnizori(
-    [{ cod: "2000000000006", denumire: "X", persoanaFizica: true }],
-    { acum: ACUM }
-  );
+  const xml = xmlDin(
+    [{ cod: "2000000000006", denumire: "X", persoanaFizica: true }], { acum: ACUM });
   const idAntet = xml.match(/ИдПравилКонвертации="([^"]+)"/)[1];
   const idReguli = xml.match(/<ПравилаОбмена>[\s\S]*?<Ид>([^<]+)<\/Ид>/)[1];
   assert.equal(idAntet, idReguli);
@@ -187,10 +179,8 @@ test("XML: fisierul poarta regulile de conversie, cu acelasi Id ca in antet", ()
 });
 
 test("XML: BOM si radacina, ca in exportul real al lui 1C", () => {
-  const xml = construiesteXmlFurnizori(
-    [{ cod: "2000000000007", denumire: "X", persoanaFizica: true }],
-    { acum: ACUM }
-  );
+  const xml = xmlDin(
+    [{ cod: "2000000000007", denumire: "X", persoanaFizica: true }], { acum: ACUM });
   assert.equal(xml.charCodeAt(0), 0xfeff, "fara BOM, unele versiuni citesc fisierul ca ANSI");
   assert.match(xml, /^﻿<\?xml version="1\.0" encoding="UTF-8"\?>/);
   assert.match(xml, /<ФайлОбмена ВерсияФормата="2\.0"/);
@@ -198,9 +188,46 @@ test("XML: BOM si radacina, ca in exportul real al lui 1C", () => {
 });
 
 test("XML: o lista goala da un fisier valid, nu o eroare", () => {
-  const xml = construiesteXmlFurnizori([], { acum: ACUM });
+  // Lista goala = „nu e nimic de incarcat", caz normal. Diferit de „am cerut 10 si n-a
+  // iesit niciunul", care e invarianta de mai jos.
+  const { xml, scrise, sarite } = construiesteXmlFurnizori([], { acum: ACUM });
   parseaza(xml);
   assert.deepEqual(cheiDinXml(xml), []);
+  assert.equal(scrise, 0);
+  assert.equal(sarite, 0);
+});
+
+test("XML: un fisier VALID SI GOL e refuzat — e rezultatul cel mai periculos", () => {
+  // 1C il importa fara sa se planga (n-are ce importa), omul apasa „Am incarcat in 1C",
+  // iar furnizorii ies DEFINITIV din coada fara sa fi ajuns vreodata acolo. Actele lor
+  // raman apoi fara contraparte. Garda trebuie sa cada ZGOMOTOS.
+  assert.throws(
+    () => construiesteXmlFurnizori(
+      [{ cod: "", denumire: "Fara cod" }, { cod: "2000000000001", denumire: "" }],
+      { acum: ACUM }
+    ),
+    /Niciun furnizor nu a putut fi scris/
+  );
+});
+
+test("XML: rindurile sarite se NUMARA, nu dispar tacut", () => {
+  const r = construiesteXmlFurnizori([
+    { cod: "2000000000001", denumire: "Bun", persoanaFizica: true },
+    { cod: "", denumire: "Fara cod", persoanaFizica: true },
+    { cod: "2000000000002", denumire: "", persoanaFizica: true }
+  ], { acum: ACUM });
+  assert.equal(r.scrise, 1);
+  assert.equal(r.sarite, 2);
+});
+
+test("XML: un nume de proprietate care NU e literal e refuzat", () => {
+  // Escaparea a fost scoasa de pe `nume`/`tip` din motive de performanta — sint literali.
+  // Asertiunea e ce tine locul escaparii: prima proprietate dinamica ar deschide injectie
+  // directa in atribut, iar testul asta o prinde la prima rulare.
+  const { verificaNumeLiteral } = require("../src/export-1c-xml");
+  assert.throws(() => verificaNumeLiteral('x" Имя="EVIL', "Строка"), /invalid pentru XML/);
+  assert.throws(() => verificaNumeLiteral("Bun", "<Tip>"), /invalid pentru XML/);
+  assert.doesNotThrow(() => verificaNumeLiteral("ФискКод", "Строка"));
 });
 
 test("XML: intrari invalide nu arunca", () => {
