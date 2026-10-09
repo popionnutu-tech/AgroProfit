@@ -103,11 +103,10 @@ test("XML: U+FFFE, U+FFFF si surogatele orfane nu rup fisierul; emoji-ul valid r
     ["A" + C(1) + C(27) + "B", "AB"],
     ["A" + C(9) + "B", "A" + C(9) + "B"]                   // TAB e admis de XML
   ];
-  const xml = construiesteXmlFurnizori(
+  const xml = xmlDin(
     cazuri.map(([intrare], i) => ({
       cod: "200000000000" + i, denumire: intrare, persoanaFizica: true
-    })),
-    { acum: ACUM }
+    }))
   );
   parseaza(xml);
   assert.deepEqual(
@@ -142,7 +141,7 @@ test("XML: un fisier prea mare e REFUZAT cu mesaj, nu lasat sa cada pe platforma
   assert.throws(() => construiesteXmlFurnizori(prea, { acum: ACUM }), /Prea multi furnizori/);
   // Exact la plafon trece.
   const laLimita = prea.slice(0, MAX_FURNIZORI_XML);
-  const xml = construiesteXmlFurnizori(laLimita, { acum: ACUM });
+  const xml = xmlDin(laLimita);
   parseaza(xml);
   assert.equal(cheiDinXml(xml).length, MAX_FURNIZORI_XML);
 });
@@ -230,12 +229,24 @@ test("XML: un nume de proprietate care NU e literal e refuzat", () => {
   assert.doesNotThrow(() => verificaNumeLiteral("ФискКод", "Строка"));
 });
 
-test("XML: intrari invalide nu arunca", () => {
-  // Apelantul e un handler: o exceptie acolo devine 400 fara explicatie utila.
+test("XML: o intrare care nu e lista da fisier gol, nu exceptie", () => {
+  // „Nimic de exportat" e un caz normal. Apelantul e un handler: o exceptie aici ar deveni
+  // 400 fara explicatie utila.
   for (const rau of [null, undefined, "text", 7, {}]) {
-    assert.doesNotThrow(() => construiesteXmlFurnizori(rau, { acum: ACUM }));
+    const r = construiesteXmlFurnizori(rau, { acum: ACUM });
+    assert.equal(r.scrise, 0);
+    assert.equal(r.sarite, 0);
+    parseaza(r.xml);
   }
-  assert.doesNotThrow(() => construiesteXmlFurnizori([null, undefined, {}], { acum: ACUM }));
+});
+
+test("XML: o lista cu randuri numai invalide ARUNCA, nu da fisier gol", () => {
+  // Diferenta fata de testul de mai sus: aici s-a CERUT ceva si n-a iesit nimic. Un fisier
+  // gol ar fi importat fara reclamatii, iar marcajul ar scoate furnizorii din coada.
+  assert.throws(
+    () => construiesteXmlFurnizori([null, undefined, {}], { acum: ACUM }),
+    /Niciun furnizor nu a putut fi scris/
+  );
 });
 
 test("escaparea acopera toate cele cinci caractere XML", () => {
@@ -290,15 +301,14 @@ test("XML si CSV scot ACELASI continut, in forme diferite", async () => {
     // Bugul reparat: 1C foloseste „Организация", nu „ЮридическоеЛицо".
     assert.equal(rows[0]["Tip contraparte"], "ЧастноеЛицо");
 
-    const xml = construiesteXmlFurnizori(
+    const xml = xmlDin(
       rows.map((r) => ({
         cod: r["Cod fiscal / IDNP"],
         denumire: r.Denumire,
         persoanaFizica: r["Tip contraparte"] === "ЧастноеЛицо",
         adresa: r["Adresa juridica"],
         telefon: r.Telefon
-      })),
-      { acum: ACUM }
+      }))
     );
     parseaza(xml);
     assert.deepEqual(cheiDinXml(xml), [["2000000000001", "Furnizor Testov"]]);
