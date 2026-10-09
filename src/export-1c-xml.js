@@ -40,10 +40,16 @@ const path = require("node:path");
 
 const CAI_REGULI = path.join(__dirname, "1c", "reguli-schimb.xml");
 
+// Acelasi plafon ca `MAX_IDS_1C` din handler: un fisier nu poate contine mai multi
+// furnizori decat pot fi ceruti sau marcati intr-o operatie.
+const MAX_FURNIZORI_XML = 500;
+
 let reguliCache = null;
 
-// Citite O DATA si tinute in memorie: 106 KB de pe disc la fiecare export ar fi o citire
-// sincrona inutila intr-o functie serverless.
+// Citite O DATA si tinute in memorie. Fisierul are 105.706 CARACTERE, dar fiind chirilic
+// ocupa 2 octeti pe caracter in UTF-8: 186 KiB pe disc si pe retea. Citirea sincrona
+// costa 1,3 ms si se face o singura data per instanta, si doar daca se cere XML —
+// un cold start fara export XML nu atinge fisierul deloc.
 function reguliSchimb() {
   if (reguliCache === null) {
     reguliCache = fs.readFileSync(CAI_REGULI, "utf8").trim();
@@ -93,14 +99,19 @@ function curataControl(valoare) {
 function proprietate(nume, tip, valoare) {
   const v = curataControl(valoare).trim();
   const corp = v === "" ? "\t\t<Пусто/>\n" : `\t\t<Значение>${esc(v)}</Значение>\n`;
-  return `\t<Свойство Имя="${esc(nume)}" Тип="${esc(tip)}">\n${corp}\t</Свойство>\n`;
+  // `nume` si `tip` sint LITERALI din codul de mai jos, nu date — nu pot contine niciodata
+  // `& < > " '`. Escaparea lor insemna 140.000 de `replace()` irosite la 500 de furnizori,
+  // 41% din timpul de constructie. Valoarea, in schimb, vine din nomenclator si TREBUIE
+  // escapata (`esc(v)` de mai sus).
+  return `\t<Свойство Имя="${nume}" Тип="${tip}">\n${corp}\t</Свойство>\n`;
 }
 
 // Proprietatile de tip referinta (catre alt obiect din 1C) pe care le lasam mereu goale.
 // Se scriu EXPLICIT, nu se omit: exportul real al lui 1C le contine pe toate, iar un obiect
 // incomplet poate fi incarcat cu campuri ramase din alta sursa.
 function referintaGoala(nume, tip) {
-  return `\t<Свойство Имя="${esc(nume)}" Тип="${esc(tip)}">\n\t\t<Пусто/>\n\t</Свойство>\n`;
+  // Literali, ca mai sus — fara escapare.
+  return `\t<Свойство Имя="${nume}" Тип="${tip}">\n\t\t<Пусто/>\n\t</Свойство>\n`;
 }
 
 // Ordinea si componenta proprietatilor urmeaza EXACT exportul real al utilizatorului.
@@ -137,7 +148,10 @@ function obiectContragent(nrq, rand) {
     proprietate("ПометкаУдаления", "Булево", "false") +
     proprietate("ПочтАдрес", "Строка", "") +
     proprietate("Представитель", "Строка", "") +
-    proprietate("РегНомНДС", "Строка", rand.codTva || "") +
+    // Codul de TVA ramine GOL: in AgroProfit el exista doar pe firmele NOASTRE
+    // (`companies[].vatCode`), nu pe parteneri. Rubrica se scrie oricum, ca obiectul sa
+    // aiba aceeasi forma ca in exportul real al lui 1C.
+    proprietate("РегНомНДС", "Строка", "") +
     proprietate("СерияПаспорта", "Строка", "") +
     referintaGoala("Страна", "СправочникСсылка.КлассификаторСтранМира") +
     proprietate("СуммаАванса", "Число", "") +
@@ -165,12 +179,30 @@ function dataLocala1c(d) {
 /**
  * Construieste fisierul de schimb pentru FURNIZORI.
  *
- * @param {Array} randuri  obiecte { cod, denumire, persoanaFizica, adresa, telefon, codTva }
+ * @param {Array} randuri  obiecte { cod, denumire, persoanaFizica, adresa, telefon }
+ *
+ * NU poarta banca si IBAN-ul, desi CSV-ul le are: in 1C contul bancar e un obiect
+ * SEPARAT (`СправочникСсылка.РасчетныеСчета`), referit prin `ОснРасчСчет`. Trimis ca text
+ * in obiectul contrapartii, ar fi ignorat tacut. Se completeaza manual in 1C.
  * @param {Object} optiuni { acum: Date }  — injectabila, ca testul sa fie determinist
  * @returns {string} XML complet, gata de scris in fisier
  */
 function construiesteXmlFurnizori(randuri, optiuni = {}) {
   const lista = Array.isArray(randuri) ? randuri : [];
+  // PLAFON. Masurat: 3.401 octeti per furnizor, deci plafonul de 4,5 MB al raspunsului
+  // serverless se atinge la ~1.330. Pe calea normala (selectie bifata) `MAX_IDS_1C` tine
+  // deja, dar `GET ?all=1&format=xml` o ocoleste — `idsDinCerere` intoarce o lista goala,
+  // iar atunci exportul scoate TOT. CSV-ul pe aceeasi ruta da ~0,5 MB, deci lipsa plafonului
+  // n-a contat niciodata pina la formatul asta.
+  // Mai bine o eroare care spune ce sa faci decat o eroare opaca de platforma.
+  if (lista.length > MAX_FURNIZORI_XML) {
+    const e = new Error(
+      `Prea multi furnizori intr-un singur fisier XML (${lista.length}, maxim ` +
+      `${MAX_FURNIZORI_XML}). Bifeaza-i in transe sau descarca in format CSV.`
+    );
+    e.statusCode = 400;
+    throw e;
+  }
   const acum = optiuni.acum instanceof Date ? optiuni.acum : new Date();
   const stampila = dataLocala1c(acum);
 
@@ -206,6 +238,7 @@ function construiesteXmlFurnizori(randuri, optiuni = {}) {
 
 module.exports = {
   construiesteXmlFurnizori,
+  MAX_FURNIZORI_XML,
   // exportate pentru teste
   esc,
   curataControl,

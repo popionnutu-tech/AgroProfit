@@ -302,7 +302,10 @@ if (document.getElementById("export-1c-body")) {
         a.href = url;
         a.download = `${def.fisier}-1c-${new Date().toISOString().slice(0, 10)}.${format}`;
         a.click();
-        URL.revokeObjectURL(url);
+        // Revocarea se AMINA. Sincron, in acelasi tick cu `a.click()`, browserul poate sa nu
+        // fi terminat de citit blob-ul — pe CSV-uri de 90 KB a mers mereu, dar fisierul XML
+        // e de 20 de ori mai mare si Firefox/Safari pierd descarcarea.
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
         export1cHint(
           `${ids.length} ${ids.length === 1 ? "document" : "documente"} descărcate. ` +
             "După importul în 1C, apasă „Am încărcat în 1C”."
