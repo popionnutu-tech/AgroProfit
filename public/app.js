@@ -7783,6 +7783,9 @@ function buildSaleContractHtml(partner, company) {
 //
 // Regula: daca data cade in weekend, documentul poarta data de LUNI.
 //   simbata -> +2 zile, duminica -> +1 zi, in rest neschimbata.
+//   EXCEPTIE la granita de luna: daca lunea urmatoare cade in luna viitoare, se merge
+//   INAPOI, la ultima zi lucratoare a lunii curente — documentul nu are voie sa sara
+//   intr-o alta luna fiscala decat marfa.
 //
 // ⚠️ SE SCHIMBA DOAR HIRTIA, NU FAPTUL. Receptia ramine inregistrata simbata:
 // `receivedAt` nu se atinge, stocul se misca la data reala, rapoartele si „Miscarea
@@ -7806,14 +7809,32 @@ function ziLucratoare(valoare) {
   // sare in ziua precedenta si simbata devine vineri.
   const m = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (!m) return text;
-  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  const an = Number(m[1]);
+  const luna = Number(m[2]) - 1;
+  const d = new Date(an, luna, Number(m[3]));
   if (Number.isNaN(d.getTime())) return text;
-  const zi = d.getDay(); // 0 = duminica, 6 = simbata
-  const adaos = zi === 6 ? 2 : zi === 0 ? 1 : 0;
-  if (!adaos) return text.slice(0, 10);
-  d.setDate(d.getDate() + adaos);
   const z = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}`;
+  const scrie = (x) => `${x.getFullYear()}-${z(x.getMonth() + 1)}-${z(x.getDate())}`;
+
+  const zi = d.getDay(); // 0 = duminica, 6 = simbata
+  if (zi !== 0 && zi !== 6) return text.slice(0, 10);
+
+  const inainte = new Date(d);
+  inainte.setDate(inainte.getDate() + (zi === 6 ? 2 : 1)); // lunea urmatoare
+
+  // LUNA NU SE SCHIMBA. O receptie de simbata 31 octombrie ar primi act pe 2 noiembrie:
+  // in 1C documentul si impozitul retinut ar intra pe noiembrie, in timp ce receptia,
+  // stocul si registrul raman pe octombrie — doua luni fiscale pentru aceeasi marfa.
+  // La granita de luna se merge INAPOI, la ultima zi lucratoare a lunii curente
+  // (decizia utilizatorului, 09.10.2026). Actul poate purta astfel o data cu o zi-doua
+  // inaintea cantaririi, dar ramine in luna corecta — ce conteaza la inchidere.
+  if (inainte.getMonth() === luna && inainte.getFullYear() === an) return scrie(inainte);
+
+  const inapoi = new Date(an, luna + 1, 0); // ultima zi calendaristica a lunii
+  while (inapoi.getDay() === 0 || inapoi.getDay() === 6) {
+    inapoi.setDate(inapoi.getDate() - 1);
+  }
+  return scrie(inapoi);
 }
 
 function buildCashPaymentOrderHtml(transaction, partner, company) {
