@@ -113,6 +113,11 @@ async function createTransactionHandler(req, res) {
       referencePayload = {
         referenceType,
         receiptId: body.receiptId,
+        // Receptiile pe care plata le acopera EXPLICIT, bifate de contabil. Trece prin
+        // WHITELIST, nu prin `...body`: payload-ul de tranzactie se construieste camp cu
+        // camp tocmai ca un client sa nu poata strecura altceva. Validarea de coerenta
+        // (partener, stoc, `receiptId` inclus) se face in magazie, cu starea la mina.
+        receiptIds: Array.isArray(body.receiptIds) ? body.receiptIds : undefined,
         partnerId: receipt.supplierId,
         partner: receipt.supplier
       };
