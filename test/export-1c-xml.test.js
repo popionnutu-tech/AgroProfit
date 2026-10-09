@@ -90,6 +90,34 @@ test("XML: caracterele de control sint SCOASE, nu escapate", () => {
   assert.ok(!/&#\d+;/.test(xml), "nicio referinta numerica de caracter de control");
 });
 
+test("XML: U+FFFE, U+FFFF si surogatele orfane nu rup fisierul; emoji-ul valid ramane", () => {
+  // Gasit de verificarea de securitate. Nu e un caz teoretic: astea apar din copy-paste
+  // dintr-un fisier stricat sau din taierea unui sir la mijlocul unei perechi de surogate.
+  // Escaparea NU ajuta — `&#xFFFF;` e la fel de invalid ca octetul brut — iar parserul
+  // respinge FISIERUL INTREG, nu randul. 1C nu spune pe ce pozitie.
+  const C = (n) => String.fromCharCode(n);
+  const cazuri = [
+    ["Ana" + C(0xfffe) + "Maria" + C(0xffff), "AnaMaria"],
+    ["Ion" + C(0xd800) + "Pop", "IonPop"],                 // surogat de sus, orfan
+    ["Ion" + C(0xdc00) + "Pop", "IonPop"],                 // surogat de jos, orfan
+    ["Agro " + String.fromCodePoint(0x1f33e) + " SRL",
+     "Agro " + String.fromCodePoint(0x1f33e) + " SRL"],    // pereche VALIDA: se pastreaza
+    ["A" + C(1) + C(27) + "B", "AB"],
+    ["A" + C(9) + "B", "A" + C(9) + "B"]                   // TAB e admis de XML
+  ];
+  const xml = construiesteXmlFurnizori(
+    cazuri.map(([intrare], i) => ({
+      cod: "200000000000" + i, denumire: intrare, persoanaFizica: true
+    })),
+    { acum: ACUM }
+  );
+  parseaza(xml);
+  assert.deepEqual(
+    cheiDinXml(xml).map((k) => k[1]),
+    cazuri.map(([, asteptat]) => asteptat)
+  );
+});
+
 test("XML: fara cod fiscal sau fara denumire, furnizorul NU se exporta", () => {
   // Fara cod, 1C nu l-ar putea lega de nimic: ar intra ca furnizor nou, nepotrivit cu
   // niciun act. Fara denumire, cheia e incompleta. Aceeasi regula ca la CSV.
