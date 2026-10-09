@@ -157,9 +157,10 @@ function export1cFormat() {
 
 function actualizeazaSelectorFormat1c() {
   const wrap = document.getElementById("export-1c-format-wrap");
-  if (!wrap) return;
   const def = EXPORT_1C_TIPURI[export1cTip] || {};
-  wrap.hidden = !def.xml;
+  if (wrap) wrap.hidden = !def.xml;
+  const nota = document.getElementById("export-1c-xml-nota");
+  if (nota) nota.hidden = !(def.xml && export1cFormat() === "xml");
 }
 let export1cTip = "suppliers";
 let export1cItems = [];
@@ -262,6 +263,10 @@ if (document.getElementById("export-1c-body")) {
     const el = document.getElementById(id);
     if (el) el.addEventListener("change", incarcaLista1c);
   }
+  const selFormat = document.getElementById("export-1c-format");
+  // Doar nota, nu si lista: formatul nu schimba ce documente sint de incarcat, deci n-are
+  // rost inca o descarcare a blobului.
+  if (selFormat) selFormat.addEventListener("change", actualizeazaSelectorFormat1c);
   const toate = document.getElementById("export-1c-all");
   if (toate) {
     toate.addEventListener("change", () => {
@@ -306,9 +311,18 @@ if (document.getElementById("export-1c-body")) {
         // fi terminat de citit blob-ul — pe CSV-uri de 90 KB a mers mereu, dar fisierul XML
         // e de 20 de ori mai mare si Firefox/Safari pierd descarcarea.
         setTimeout(() => URL.revokeObjectURL(url), 60000);
+        // Serverul spune cate au intrat EFECTIV in fisier. Raportand selectia, un rand sarit
+        // (fara cod fiscal, fara denumire) ramanea invizibil, iar omul marca drept incarcat
+        // un furnizor care nu ajunsese niciodata in 1C.
+        const scrise = Number(res.headers.get("X-Export-Scrise"));
+        const sarite = Number(res.headers.get("X-Export-Sarite"));
+        const n = Number.isFinite(scrise) && scrise >= 0 ? scrise : ids.length;
         export1cHint(
-          `${ids.length} ${ids.length === 1 ? "document" : "documente"} descărcate. ` +
-            "După importul în 1C, apasă „Am încărcat în 1C”."
+          `${n} ${n === 1 ? "document" : "documente"} în fișier` +
+            (Number.isFinite(sarite) && sarite > 0
+              ? `, ${sarite} sărite (fără cod fiscal sau fără denumire)`
+              : "") +
+            ". După importul în 1C, apasă „Am încărcat în 1C”."
         );
       } catch (err) {
         window.alert(err.message);

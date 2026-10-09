@@ -2078,10 +2078,15 @@
                   <span>Format</span>
                   <select id="export-1c-format" style="margin-left:6px">
                     <option value="csv">CSV (pentru Excel)</option>
-                    <option value="xml">XML (se încarcă direct în 1C)</option>
+                    <option value="xml">XML nativ 1C (de verificat la primul import)</option>
                   </select>
                 </label>
                 <button type="button" id="export-1c-download-btn" class="cell-btn cell-btn-primary">⬇ Descarcă selecția</button>
+                <span class="field-hint" id="export-1c-xml-nota" hidden>
+                  Formatul XML e nou. Încearcă-l întâi pe <b>un furnizor sau doi</b> și
+                  verifică în 1C că au intrat cu adresa și tipul corect. CSV-ul rămâne
+                  varianta verificată.
+                </span>
                 <button type="button" id="export-1c-mark-btn" class="cell-btn">✓ Am încărcat în 1C</button>
                 <button type="button" id="export-1c-unmark-btn" class="cell-btn">↺ Anulează marcajul</button>
                 <span class="field-hint" id="export-1c-hint"></span>
