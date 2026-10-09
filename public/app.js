@@ -7774,12 +7774,58 @@ function buildSaleContractHtml(partner, company) {
 }
 
 // 3) ORDIN DE PLATA / Dispozitie de plata de casa (Расходный кассовый ордер) — dintr-o plata.
+// ============================================================================
+// ZIUA LUCRATOARE DE PE DOCUMENTELE DE TIPAR
+//
+// Marfa intra si simbata, si duminica — cantarul nu tine cont de calendar. Dar furnizorul
+// ajunge la contabilitate LUNI, iar documentul se perfecteaza atunci. Pina acum contabila
+// schimba data de mina pe fiecare hirtie, si se mai incurca.
+//
+// Regula: daca data cade in weekend, documentul poarta data de LUNI.
+//   simbata -> +2 zile, duminica -> +1 zi, in rest neschimbata.
+//
+// ⚠️ SE SCHIMBA DOAR HIRTIA, NU FAPTUL. Receptia ramine inregistrata simbata:
+// `receivedAt` nu se atinge, stocul se misca la data reala, rapoartele si „Miscarea
+// stocului" raman pe ziua adevarata. Aici se decide doar ce scrie pe actul, contractul si
+// ordinul de plata tiparite. Bonul de cintar NU trece pe aici: el consemneaza cintarirea
+// fizica de la poarta (decizia utilizatorului, 09.10.2026).
+//
+// Se aplica la EMITERE si se INGHEATA in `actFigures` ca orice alta cifra de pe act
+// (regula 10): o retiparire da aceeasi data ca hirtia semnata, nu una recalculata.
+//
+// Nu cunoaste sarbatorile legale. Daca lunea e zi libera, contabila corecteaza manual —
+// un calendar de sarbatori ar trebui intretinut in fiecare an, si nimeni n-ar face-o.
+//
+// OGLINDA lui `ziLucratoare` din `src/local-storage.js`. Se schimba in AMBELE LOCURI.
+// ============================================================================
+function ziLucratoare(valoare) {
+  const text = String(valoare || "").trim();
+  if (!text) return text;
+  // Doar partea de data: documentele poarta ziua, nu ora. `Date` pe „AAAA-LL-ZZ" citeste UTC,
+  // deci se construieste explicit din componente — altfel, intr-un fus estic, 00:00 local
+  // sare in ziua precedenta si simbata devine vineri.
+  const m = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return text;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  if (Number.isNaN(d.getTime())) return text;
+  const zi = d.getDay(); // 0 = duminica, 6 = simbata
+  const adaos = zi === 6 ? 2 : zi === 0 ? 1 : 0;
+  if (!adaos) return text.slice(0, 10);
+  d.setDate(d.getDate() + adaos);
+  const z = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}`;
+}
+
 function buildCashPaymentOrderHtml(transaction, partner, company) {
   const p = partner || {};
   const co = company || DEFAULT_COMPANY;
   const amount = Number(transaction.amount) || 0;
   const nr = "____"; // numarul de ordine il completeaza contabilul manual
-  const dateStr = formatDateShort(transaction.createdAt || transaction.transactedAt);
+  // Ziua lucratoare: o plata inregistrata simbata se perfecteaza luni, cind furnizorul
+  // ajunge la casierie. Tranzactia ramine inregistrata la data ei reala.
+  const dateStr = formatDateShort(
+    ziLucratoare(transaction.createdAt || transaction.transactedAt)
+  );
   const refText = transaction.receiptId ? `Act de achiziție / recepția #${transaction.receiptId}` : (transaction.note || "achitare furnizor");
   return `
     <div style="font-size:12px;"><b>${escapeComboHtml(co.shortName || co.name || "")}</b></div>
