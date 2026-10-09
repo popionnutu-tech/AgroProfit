@@ -2393,7 +2393,11 @@ function alocaPlatiPeReceptii(state) {
         (new Date(a.createdAt || a.receivedAt) - new Date(b.createdAt || b.receivedAt)) ||
         (Number(a.id) - Number(b.id))
       );
-    let disponibil = plata.suma;
+    // Plafonat la cit mai e in potul partenerului. Potul poate fi mai mic decat plata
+    // (o ajustare NEGATIVA de reclamatie pe acelasi furnizor scade din el), iar fara
+    // plafon alocam mai multi bani decat s-au primit net — receptia aparea „Achitat"
+    // pe un sold zero.
+    let disponibil = Math.min(plata.suma, Math.max(0, Number(ramasPartener.get(plata.partnerId) || 0)));
     for (const r of tinte) {
       if (disponibil <= 0) break;
       const target = receiptPayableValue(r);
@@ -2402,7 +2406,10 @@ function alocaPlatiPeReceptii(state) {
       if (aplicat <= 0) continue;
       paidByReceipt.set(Number(r.id), dejaPus + aplicat);
       disponibil -= aplicat;
-      ramasPartener.set(plata.partnerId, Number(ramasPartener.get(plata.partnerId) || 0) - aplicat);
+      ramasPartener.set(
+        plata.partnerId,
+        Math.max(0, Number(ramasPartener.get(plata.partnerId) || 0) - aplicat)
+      );
     }
   }
 
@@ -3159,6 +3166,39 @@ async function createProcessing(payload) {
   return processing;
 }
 
+// Cit mai datoreaza partenerul, ACUM, inainte de plata curenta.
+//
+// Se calculeaza din aceeasi alocare pe care o folosesc ecranele (`alocaPlatiPeReceptii`),
+// excluzand tranzactia in curs — altfel si-ar plafona propriul avans cu ea insasi.
+// Fara acoperire aleasa se iau toate receptiile in stoc ale partenerului; cu acoperire, doar
+// cele bifate, fiindca doar ele vor primi banii in alocarea tintita.
+function datorieRamasaPartener(state, transaction, receipt) {
+  const fara = {
+    ...state,
+    transactions: (state.transactions || []).filter((t) => Number(t.id) !== Number(transaction.id))
+  };
+  const { paidByReceipt } = alocaPlatiPeReceptii(fara);
+
+  const acoperire = acoperire1Plata(transaction);
+  const partenerId = transaction.partnerId != null
+    ? Number(transaction.partnerId)
+    : Number(receipt.supplierId);
+
+  const candidate = acoperire.length
+    ? acoperire.map((id) => (state.receipts || []).find((r) => Number(r.id) === id)).filter(Boolean)
+    : (state.receipts || []).filter((r) => Number(r.supplierId) === partenerId);
+
+  let datorie = 0;
+  for (const r of candidate) {
+    if (!isReceiptInStock(r)) continue;
+    if (Number(r.supplierId) !== partenerId) continue;
+    const tinta = receiptPayableValue(r);
+    const platit = Number(paidByReceipt.get(Number(r.id)) || 0);
+    datorie += Math.max(tinta - platit, 0);
+  }
+  return datorie;
+}
+
 async function createTransaction(payload) {
   const state = readReceiptsState();
   const transaction = {
@@ -3228,8 +3268,21 @@ async function createTransaction(payload) {
         0
       );
       const targetAmount = Number(receipt.preliminaryPayableAmount || 0);
-      const outstanding = Math.max(targetAmount - previouslyPaid, 0);
       const rawAmount = Number(transaction.amount || 0);
+
+      // AVANSUL se masoara fata de CIT DATOREAZA PARTENERUL, nu fata de o singura receptie.
+      //
+      // Inainte, `outstanding` se calcula doar pe `receiptId` singular, iar tot restul
+      // devenea avans — in timp ce alocarea de la citire imprastia suma INTREAGA pe
+      // receptiile partenerului. Aceiasi bani apareau de doua ori: o data ca datorii stinse,
+      // o data ca avans disponibil de reaplicat. Masurat: 16.920 lei platiti produceau
+      // 16.920 alocati PLUS 11.280 lei de avans.
+      //
+      // Defectul era vechi (aparea la fel si fara bife), dar plata pe mai multe receptii il
+      // muta din caz rar in flux normal. Avans inseamna „bani peste cit se datoreaza", si
+      // atit.
+      const datoriiPartener = datorieRamasaPartener(state, transaction, receipt);
+      const outstanding = Math.max(datoriiPartener, 0);
 
       if (rawAmount >= 0 && targetAmount > 0 && rawAmount > outstanding) {
         transaction.appliedAmount = outstanding;
