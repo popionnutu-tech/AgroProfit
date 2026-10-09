@@ -1179,6 +1179,27 @@
               <select name="referenceId" id="transaction-reference-select" required></select>
             </label>
 
+            <div id="transaction-coverage" hidden>
+              <span class="field-hint" style="display:block;margin-bottom:4px">
+                <b>Ce acoperă plata.</b> Bifează recepțiile pe care le stinge. Dacă nu bifezi
+                nimic, banii se duc automat pe cele mai vechi neachitate ale furnizorului.
+              </span>
+              <div class="table-wrap" style="max-height:200px;overflow:auto">
+                <table id="transaction-coverage-table">
+                  <thead>
+                    <tr>
+                      <th style="width:28px"><input type="checkbox" id="transaction-coverage-all" title="Bifează tot" /></th>
+                      <th>Recepție</th>
+                      <th>Data</th>
+                      <th style="text-align:right">Rest de plată</th>
+                    </tr>
+                  </thead>
+                  <tbody id="transaction-coverage-body"></tbody>
+                </table>
+              </div>
+              <span class="field-hint" id="transaction-coverage-hint"></span>
+            </div>
+
             <div class="split">
               <label>
                 Tip operatie

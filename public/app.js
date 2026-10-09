@@ -6320,6 +6320,122 @@ function renderTransactionReferenceOptions() {
   );
 
   setSelectValue(transactionReferenceSelect, [currentReferenceValue, receiptsCache[0]?.id]);
+  randeazaAcoperirePlata();
+}
+
+// ============================================================================
+// CE ACOPERA O PLATA
+//
+// Un furnizor aduce marfa de mai multe ori, iar plata se face odata, pe mai multe receptii.
+// Pina acum banii se imprastiau singuri, de la cea mai veche spre cea mai noua, si nu se
+// putea spune „plata asta acopera receptiile 12, 14 si 15, nu si 13" — exact ce scrie pe
+// ordinul de plata si ce se discuta cu furnizorul.
+//
+// Fara nicio bifa, comportamentul ramine cel vechi: FIFO pe tot furnizorul. Bifa nu e
+// obligatorie, e o precizare.
+// ============================================================================
+
+// Receptiile NEACHITATE ale furnizorului de pe receptia aleasa, cea aleasa inclusa.
+function receptiiAcoperibile() {
+  const idAles = Number(transactionReferenceSelect && transactionReferenceSelect.value);
+  if (!Number.isFinite(idAles) || idAles <= 0) return [];
+  const aleasa = (receiptsCache || []).find((r) => Number(r.id) === idAles);
+  if (!aleasa) return [];
+  return (receiptsCache || [])
+    .filter((r) => Number(r.supplierId) === Number(aleasa.supplierId))
+    // Doar ce mai are rest: o receptie deja achitata n-are ce primi.
+    .filter((r) => Number(r.id) === idAles || Number(r.soldRestant || 0) > 0.005)
+    .sort((a, b) =>
+      String(a.createdAt || a.receivedAt).localeCompare(String(b.createdAt || b.receivedAt)) ||
+      Number(a.id) - Number(b.id)
+    );
+}
+
+function randeazaAcoperirePlata() {
+  const wrap = document.getElementById("transaction-coverage");
+  const body = document.getElementById("transaction-coverage-body");
+  if (!wrap || !body) return;
+
+  // Doar la plata catre furnizor pe receptie. La livrari si solduri initiale nu are sens.
+  if (getTransactionReferenceType() !== "receipt") {
+    wrap.hidden = true;
+    body.innerHTML = "";
+    return;
+  }
+
+  const lista = receptiiAcoperibile();
+  // Cu o singura receptie nu e nimic de ales — panoul ar fi doar zgomot pe ecran.
+  if (lista.length < 2) {
+    wrap.hidden = true;
+    body.innerHTML = "";
+    return;
+  }
+
+  const idAles = Number(transactionReferenceSelect.value);
+  wrap.hidden = false;
+  body.innerHTML = lista
+    .map((r) => {
+      const rest = Number(r.soldRestant || 0);
+      // Receptia pe care se inregistreaza plata e bifata si BLOCATA: serverul cere ca ea sa
+      // fie in lista, altfel ordinul de plata tiparit ar numi o receptie pe care banii n-o
+      // ating.
+      const esteAleasa = Number(r.id) === idAles;
+      return `
+        <tr>
+          <td><input type="checkbox" data-acoperire="${r.id}" ${esteAleasa ? "checked disabled" : ""} /></td>
+          <td>#${r.id} · ${escapeComboHtml(r.product || "")}${esteAleasa ? " <b>(referința)</b>" : ""}</td>
+          <td>${escapeComboHtml(formatDateShort(r.receivedAt || r.createdAt))}</td>
+          <td style="text-align:right">${moneyRo(rest)} lei</td>
+        </tr>`;
+    })
+    .join("");
+  actualizeazaHintAcoperire();
+}
+
+function acoperireaBifata() {
+  const idAles = Number(transactionReferenceSelect && transactionReferenceSelect.value);
+  const bifate = [...document.querySelectorAll("#transaction-coverage-body input[data-acoperire]")]
+    .filter((el) => el.checked)
+    .map((el) => Number(el.dataset.acoperire));
+  // O singura bifa, cea blocata pe referinta, inseamna „n-am ales nimic": se trimite lista
+  // goala, iar banii se distribuie ca inainte.
+  if (bifate.length <= 1 && bifate.every((id) => id === idAles)) return [];
+  return bifate;
+}
+
+function actualizeazaHintAcoperire() {
+  const hint = document.getElementById("transaction-coverage-hint");
+  if (!hint) return;
+  const ids = acoperireaBifata();
+  if (!ids.length) {
+    hint.textContent = "Nimic bifat — banii sting cele mai vechi recepții neachitate.";
+    return;
+  }
+  const total = (receiptsCache || [])
+    .filter((r) => ids.includes(Number(r.id)))
+    .reduce((s, r) => s + Number(r.soldRestant || 0), 0);
+  hint.textContent =
+    `${ids.length} recepții bifate · rest total ${moneyRo(total)} lei. ` +
+    "Dacă plătești mai puțin, se sting în ordine de la cea mai veche.";
+}
+
+if (document.getElementById("transaction-coverage-body")) {
+  document.getElementById("transaction-coverage-body").addEventListener("change", (e) => {
+    if (e.target && e.target.dataset && e.target.dataset.acoperire) actualizeazaHintAcoperire();
+  });
+  const toate = document.getElementById("transaction-coverage-all");
+  if (toate) {
+    toate.addEventListener("change", () => {
+      document
+        .querySelectorAll("#transaction-coverage-body input[data-acoperire]:not([disabled])")
+        .forEach((el) => { el.checked = toate.checked; });
+      actualizeazaHintAcoperire();
+    });
+  }
+}
+
+if (transactionReferenceSelect) {
+  transactionReferenceSelect.addEventListener("change", randeazaAcoperirePlata);
 }
 
 function getTransactionDirectionLabel(direction) {
@@ -6500,6 +6616,8 @@ async function createTransaction(formData) {
         ? "opening-debt"
         : "receipt";
   const referenceId = formData.get("referenceId");
+  // O singura data: functia citeste din DOM.
+  const acoperire = referenceType === "receipt" ? acoperireaBifata() : [];
   const payload = {
     referenceType,
     receiptId: referenceType === "receipt" ? referenceId : "",
@@ -6508,7 +6626,9 @@ async function createTransaction(formData) {
     direction: formData.get("direction"),
     paymentType: formData.get("paymentType"),
     amount: formData.get("amount"),
-    note: formData.get("note")
+    note: formData.get("note"),
+    // Lista goala = fara alegere; serverul distribuie atunci FIFO pe tot furnizorul.
+    ...(acoperire.length ? { receiptIds: acoperire } : {})
   };
 
   const response = await fetch("/api/transactions", {
