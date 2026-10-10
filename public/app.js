@@ -2848,6 +2848,9 @@ function prefillReceiptPayment(receiptId) {
   }
   renderTransactionReferenceOptions();
   setSelectValue(transactionReferenceSelect, [String(receiptId)]);
+  // `setSelectValue` nu declanseaza `change`: panoul trebuie refacut explicit, altfel
+  // ramine pe referinta veche si plata e refuzata de server.
+  randeazaAcoperirePlata();
   if (typeof syncTransactionDirection === "function") syncTransactionDirection();
   // Pre-fill amount = sold restant
   const rest = Number(receipt.soldRestant ?? Math.max(Number(receipt.amountToPay || receipt.preliminaryPayableAmount || 0) - Number(receipt.paidAmount || 0), 0));
@@ -6013,6 +6016,9 @@ function resetReceiptForm(mode = "save") {
 }
 
 function resetTransactionForm(mode = "save") {
+  // Bifele NU se mostenesc de la plata precedenta: urmatoarea plata e alta decizie, iar o
+  // selectie ramasa pe ecran ar trimite bani pe receptii la care omul nu s-a mai uitat.
+  acoperireAleasa = null;
   const preserveContext = mode !== "save-new";
   const preservedValues = {
     referenceType: preserveContext ? transactionReferenceTypeSelect.value : "",
@@ -6030,6 +6036,8 @@ function resetTransactionForm(mode = "save") {
 
   if (preserveContext) {
     setSelectValue(transactionReferenceSelect, [preservedValues.referenceId]);
+    // Acelasi motiv ca mai sus: dupa resetarea formularului panoul trebuie refacut.
+    randeazaAcoperirePlata();
     setSelectValue(transactionPaymentTypeSelect, [preservedValues.paymentType]);
   }
 
@@ -6278,6 +6286,15 @@ function renderTransactionReferenceOptions() {
   const referenceType = getTransactionReferenceType();
   const currentReferenceValue = transactionReferenceSelect.value;
 
+  // Panoul de acoperire e doar pentru plata catre furnizor pe receptie. Ramurile de mai jos
+  // ies devreme, deci se ascunde AICI — altfel ramanea pe ecran, cu receptii, pe un formular
+  // de incasare.
+  if (referenceType !== "receipt") {
+    const wrap = document.getElementById("transaction-coverage");
+    if (wrap) wrap.hidden = true;
+    acoperireAleasa = null;
+  }
+
   if (referenceType === "delivery") {
     // Livrarea anulată/returnată nu mai are ce încasa (ținta e 0).
     const collectableDeliveries = (deliveriesCache || []).filter((item) => !isVoidedDelivery(item));
@@ -6335,6 +6352,15 @@ function renderTransactionReferenceOptions() {
 // obligatorie, e o precizare.
 // ============================================================================
 
+// Bifele traiesc AICI, nu in DOM.
+//
+// Erau citite din pagina la trimitere. Orice re-randare a formularului (reincarcare de date,
+// schimbare de referinta) le stergea tacit, iar plata cadea pe FIFO — omul credea ca a
+// desemnat altceva si nu primea niciun mesaj. E chiar principiul pe care serverul il aplica
+// („o intrare inghitita in tacere e mai rea decat un refuz"), incalcat in interfata.
+// `null` = „n-a atins nimeni bifele"; un `Set` = alegere explicita, chiar si goala.
+let acoperireAleasa = null;
+
 // Receptiile NEACHITATE ale furnizorului de pe receptia aleasa, cea aleasa inclusa.
 function receptiiAcoperibile() {
   const idAles = Number(transactionReferenceSelect && transactionReferenceSelect.value);
@@ -6343,6 +6369,10 @@ function receptiiAcoperibile() {
   if (!aleasa) return [];
   return (receiptsCache || [])
     .filter((r) => Number(r.supplierId) === Number(aleasa.supplierId))
+    // ACELASI predicat ca pe server: o receptie in „Proiect" sau „In descarcare" nu are inca
+    // datorie, deci serverul refuza bifa pe ea. Oferita in lista, „Bifeaza tot" facea cererea
+    // sa cada integral cu 400.
+    .filter((r) => isReceiptInStock(r))
     // Doar ce mai are rest: o receptie deja achitata n-are ce primi.
     .filter((r) => Number(r.id) === idAles || Number(r.soldRestant || 0) > 0.005)
     .sort((a, b) =>
@@ -6372,6 +6402,12 @@ function randeazaAcoperirePlata() {
   }
 
   const idAles = Number(transactionReferenceSelect.value);
+  // Bifele dispărute la re-randare se RESTAUREAZA din starea pastrata; cele care nu mai sint
+  // in lista (alt furnizor, receptie achitata intre timp) se uita.
+  if (acoperireAleasa) {
+    const valabile = new Set(lista.map((r) => Number(r.id)));
+    acoperireAleasa = new Set([...acoperireAleasa].filter((id) => valabile.has(id)));
+  }
   wrap.hidden = false;
   body.innerHTML = lista
     .map((r) => {
@@ -6380,27 +6416,42 @@ function randeazaAcoperirePlata() {
       // fie in lista, altfel ordinul de plata tiparit ar numi o receptie pe care banii n-o
       // ating.
       const esteAleasa = Number(r.id) === idAles;
+      const bifata = esteAleasa || Boolean(acoperireAleasa && acoperireAleasa.has(Number(r.id)));
       return `
         <tr>
-          <td><input type="checkbox" data-acoperire="${r.id}" ${esteAleasa ? "checked disabled" : ""} /></td>
+          <td><input type="checkbox" data-acoperire="${r.id}" ${bifata ? "checked" : ""} ${esteAleasa ? "disabled" : ""} /></td>
           <td>#${r.id} · ${escapeComboHtml(r.product || "")}${esteAleasa ? " <b>(referința)</b>" : ""}</td>
           <td>${escapeComboHtml(formatDateShort(r.receivedAt || r.createdAt))}</td>
           <td style="text-align:right">${moneyRo(rest)} lei</td>
         </tr>`;
     })
     .join("");
+  const toate = document.getElementById("transaction-coverage-all");
+  if (toate) toate.checked = false;
   actualizeazaHintAcoperire();
+}
+
+// Citeste bifele din pagina IN stare. Apelat la fiecare schimbare, ca starea sa fie mereu
+// adevarul, iar DOM-ul doar reflexia ei.
+function memoreazaAcoperirea() {
+  const idAles = Number(transactionReferenceSelect && transactionReferenceSelect.value);
+  acoperireAleasa = new Set(
+    [...document.querySelectorAll("#transaction-coverage-body input[data-acoperire]")]
+      .filter((el) => el.checked && Number(el.dataset.acoperire) !== idAles)
+      .map((el) => Number(el.dataset.acoperire))
+  );
 }
 
 function acoperireaBifata() {
   const idAles = Number(transactionReferenceSelect && transactionReferenceSelect.value);
-  const bifate = [...document.querySelectorAll("#transaction-coverage-body input[data-acoperire]")]
-    .filter((el) => el.checked)
-    .map((el) => Number(el.dataset.acoperire));
-  // O singura bifa, cea blocata pe referinta, inseamna „n-am ales nimic": se trimite lista
-  // goala, iar banii se distribuie ca inainte.
-  if (bifate.length <= 1 && bifate.every((id) => id === idAles)) return [];
-  return bifate;
+  // `null` = nimeni n-a atins bifele -> fara acoperire, banii se distribuie FIFO ca inainte.
+  if (!acoperireAleasa) return [];
+  // Altfel e o alegere EXPLICITA, chiar si cand ramine doar referinta: „plata asta acopera
+  // DOAR receptia 13" e o intentie reala, pe care varianta veche o confunda cu „n-am ales
+  // nimic" si o trimitea pe FIFO.
+  const ids = [...acoperireAleasa];
+  if (Number.isFinite(idAles) && idAles > 0 && !ids.includes(idAles)) ids.unshift(idAles);
+  return ids;
 }
 
 function actualizeazaHintAcoperire() {
@@ -6409,6 +6460,11 @@ function actualizeazaHintAcoperire() {
   const ids = acoperireaBifata();
   if (!ids.length) {
     hint.textContent = "Nimic bifat — banii sting cele mai vechi recepții neachitate.";
+    return;
+  }
+  if (ids.length === 1) {
+    hint.textContent =
+      "Doar recepția de referință — banii se duc pe ea întâi, iar ce rămâne pe celelalte.";
     return;
   }
   const total = (receiptsCache || [])
@@ -6421,7 +6477,10 @@ function actualizeazaHintAcoperire() {
 
 if (document.getElementById("transaction-coverage-body")) {
   document.getElementById("transaction-coverage-body").addEventListener("change", (e) => {
-    if (e.target && e.target.dataset && e.target.dataset.acoperire) actualizeazaHintAcoperire();
+    if (e.target && e.target.dataset && e.target.dataset.acoperire) {
+      memoreazaAcoperirea();
+      actualizeazaHintAcoperire();
+    }
   });
   const toate = document.getElementById("transaction-coverage-all");
   if (toate) {
@@ -6429,6 +6488,7 @@ if (document.getElementById("transaction-coverage-body")) {
       document
         .querySelectorAll("#transaction-coverage-body input[data-acoperire]:not([disabled])")
         .forEach((el) => { el.checked = toate.checked; });
+      memoreazaAcoperirea();
       actualizeazaHintAcoperire();
     });
   }
@@ -7964,8 +8024,10 @@ function buildCashPaymentOrderHtml(transaction, partner, company) {
   const nr = "____"; // numarul de ordine il completeaza contabilul manual
   // Ziua lucratoare: o plata inregistrata simbata se perfecteaza luni, cind furnizorul
   // ajunge la casierie. Tranzactia ramine inregistrata la data ei reala.
+  // Data INGHETATA pe document la creare. Se deriva doar pentru platile dinaintea regulii,
+  // care n-au campul — altfel o schimbare viitoare a regulii ar rescrie hirtii din dosar.
   const dateStr = formatDateShort(
-    ziLucratoare(transaction.createdAt || transaction.transactedAt)
+    transaction.documentDate || ziLucratoare(transaction.createdAt || transaction.transactedAt)
   );
   const refText = transaction.receiptId ? `Act de achiziție / recepția #${transaction.receiptId}` : (transaction.note || "achitare furnizor");
   return `

@@ -3291,6 +3291,10 @@ async function createTransaction(payload) {
     amount: sanitizeNumber(payload.amount),
     appliedAmount: 0,
     advanceAmount: 0,
+    // Data de pe DOCUMENTUL tiparit, inghetata la creare — ca la actul de achizitie
+    // (regula 10). Derivata la fiecare tipărire, s-ar rescrie retroactiv la orice schimbare
+    // viitoare a regulii, iar hirtia din dosar n-ar mai corespunde cu ce scoate aplicatia.
+    documentDate: ziLucratoare(new Date().toISOString()),
     source: payload.source || "direct",
     complaintId: payload.complaintId ? Number(payload.complaintId) : null,
     paymentType: payload.paymentType || "",
@@ -7388,7 +7392,9 @@ async function exportPaymentsFor1c(options = {}) {
       // lucratoare, iar exportul nu are voie sa contrazica hirtia semnata (regula 13):
       // acelasi РКО iesea pe hirtie cu luni si in 1C cu simbata, pe contul 241.1.
       // `zi` ramine criteriul de FILTRARE pe perioada, ca selectia sa nu se mute.
-      Data: ziLucratoare(zi),
+      // Data INGHETATA pe document. Pentru platile dinaintea regulii campul lipseste, deci
+      // se deriva — asa istoricul nu se rescrie si nici nu ramine gol.
+      Data: String(t.documentDate || "").slice(0, 10) || ziLucratoare(zi),
       "Tip plata": tipPlata,
       Furnizor: String(t.partner || (partener || {}).name || "").trim(),
       "Cod fiscal / IDNP": cod,
