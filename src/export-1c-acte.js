@@ -189,11 +189,27 @@ function obiectAct(act, nppBaza) {
   const zi = txt(String(act.data || "").slice(0, 10));
   return completeaza(doc, {
     NPP: nppBaza,
-    GUID_DOC: guidDocument("act", act.companyId, act.serie, act.numar),
+    // Fara numar de act, identificatorul se deriva din RECEPTIA purtatoare: tot stabil
+    // pentru acelasi document, deci un reimport il recunoaste in loc sa-l dubleze.
+    GUID_DOC: Number(act.numar) > 0
+      ? guidDocument("act", act.companyId, act.serie, act.numar)
+      : guidDocument("act-receptie", act.companyId, "", act.receiptId),
     DATA_ORA: `${zi}T12:00:00`,
     DATA: zi,
-    NUMAR: txt(act.numar),
-    SERIE: txt(act.serie),
+    // Numarul si seria LIPSESC pentru perioada veche: actele de atunci au numere scrise de
+    // mina pe hirtie, iar utilizatorul a ales ca 1C sa numeroteze singur
+    // (`ГенерироватьНовыйНомерИлиКодЕслиНеУказан`). Un cimp gol se scrie `<Пусто/>`, nu
+    // `<Значение></Значение>` — altfel 1C primeste un numar vid in loc de „fara numar".
+    NUMAR_BLOC: Number(act.numar) > 0
+      ? `<Значение>${txt(act.numar)}</Значение>`
+      : "<Пусто/>",
+    SERIE_BLOC: Number(act.numar) > 0 && String(act.serie || "").trim()
+      ? `<Значение>${txt(act.serie)}</Значение>`
+      : "<Пусто/>",
+    // Numarul recepției intra in „Temei", rubrica pe care 1C o arata in lista de documente.
+    // Asa se poate confrunta actul din 1C cu recepția din aplicatie dintr-o privire, fara sa
+    // stricam sirul fiscal legind numarul actului de id-ul recepției (acela are goluri: o
+    // receptie anulata consuma un numar care nu mai apare nicaieri).
     TEMEI: txt(act.temei),
     FURNIZOR: txt(act.furnizor),
     COD_FISCAL: txt(act.codFiscal),
@@ -248,10 +264,13 @@ function construiesteXmlActe(acte, optiuni = {}) {
   const obiecte = [];
   const motive = [];
   for (const act of lista) {
-    if (!act || !(Number(act.numar) > 0)) {
-      motive.push("act fara numar emis");
+    if (!act) {
+      motive.push("act gol");
       continue;
     }
+    // Un act FARA numar e permis deliberat: perioada veche se incarca lasind 1C sa
+    // numeroteze. Pentru actele emise din aplicatie, numarul ajunge pe hirtia semnata si
+    // pleaca aici asa cum e.
     const randuri = Array.isArray(act.randuri) ? act.randuri.filter((r) => r && r.guidProdus) : [];
     if (!randuri.length) {
       // Fara GUID de produs n-avem ce exporta: 1C ar crea un produs nou la fiecare import.
