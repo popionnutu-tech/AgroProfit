@@ -3817,6 +3817,143 @@ if (document.getElementById("audit-search-btn")) {
   if (q) q.addEventListener("keydown", (e) => { if (e.key === "Enter") cautaInAudit(); });
 }
 
+// ============================================================================
+// TOTALURI AUTOMATE PE TABELE
+//
+// Sint 33 de tabele in aplicatie, randate fiecare de alta functie. Scrise de mina, ar fi 33
+// de locuri in care totalul se poate desincroniza de randuri — iar patru dintre ele au deja
+// totaluri proprii, scrise cind a fost nevoie.
+//
+// Aici se calculeaza din RANDURILE DEJA AFISATE: ce vezi pe ecran se aduna. Asa totalul nu
+// poate contrazice tabelul, oricat de complicat ar fi filtrul care l-a produs.
+//
+// ⚠️ NU se aduna orice coloana cu cifre. Totalul coloanei „Pret lei/kg" sau „Umiditate %" e
+// un numar fara inteles, iar pe un ecran financiar induce in eroare mai rau decat lipsa lui.
+// Se aduna cantitatile si sumele; se sar preturile unitare, procentele, cotele, normele,
+// numerele de document si datele.
+// ============================================================================
+
+// Antete care NU se aduna. Se compara pe inceput de cuvant, fara diacritice.
+const COLOANE_FARA_TOTAL = [
+  "nr", "id", "numar", "număr", "data", "dată", "ziua", "an",
+  "pret", "preț", "cota", "cotă", "procent", "%", "tarif", "curs",
+  "umiditate", "impuritat", "norma", "normă", "densitate",
+  "status", "stare", "utilizator", "actiune", "acțiune", "entitate", "mentiune", "mențiune",
+  "cod", "idno", "iban", "telefon", "serie", "seria"
+];
+
+function faraDiacritice(text) {
+  return String(text || "")
+    .toLowerCase()
+    .replace(/[ăâ]/g, "a").replace(/[îí]/g, "i")
+    .replace(/[șş]/g, "s").replace(/[țţ]/g, "t");
+}
+
+function coloanaSeAduna(antet) {
+  const t = faraDiacritice(antet).trim();
+  if (!t) return false;
+  return !COLOANE_FARA_TOTAL.some((cuvant) => {
+    const c = faraDiacritice(cuvant);
+    return t === c || t.startsWith(`${c} `) || t.startsWith(`${c}.`) || t.includes(` ${c} `) || t.includes(c === "%" ? "%" : `(${c}`);
+  });
+}
+
+// Numerele se afiseaza romaneste: `1.234,56`. Punctul e separator de mii, virgula zecimala.
+function numarDinCelula(text) {
+  const t = String(text || "").replace(/\s/g, "").replace(/lei|kg|tone|t\b/gi, "").trim();
+  if (!t || !/\d/.test(t)) return null;
+  // Orice altceva decat cifre, punct, virgula si minus inseamna ca nu e un numar curat.
+  if (!/^-?[\d.,]+$/.test(t)) return null;
+  const normalizat = t.replace(/\./g, "").replace(",", ".");
+  const n = Number(normalizat);
+  return Number.isFinite(n) ? n : null;
+}
+
+function adaugaTotaluri(tbody) {
+  const tabel = tbody && tbody.closest("table");
+  if (!tabel) return;
+  // Tabelele care si-au scris singure totalul (patru la numar) nu se ating: ele stiu mai
+  // bine ce inseamna totalul pe datele lor.
+  if (tabel.dataset.totalPropriu === "1") return;
+  const vechi = tabel.querySelector("tfoot[data-auto-total]");
+  if (vechi) vechi.remove();
+  if (tabel.querySelector("tfoot")) {
+    tabel.dataset.totalPropriu = "1";
+    return;
+  }
+
+  const antete = [...tabel.querySelectorAll("thead th")].map((th) => th.textContent || "");
+  const randuri = [...tbody.querySelectorAll("tr")].filter(
+    // Randurile de tip „nu exista date" au o singura celula intinsa pe tot tabelul.
+    (tr) => tr.children.length === antete.length
+  );
+  if (!randuri.length || antete.length < 2) return;
+
+  const sume = antete.map(() => null);
+  for (let c = 0; c < antete.length; c += 1) {
+    if (!coloanaSeAduna(antete[c])) continue;
+    let suma = 0;
+    let gasite = 0;
+    for (const tr of randuri) {
+      const n = numarDinCelula(tr.children[c] ? tr.children[c].textContent : "");
+      if (n === null) continue;
+      suma += n;
+      gasite += 1;
+    }
+    // Cel putin jumatate din randuri trebuie sa aiba numere: altfel coloana e text cu cifre
+    // pe ici pe colo (un nume cu an, un comentariu), nu o coloana de cifre.
+    if (gasite >= Math.max(1, Math.ceil(randuri.length / 2))) sume[c] = suma;
+  }
+
+  if (!sume.some((v) => v !== null)) return;
+
+  const primaCuTotal = sume.findIndex((v) => v !== null);
+  const celule = antete.map((_, c) => {
+    if (c === 0 && sume[0] === null) {
+      return `<td><b>TOTAL</b> <span class="muted-count">(${randuri.length})</span></td>`;
+    }
+    if (sume[c] === null) return "<td></td>";
+    const eticheta = c === primaCuTotal && sume[0] !== null ? "<b>TOTAL</b> " : "";
+    return `<td style="text-align:right"><b>${eticheta}${numberFormatter.format(sume[c])}</b></td>`;
+  });
+
+  const tfoot = document.createElement("tfoot");
+  tfoot.setAttribute("data-auto-total", "1");
+  tfoot.innerHTML = `<tr>${celule.join("")}</tr>`;
+  tabel.appendChild(tfoot);
+}
+
+// Se aplica singur, dupa fiecare randare.
+//
+// Alternativa — un apel in fiecare din cele 33 de functii de randare — s-ar fi dezlipit la
+// prima functie noua. Observatorul prinde orice tabel, inclusiv pe cele adaugate mai tirziu.
+// Se urmareste doar `tbody`, iar totalul se scrie in `tfoot`, deci nu se declanseaza singur.
+if (typeof MutationObserver === "function") {
+  let programat = null;
+  const deFacut = new Set();
+  const observator = new MutationObserver((schimbari) => {
+    for (const s of schimbari) {
+      if (s.target && s.target.tagName === "TBODY") deFacut.add(s.target);
+    }
+    if (programat) return;
+    // Amanat pina se linisteste randarea: o functie care scrie `innerHTML` de mai multe ori
+    // ar recalcula totalul la fiecare scriere.
+    programat = setTimeout(() => {
+      programat = null;
+      const lista = [...deFacut];
+      deFacut.clear();
+      for (const tbody of lista) {
+        try { adaugaTotaluri(tbody); } catch (e) { /* un tabel ciudat nu opreste restul */ }
+      }
+    }, 40);
+  });
+  document.addEventListener("DOMContentLoaded", () => {
+    for (const tbody of document.querySelectorAll("tbody")) {
+      observator.observe(tbody, { childList: true });
+    }
+  });
+}
+
 function renderLockouts(lockouts) {
   if (!lockoutsBodyEl) {
     return;
