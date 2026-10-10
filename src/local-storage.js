@@ -7210,6 +7210,30 @@ function brutDinNet1c(net, cota) {
   return Number(net) / (1 - c / 100);
 }
 
+// Receptiile pe care o plata le stinge IN REALITATE.
+//
+// Nu `receiptId` (acolo e doar inregistrata) si nu `receiptIds` (acolo e doar preferinta
+// omului): se citeste din aceeasi alocare pe care o folosesc ecranele, cu si fara aceasta
+// plata. Diferenta dintre cele doua e exact ce a stins ea.
+//
+// E singura sursa pe care se poate sprijini exportul fiscal: impozitul retinut depinde de
+// COTA receptiilor atinse, iar ele pot fi altele decat cea de pe document.
+function receptiiAtinseDePlata(state, tranzactie) {
+  const fara = {
+    ...state,
+    transactions: (state.transactions || []).filter(
+      (t) => Number(t.id) !== Number(tranzactie.id)
+    )
+  };
+  const inainte = alocaPlatiPeReceptii(fara).paidByReceipt;
+  const dupa = alocaPlatiPeReceptii(state).paidByReceipt;
+  const atinse = [];
+  for (const [id, suma] of dupa) {
+    if (Number(suma || 0) - Number(inainte.get(id) || 0) > 0.005) atinse.push(Number(id));
+  }
+  return atinse;
+}
+
 async function exportPaymentsFor1c(options = {}) {
   const state = readReceiptsState();
   const config = readConfigState();
@@ -7266,12 +7290,26 @@ async function exportPaymentsFor1c(options = {}) {
     const avertismente = [];
     const esteNumerar = /numerar/i.test(tipPlata);
     const cotaReceptie = Number((receptie || {}).withholdingPercent);
+    // Receptiile pe care plata le atinge EFECTIV, nu cea pe care a fost inregistrata.
+    // `appliedAmount` nu mai e un indiciu: de cand avansul se masoara pe tot partenerul,
+    // el e suma intreaga si pe o plata care stinge cinci receptii.
+    const atinse = receptiiAtinseDePlata(state, t);
+    const coteAtinse = new Set(
+      atinse.map((r) => Number(receptiiPeId.get(Number(r)) ? receptiiPeId.get(Number(r)).withholdingPercent : NaN))
+    );
+    const oSinguraCota = coteAtinse.size === 1 && Number.isFinite([...coteAtinse][0]);
+    const cotaFolosita = oSinguraCota ? [...coteAtinse][0] : cotaReceptie;
+
     const integralPeReceptie =
       Boolean(receptie) &&
       String(t.referenceType || "") === "receipt" &&
       avans <= 0 &&
-      Math.abs(atribuit - platit) < 0.005;
-    const brutPosibil = brutDinNet1c(platit, cotaReceptie);
+      atinse.length > 0 &&
+      // Toate receptiile atinse trebuie sa aiba ACEEASI cota inghetata. Cu cote diferite nu
+      // exista un singur brut din care sa iasa suma platita — orice cifra am scrie ar fi
+      // inventata. Regula 13: mai bine o celula goala decat un impozit care nu s-a retinut.
+      oSinguraCota;
+    const brutPosibil = brutDinNet1c(platit, cotaFolosita);
     const sigur = esteNumerar && integralPeReceptie && brutPosibil !== null;
 
     let brut = "";
@@ -7283,15 +7321,27 @@ async function exportPaymentsFor1c(options = {}) {
       impozit = (b - platit).toFixed(2);
       // Cota se afiseaza intreaga doar daca E intreaga: 6,5% rotunjit la „7" ar face ca 1C
       // sa recalculeze altceva decat brutul exportat.
-      cotaAfisata = Number.isInteger(cotaReceptie)
-        ? cotaReceptie.toFixed(0)
-        : String(cotaReceptie);
+      cotaAfisata = Number.isInteger(cotaFolosita)
+        ? cotaFolosita.toFixed(0)
+        : String(cotaFolosita);
     } else {
       if (!esteNumerar) {
         avertismente.push(
           tipPlata
             ? `plata e „${tipPlata}", nu numerar — nu intra pe contul de casa; verifica documentul si contul`
             : "plata nu are tip inregistrat — nu se poate sti daca a iesit din casa; verifica documentul si contul"
+        );
+      }
+      if (atinse.length > 1 && !oSinguraCota) {
+        avertismente.push(
+          `plata stinge ${atinse.length} receptii cu cote de retinere DIFERITE ` +
+          `(${[...coteAtinse].filter(Number.isFinite).map((c) => `${c}%`).join(", ")}) — ` +
+          "nu exista un singur brut din care sa iasa suma; completeaza manual"
+        );
+      } else if (atinse.length > 1) {
+        avertismente.push(
+          `plata stinge ${atinse.length} receptii — brutul e reconstituit pe cota comuna, ` +
+          "verifica pe actele acoperite"
         );
       }
       if (String(t.referenceType || "") !== "receipt") {
