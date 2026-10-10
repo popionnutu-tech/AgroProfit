@@ -197,3 +197,27 @@ test("sablonul e urmarit de git si nu contine date personale", () => {
     assert.equal(cifre, null, `${f} contine ce pare un cod fiscal: ${cifre}`);
   }
 });
+
+test("identificatorul actului NU se schimba cand se emite actul", () => {
+  // Doua incercari gresite inainte: o data derivat din NUMAR (deci alt identificator dupa
+  // emitere), a doua oara derivat si din FIRMA (iar o receptie fara act emis are firma 0).
+  // Ambele puneau in 1C DOUA documente pentru aceeasi marfa, cu achizitia si impozitul
+  // numarate de doua ori — pe exact fluxul proiectat: incarci perioada veche, apoi emiti
+  // actul.
+  const idDin = (xml) => xml.match(/<Ссылка[^>]*>\s*<Свойство Имя="\{УникальныйИдентификатор\}"[^>]*>\s*<Значение>([0-9a-f-]{36})</)[1];
+
+  const baza = {
+    receiptId: 10, data: "2026-06-10", furnizor: "F", codFiscal: "2000000000001",
+    temei: "Grau", total: 1000, impozit: 60,
+    randuri: [{ guidProdus: GRAU, cantitateKg: 100, suma: 1000 }]
+  };
+  // Inainte de emitere: fara numar, fara firma.
+  const faraAct = idDin(fa([{ ...baza, numar: 0, serie: "", companyId: 0 }]).xml);
+  // Dupa emitere: cu numar si cu firma.
+  const dupaEmitere = idDin(fa([{ ...baza, numar: 915, serie: "AA", companyId: 1 }]).xml);
+  assert.equal(faraAct, dupaEmitere, "acelasi act a capatat doua identitati in 1C");
+
+  // Dar receptii diferite raman documente diferite.
+  const alta = idDin(fa([{ ...baza, receiptId: 11, numar: 0, serie: "", companyId: 0 }]).xml);
+  assert.notEqual(faraAct, alta);
+});

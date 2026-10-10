@@ -7179,7 +7179,10 @@ async function exportPurchaseActsFor1c(options = {}) {
         "Impozit retinut (lei)": (Number(rand.value || 0) - Number(rand.netPay || 0)).toFixed(2),
         "Spre plata (lei)": Number(rand.netPay || 0).toFixed(2),
         Depozit: sursa.location || "",
-        Temei: sursa.note || "",
+        // Plafonata, ca si `_temei`: nota e scrisa liber de operator, iar la plafonul
+        // de randuri un CSV cu note lungi ajungea la 20 MB — de patru ori limita
+        // de raspuns a platformei.
+        Temei: String(sursa.note || "").slice(0, 200),
         "Nr. recepție": rand.id,
         "Observatii export": avertisment,
         _id: receipt.id,
@@ -7458,6 +7461,9 @@ function receptiiAtinseDePlata(alocare, tranzactie) {
 
 async function exportPaymentsFor1c(options = {}) {
   const state = readReceiptsState();
+  // Plafon de randuri, ca la acte: CSV-ul de plati n-avea niciunul si ajunsese la 3,78 MB
+  // pe istoricul de acum — 84% din limita de raspuns a platformei, si creste cu fiecare an.
+  const maxRanduriPlati = Math.max(Number(options.maxRanduri) || 0, 0);
   // O SINGURA alocare pentru tot exportul. Calculata per plata, costa 25 de secunde la 500
   // de documente — peste limita platformei.
   const alocareExport = alocaPlatiPeReceptii(state);
@@ -7488,6 +7494,14 @@ async function exportPaymentsFor1c(options = {}) {
       if (to && zi > to) continue;
     }
 
+    if (maxRanduriPlati && randuri.length >= maxRanduriPlati) {
+      const e = new Error(
+        `Prea multe plati intr-un singur fisier (peste ${maxRanduriPlati}). ` +
+        "Restrange perioada sau descarca in transe."
+      );
+      e.statusCode = 400;
+      throw e;
+    }
     const partener = parteneriPeId.get(Number(t.partnerId));
     const receptie = receptiiPeId.get(Number(t.receiptId));
 

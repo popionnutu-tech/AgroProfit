@@ -3978,9 +3978,30 @@ if (typeof MutationObserver === "function") {
       }
     }, 40);
   });
-  document.addEventListener("DOMContentLoaded", () => {
-    for (const tbody of document.querySelectorAll("tbody")) {
+  // Se urmaresc `tbody`-urile existente SI cele adaugate mai tarziu: o parte din tabele se
+  // construiesc din cod, la cerere, si nu existau la incarcarea paginii — deci nu primeau
+  // niciodata totaluri.
+  const urmareste = (radacina) => {
+    for (const tbody of radacina.querySelectorAll("tbody")) {
+      if (tbody.dataset.urmarit === "1") continue;
+      tbody.dataset.urmarit = "1";
       observator.observe(tbody, { childList: true });
+      // Tabelul exista deja cu randuri in el: se totalizeaza acum, nu la urmatoarea scriere.
+      if (tbody.children.length) deFacut.add(tbody);
+    }
+  };
+  document.addEventListener("DOMContentLoaded", () => {
+    urmareste(document);
+    // Tabelele noi se prind pe masura ce apar. `subtree` doar aici, pe document, nu pe
+    // fiecare `tbody` — asa `tfoot` ramane in afara a ceea ce se observa, deci fara bucla.
+    new MutationObserver(() => urmareste(document)).observe(document.body, {
+      childList: true, subtree: true
+    });
+    if (deFacut.size) {
+      for (const tbody of [...deFacut]) {
+        deFacut.delete(tbody);
+        try { adaugaTotaluri(tbody); } catch (e) { /* un tabel ciudat nu opreste restul */ }
+      }
     }
   });
 }

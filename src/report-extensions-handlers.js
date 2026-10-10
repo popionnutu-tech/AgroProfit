@@ -304,7 +304,9 @@ async function exportPayments1cHandler(req, res) {
       from: q.from,
       to: q.to,
       onlyNew: !["1", "true"].includes(String(q.includeExported || "").toLowerCase()),
-      transactionIds: idsDinCerere(req)
+      transactionIds: idsDinCerere(req),
+      // Acelasi plafon ca la acte: fara el, CSV-ul de plati creste nelimitat cu istoricul.
+      maxRanduri: MAX_RANDURI_CSV
     });
     const zi = new Date().toISOString().slice(0, 10);
     if (formatCerut(req, true) === "xml") {
