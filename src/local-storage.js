@@ -2442,7 +2442,10 @@ function alocaPlatiPeReceptii(state) {
     const when = t.createdAt || t.transactedAt || "";
     const tinte = acoperire1Plata(t);
     if (tinte.length) {
-      platiTintite.push({ id: Number(t.id), partnerId, suma: Number(t.amount || 0), tinte });
+      platiTintite.push({
+        id: Number(t.id), partnerId, suma: Number(t.amount || 0), tinte,
+        cand: String(when || "")
+      });
     } else {
       // Platile FARA bife se distribuie FIFO, dar tot trebuie sa stim ce au atins:
       // se pastreaza in ordine cronologica, ca alocarea sa poata atribui corect.
@@ -2527,6 +2530,18 @@ function alocaPlatiPeReceptii(state) {
         plata.partnerId,
         Math.max(0, Number(ramasPartener.get(plata.partnerId) || 0) - aplicat)
       );
+    }
+    // Ce a ramas din plata dupa receptiile bifate se revarsa FIFO pe celelalte — dar PE
+    // NUMELE EI. Fara asta, banii ajungeau pe receptii cu alte cote de retinere, iar
+    // exportul fiscal credea ca plata a atins doar ce s-a bifat: scria impozitul cotei
+    // bifate pe toata suma. Masurat: 679,15 lei in loc de 1.610.
+    if (disponibil > 0.005) {
+      platiLibere.push({
+        id: plata.id,
+        partnerId: plata.partnerId,
+        suma: disponibil,
+        cand: plata.cand || ""
+      });
     }
   }
 
