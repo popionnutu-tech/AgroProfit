@@ -1797,6 +1797,18 @@
             <p>Istoric pentru modificari, redeschideri si schimbari de status</p>
           </div>
 
+          <div class="split" style="margin-bottom:8px">
+            <label>De la<input type="date" id="audit-from" /></label>
+            <label>Până la<input type="date" id="audit-to" /></label>
+            <label>Caută
+              <input type="search" id="audit-q" placeholder="furnizor, motiv, utilizator…" />
+            </label>
+            <label>&nbsp;
+              <button type="button" id="audit-search-btn" class="cell-btn cell-btn-primary">Caută</button>
+            </label>
+          </div>
+          <p class="field-hint" id="audit-hint"></p>
+
           <div class="table-wrap">
             <table>
               <thead>

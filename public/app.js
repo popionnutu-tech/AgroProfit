@@ -3750,9 +3750,21 @@ function renderOpenJournal() {
     .join("");
 }
 
-function renderAuditLogs(auditLogs) {
+// Cate randuri se arata cand nu s-a cautat nimic. Cu filtru, se arata tot ce a intors
+// serverul (plafonat acolo) — altfel omul filtreaza o zi si tot vede 20 de randuri.
+const AUDIT_IMPLICIT = 20;
+
+function renderAuditLogs(auditLogs, info) {
+  const hint = document.getElementById("audit-hint");
+  if (hint) {
+    const total = info && Number.isFinite(Number(info.total)) ? Number(info.total) : auditLogs.length;
+    hint.textContent = total
+      ? `${auditLogs.length} din ${total} înregistrări` +
+        (info && total > auditLogs.length ? " · restrânge perioada ca să le vezi pe toate" : "")
+      : "Nicio înregistrare pentru filtrele alese.";
+  }
   auditBodyEl.innerHTML = auditLogs
-    .slice(0, 20)
+    .slice(0, info && info.filtrat ? auditLogs.length : AUDIT_IMPLICIT)
     .map(
       (item) => `
         <tr>
@@ -3766,6 +3778,43 @@ function renderAuditLogs(auditLogs) {
       `
     )
     .join("");
+}
+
+// Cautare in jurnalul de modificari, pe SERVER.
+//
+// Ecranul primea tot jurnalul si afisa 20 de randuri; la 3 ani inseamna zeci de MB
+// descarcate degeaba. Filtrele pleaca acum la server, iar el intoarce doar ce se potriveste.
+async function cautaInAudit() {
+  const from = (document.getElementById("audit-from") || {}).value || "";
+  const to = (document.getElementById("audit-to") || {}).value || "";
+  const q = (document.getElementById("audit-q") || {}).value || "";
+  const p = new URLSearchParams();
+  if (from) p.set("from", from);
+  if (to) p.set("to", to);
+  if (q.trim()) p.set("q", q.trim());
+  const filtrat = Boolean(from || to || q.trim());
+
+  const hint = document.getElementById("audit-hint");
+  if (hint) hint.textContent = "Se caută…";
+  try {
+    const res = await fetch(`/api/audit-logs?${p}`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Nu am putut citi jurnalul.");
+    renderAuditLogs(data.auditLogs || [], { total: data.total, filtrat });
+  } catch (err) {
+    if (hint) hint.textContent = err.message;
+  }
+}
+
+if (document.getElementById("audit-search-btn")) {
+  document.getElementById("audit-search-btn").addEventListener("click", cautaInAudit);
+  for (const id of ["audit-from", "audit-to"]) {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener("change", cautaInAudit);
+  }
+  const q = document.getElementById("audit-q");
+  // Enter cauta; nu se cauta la fiecare tasta, ca sa nu plece o cerere per litera.
+  if (q) q.addEventListener("keydown", (e) => { if (e.key === "Enter") cautaInAudit(); });
 }
 
 function renderLockouts(lockouts) {
