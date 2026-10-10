@@ -3236,14 +3236,17 @@ function datorieRamasaPartener(state, transaction, receipt) {
   };
   const { paidByReceipt } = alocaPlatiPeReceptii(fara);
 
-  const acoperire = acoperire1Plata(transaction);
   const partenerId = transaction.partnerId != null
     ? Number(transaction.partnerId)
     : Number(receipt.supplierId);
 
-  const candidate = acoperire.length
-    ? acoperire.map((id) => (state.receipts || []).find((r) => Number(r.id) === id)).filter(Boolean)
-    : (state.receipts || []).filter((r) => Number(r.supplierId) === partenerId);
+  // TOATE receptiile partenerului, indiferent de bife.
+  //
+  // Bifele hotarasc ORDINEA in care se sting, nu CIT se datoreaza: surplusul peste
+  // receptiile bifate se revarsa oricum pe celelalte (vezi alocarea din
+  // `alocaPlatiPeReceptii`). Masurind doar pe cele bifate, acelasi ban aparea de doua ori —
+  // o data ca datorie stinsa, o data ca avans disponibil de reaplicat.
+  const candidate = (state.receipts || []).filter((r) => Number(r.supplierId) === partenerId);
 
   let datorie = 0;
   for (const r of candidate) {
@@ -3348,7 +3351,10 @@ async function createTransaction(payload) {
       const datoriiPartener = datorieRamasaPartener(state, transaction, receipt);
       const outstanding = Math.max(datoriiPartener, 0);
 
-      if (rawAmount >= 0 && targetAmount > 0 && rawAmount > outstanding) {
+      // Poarta pe datoria PARTENERULUI, nu pe cea a receptiei de referinta. Cu o receptie
+      // fara pret (datorie 0), poarta veche cadea si surplusul nu mai devenea avans — banii
+      // nu apareau nici ca datorie stinsa, nici ca avans. Dispareau.
+      if (rawAmount >= 0 && outstanding > 0 && rawAmount > outstanding) {
         transaction.appliedAmount = outstanding;
         transaction.advanceAmount = rawAmount - outstanding;
 
@@ -3377,9 +3383,47 @@ async function createTransaction(payload) {
             newValue: { partnerId: transaction.partnerId, amount: transaction.advanceAmount }
           });
         }
+      } else if (rawAmount > 0 && outstanding <= 0) {
+        // Partenerul nu mai datoreaza nimic, dar a primit bani: TOT e avans. Fara ramura
+        // asta, `appliedAmount` lua suma intreaga pe o datorie inexistenta si banii
+        // dispareau din evidenta.
+        transaction.appliedAmount = 0;
+        transaction.advanceAmount = rawAmount;
+        if (!Array.isArray(state.partnerAdvances)) state.partnerAdvances = [];
+        const advanceId = nextId(state.partnerAdvances);
+        state.partnerAdvances.push({
+          id: advanceId,
+          partnerId: transaction.partnerId,
+          partner: transaction.partner,
+          transactionId: transaction.id,
+          amount: rawAmount,
+          remainingAmount: rawAmount,
+          source: "overpayment",
+          note: `Plata fara datorie deschisa, din tranzactia #${transaction.id}`,
+          createdAt: new Date().toISOString()
+        });
+        createAuditEntry(state, {
+          entityType: "partner-advance",
+          entityId: advanceId,
+          action: "create",
+          reason: `Avans creat: plata #${transaction.id} fara datorie deschisa`,
+          user: payload.createdBy || "dashboard",
+          newValue: { partnerId: transaction.partnerId, amount: rawAmount }
+        });
       } else {
         transaction.appliedAmount = rawAmount;
         transaction.advanceAmount = 0;
+      }
+
+      // INVARIANTA: fiecare leu primit e ori atribuit unei datorii, ori pus deoparte ca
+      // avans. Nici pierdut, nici numarat de doua ori. Cade ZGOMOTOS daca se rupe — e
+      // singura verificare care prinde o viitoare rescriere a ramurilor de mai sus.
+      const impartit = Number(transaction.appliedAmount || 0) + Number(transaction.advanceAmount || 0);
+      if (rawAmount > 0 && Math.abs(impartit - rawAmount) > 0.005) {
+        throw new Error(
+          `Eroare interna la impartirea platii: ${impartit.toFixed(2)} lei repartizati din ` +
+          `${rawAmount.toFixed(2)} lei primiti. Plata nu a fost inregistrata.`
+        );
       }
 
       const totalApplied =
