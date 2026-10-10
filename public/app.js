@@ -3839,7 +3839,11 @@ const COLOANE_FARA_TOTAL = [
   "pret", "preț", "cota", "cotă", "procent", "%", "tarif", "curs",
   "umiditate", "impuritat", "norma", "normă", "densitate",
   "status", "stare", "utilizator", "actiune", "acțiune", "entitate", "mentiune", "mențiune",
-  "cod", "idno", "iban", "telefon", "serie", "seria"
+  "cod", "idno", "iban", "telefon", "serie", "seria",
+  // Numere de document si referinte: adunate, dau un numar fara niciun inteles.
+  "act", "invoice", "factura", "factură", "referinta", "referință", "document",
+  // Marimi care se MEDIAZA, nu se aduna.
+  "randament", "medie", "rol", "canal", "workflow", "ultima", "ultimul"
 ];
 
 function faraDiacritice(text) {
@@ -3852,10 +3856,33 @@ function faraDiacritice(text) {
 function coloanaSeAduna(antet) {
   const t = faraDiacritice(antet).trim();
   if (!t) return false;
-  return !COLOANE_FARA_TOTAL.some((cuvant) => {
-    const c = faraDiacritice(cuvant);
-    return t === c || t.startsWith(`${c} `) || t.startsWith(`${c}.`) || t.includes(` ${c} `) || t.includes(c === "%" ? "%" : `(${c}`);
-  });
+  if (t.includes("%")) return false;
+  // Se compara pe CUVINTE, nu pe inceput de sir: „Act nr." si „Nr. factura" contin amandoua
+  // un numar de document, dar cuvantul care o spune nu e la inceput in primul caz.
+  const cuvinte = t.split(/[^a-z0-9]+/).filter(Boolean);
+  // ALLOW-LIST, cu prioritate: daca antetul spune explicit ca e o cantitate sau o suma, se
+  // aduna oricum. Altfel „Suma factura" ar fi exclusa din cauza cuvantului „factura", desi e
+  // exact o coloana de bani.
+  // Mai intai cuvintele care exclud NECONDITIONAT: o marime pe unitate sau un procent nu se
+  // aduna niciodata, oricat de mult ar semana antetul cu o suma. „Pret (lei/kg)" contine si
+  // „lei", si „kg" — dar e un pret unitar, iar totalul lui n-ar insemna nimic.
+  const NICIODATA = [
+    "pret", "cota", "tarif", "procent", "norma", "densitate",
+    "umiditate", "impuritat", "randament", "medie", "curs"
+  ];
+  if (cuvinte.some((c) => NICIODATA.some((n) => c.startsWith(faraDiacritice(n))))) return false;
+
+  // Apoi cuvintele care spun explicit ca e o cantitate sau o suma. Ele invinge excluderile
+  // „slabe" de mai jos: „Suma factura" e o coloana de bani, desi contine „factura".
+  const SPUNE_CANTITATE = ["suma", "cantitate", "valoare", "total", "kg", "tone", "lei", "ha"];
+  if (cuvinte.some((c) => SPUNE_CANTITATE.includes(c))) return true;
+  return !cuvinte.some((cuvant) =>
+    COLOANE_FARA_TOTAL.some((exclus) => {
+      const c = faraDiacritice(exclus);
+      // Prefix, ca „impuritat" sa prinda si „impuritati", si „data" sa prinda „datei".
+      return cuvant === c || cuvant.startsWith(c);
+    })
+  );
 }
 
 // Numerele se afiseaza romaneste: `1.234,56`. Punctul e separator de mii, virgula zecimala.
