@@ -204,9 +204,14 @@ function obiectAct(act, nppBaza) {
     NPP: nppBaza,
     // Fara numar de act, identificatorul se deriva din RECEPTIA purtatoare: tot stabil
     // pentru acelasi document, deci un reimport il recunoaste in loc sa-l dubleze.
-    GUID_DOC: Number(act.numar) > 0
-      ? guidDocument("act", act.companyId, act.serie, act.numar)
-      : guidDocument("act-receptie", act.companyId, "", act.receiptId),
+    // Derivat MEREU din RECEPTIA purtatoare, nu din numarul actului.
+    //
+    // Cand erau doua formule — una pe numar, alta pe receptie — aceeasi marfa capata doua
+    // identitati: incarcata intai fara act, apoi cu actul emis, intra in 1C ca DOUA
+    // documente, cu achizitia si impozitul retinut numarate de doua ori. Marcajul
+    // `exported1cAt` nu apara: reincarcarea deliberata si actele pe mai multe receptii il
+    // ocolesc. Cu un singur identificator, reimportul ACTUALIZEAZA documentul.
+    GUID_DOC: guidDocument("act", act.companyId, "", act.receiptId),
     DATA_ORA: `${zi}T12:00:00`,
     DATA: zi,
     // Numarul si seria LIPSESC pentru perioada veche: actele de atunci au numere scrise de
@@ -239,6 +244,10 @@ function obiectAct(act, nppBaza) {
  */
 function construiesteXmlActe(acte, optiuni = {}) {
   const lista = Array.isArray(acte) ? acte : [];
+  // Firma emitenta e FIXATA in sablon (e documentul real al unei singure firme). Un act
+  // emis pe alta firma ar pleca in 1C pe persoana juridica gresita, tacut — exact ce
+  // interzice regula 10. Se compara si se sare, cu motiv.
+  const firmaSablon = Number(optiuni.companyId || 0);
 
   // PLAFON DUBLU, verificat INAINTE de constructie.
   //
@@ -284,7 +293,12 @@ function construiesteXmlActe(acte, optiuni = {}) {
     // Un act FARA numar e permis deliberat: perioada veche se incarca lasind 1C sa
     // numeroteze. Pentru actele emise din aplicatie, numarul ajunge pe hirtia semnata si
     // pleaca aici asa cum e.
-    const randuri = Array.isArray(act.randuri) ? act.randuri.filter((r) => r && r.guidProdus) : [];
+    const toateRandurile = Array.isArray(act.randuri) ? act.randuri : [];
+    // TOT actul, sau NIMIC. Filtrand doar randurile fara produs legat, actul pleca cu mai
+    // putine randuri dar cu totalul INTREG — `Σ randuri ≠ СуммаДокумента`, iar `СуммаПН`
+    // calculat pe o baza care nu apare in document. Mai bine lipsa decat gresit (regula 13).
+    const faraProdus = toateRandurile.filter((r) => !r || !r.guidProdus);
+    const randuri = faraProdus.length ? [] : toateRandurile;
     // Fiecare act primeste 60 de sloturi de numerotare; al 61-lea rand ar intra peste
     // intervalul actului urmator, iar `Нпп` e identitatea obiectului in fisier — o coliziune
     // ar lega un rand de produsul altui act. Azi un act acopera maximum 50 de receptii, deci
@@ -297,12 +311,20 @@ function construiesteXmlActe(acte, optiuni = {}) {
       e.statusCode = 400;
       throw e;
     }
+    if (firmaSablon && Number(act.companyId || 0) && Number(act.companyId) !== firmaSablon) {
+      motive.push(
+        `actul ${act.serie || ""} ${act.numar || `(recepția #${act.receiptId})`}: ` +
+        "e emis pe alta firma decat cea din sablonul 1C — nu se poate exporta in XML"
+      );
+      continue;
+    }
     if (!randuri.length) {
       // Fara GUID de produs n-avem ce exporta: 1C ar crea un produs nou la fiecare import.
       // Se raporteaza, nu se trece tacit.
       motive.push(
-        `actul ${act.serie || ""} ${act.numar}: produsul nu e legat de nomenclatorul 1C ` +
-        "(completeaza identificatorul 1C pe produs, in nomenclator)"
+        `actul ${act.serie || ""} ${act.numar || `(recepția #${act.receiptId})`}: ` +
+        `${faraProdus.length} produs(e) nelegate de nomenclatorul 1C — ` +
+        "completeaza identificatorul 1C pe produs, in nomenclator"
       );
       continue;
     }

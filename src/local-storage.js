@@ -2336,6 +2336,14 @@ async function assignActNumber(ids, options = {}) {
   };
 
   for (const item of receipts) {
+    // Daca receptia a fost deja incarcata in 1C FARA act (perioada veche), marcajul se
+    // goleste: documentul de acolo trebuie actualizat cu numarul si cifrele actului.
+    // Identificatorul fiind derivat din receptie, reimportul il ACTUALIZEAZA, nu il dubleaza
+    // — dar fara reintrarea in coada nimeni n-ar sti ca trebuie reincarcat.
+    if (!(Number(item.actNumber || 0) > 0) && String(item.exported1cAt || "").trim()) {
+      item.exported1cPrevAt = item.exported1cAt;
+      delete item.exported1cAt;
+    }
     item.actNumber = numar;
     item.actNumberSource = sursaNumar;
     item.actSeries = serie;
@@ -7285,7 +7293,7 @@ function estePlataExportabila1c(t) {
   return true;
 }
 
-function esteActExportabil1c(r, incluneEmise) {
+function esteActExportabil1c(r, incluneNeemise) {
   if (!r) return false;
   if (!isReceiptInStock(r)) return false;
   // Captura sta pe PURTATOR; celelalte receptii ale actului au doar referinta. Se exporta
@@ -7306,7 +7314,13 @@ function esteActExportabil1c(r, incluneEmise) {
   // ⚠️ O receptie incarcata asa primeste un document in 1C. Daca i se emite ULTERIOR un act
   // din aplicatie, ar fi al doilea document pentru aceeasi marfa — de-asta marcajul
   // `exported1cAt` e singura aparare: odata incarcata, iese din coada.
-  return incluneEmise === true;
+  if (incluneNeemise !== true) return false;
+  // DOAR achizitiile de la PERSOANE FIZICE produc act de achizitie: acolo se retine
+  // impozitul la sursa (regula 10). Pe calea normala, garda e in `assignActNumber` — numai
+  // persoanele fizice primesc numar. Fara verificarea asta, modul „perioada veche" ar trimite
+  // in 1C achizitii de la FIRME ca `ВидОперации = АктЗакупки`, pe conturile de impozit pe
+  // venit, desi pentru ele exista deja factura furnizorului.
+  return Number(r.withholdingPercent || 0) > 0;
 }
 
 // Data dupa care se filtreaza un act. Aceeasi in lista si in export: altfel descarcarea pe
