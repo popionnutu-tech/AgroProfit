@@ -309,11 +309,93 @@ function normalizeCurrency(value) {
   }
   return cerut;
 }
+// ============================================================================
+// ZIUA LUCRATOARE DE PE DOCUMENTELE DE TIPAR
+//
+// Marfa intra si simbata, si duminica — cantarul nu tine cont de calendar. Dar furnizorul
+// ajunge la contabilitate LUNI, iar documentul se perfecteaza atunci. Pina acum contabila
+// schimba data de mina pe fiecare hirtie, si se mai incurca.
+//
+// Regula: daca data cade in weekend, documentul poarta data de LUNI.
+//   simbata -> +2 zile, duminica -> +1 zi, in rest neschimbata.
+//   EXCEPTIE la granita de luna: daca lunea urmatoare cade in luna viitoare, se merge
+//   INAPOI, la ultima zi lucratoare a lunii curente — documentul nu are voie sa sara
+//   intr-o alta luna fiscala decat marfa.
+//
+// ⚠️ SE SCHIMBA DOAR HIRTIA, NU FAPTUL. Receptia ramine inregistrata simbata:
+// `receivedAt` nu se atinge, stocul se misca la data reala, rapoartele si „Miscarea
+// stocului" raman pe ziua adevarata. Aici se decide doar ce scrie pe actul, contractul si
+// ordinul de plata tiparite. Bonul de cintar NU trece pe aici: el consemneaza cintarirea
+// fizica de la poarta (decizia utilizatorului, 09.10.2026).
+//
+// Se aplica la EMITERE si se INGHEATA in `actFigures` ca orice alta cifra de pe act
+// (regula 10): o retiparire da aceeasi data ca hirtia semnata, nu una recalculata.
+//
+// Nu cunoaste sarbatorile legale. Daca lunea e zi libera, contabila corecteaza manual —
+// un calendar de sarbatori ar trebui intretinut in fiecare an, si nimeni n-ar face-o.
+//
+// Oglindita in `public/app.js` (ordinul de plata se tipareste in frontend). AMBELE LOCURI.
+// ============================================================================
+function ziLucratoare(valoare) {
+  const text = String(valoare || "").trim();
+  if (!text) return text;
+  // Doar partea de data: documentele poarta ziua, nu ora. `Date` pe „AAAA-LL-ZZ" citeste UTC,
+  // deci se construieste explicit din componente — altfel, intr-un fus estic, 00:00 local
+  // sare in ziua precedenta si simbata devine vineri.
+  const m = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return text;
+  const an = Number(m[1]);
+  const luna = Number(m[2]) - 1;
+  const d = new Date(an, luna, Number(m[3]));
+  if (Number.isNaN(d.getTime())) return text;
+  const z = (n) => String(n).padStart(2, "0");
+  const scrie = (x) => `${x.getFullYear()}-${z(x.getMonth() + 1)}-${z(x.getDate())}`;
+
+  const zi = d.getDay(); // 0 = duminica, 6 = simbata
+  if (zi !== 0 && zi !== 6) return text.slice(0, 10);
+
+  const inainte = new Date(d);
+  inainte.setDate(inainte.getDate() + (zi === 6 ? 2 : 1)); // lunea urmatoare
+
+  // LUNA NU SE SCHIMBA. O receptie de simbata 31 octombrie ar primi act pe 2 noiembrie:
+  // in 1C documentul si impozitul retinut ar intra pe noiembrie, in timp ce receptia,
+  // stocul si registrul raman pe octombrie — doua luni fiscale pentru aceeasi marfa.
+  // La granita de luna se merge INAPOI, la ultima zi lucratoare a lunii curente
+  // (decizia utilizatorului, 09.10.2026). Actul poate purta astfel o data cu o zi-doua
+  // inaintea cantaririi, dar ramine in luna corecta — ce conteaza la inchidere.
+  if (inainte.getMonth() === luna && inainte.getFullYear() === an) return scrie(inainte);
+
+  const inapoi = new Date(an, luna + 1, 0); // ultima zi calendaristica a lunii
+  while (inapoi.getDay() === 0 || inapoi.getDay() === 6) {
+    inapoi.setDate(inapoi.getDate() - 1);
+  }
+  return scrie(inapoi);
+}
+
 // Numerotarea actelor de achizitie. Primul act emis din aplicatie e cel
 // din 02.10.2026, care pe hartie are numarul 914 — deci sirul porneste de acolo. Actele de
 // DINAINTE rămân nenumerotate in aplicatie: au deja numere scrise de mana si nu se rescrie
 // nimic din ce e deja semnat (decizia utilizatorului, 03.10.2026).
-const ACT_NUMBER_START = 914;
+// Praguri inferioare, PE SERIE. Numerotarea e per (firma, serie), iar fiecare serie isi
+// porneste propriul sir de la 1 — cu o exceptie: seria care era deja in uz cand aplicatia a
+// preluat numerotarea.
+//
+// „PAT" are pe hartie numerele 1-913, scrise de mana. Primul act emis din aplicatie a fost
+// 914 (02.10.2026). Daca seria aceea ar reporni de la 1, actele noi s-ar suprapune peste
+// dosarul vechi — doua hirtii semnate cu acelasi numar, imposibil de explicat la control.
+//
+// O SERIE NOUA nu are istorie pe hirtie, deci porneste curat de la 1. Asa s-a si ales
+// trecerea la „AA" (decizia utilizatorului, 09.10.2026): seria se schimba in nomenclatorul
+// firmei, iar sirul reporneste singur, fara sa atinga numerele deja tiparite pe „PAT".
+// Sint trecute AMBELE serii istorice. Un prag pus din greseala pe o serie FARA istorie
+// lasa o GAURA in sir (porneste de la 914) - neplacut, dar explicabil. Un prag LIPSA pe o
+// serie CU istorie da DUBLURI pe hirtii semnate. Se greseste in directia sigura.
+const PRAGURI_SERIE = Object.assign(Object.create(null), { AP: 913, PAT: 913 });
+
+function pragSerie(serie) {
+  const cheie = String(serie || "").trim().toUpperCase();
+  return Object.prototype.hasOwnProperty.call(PRAGURI_SERIE, cheie) ? PRAGURI_SERIE[cheie] : 0;
+}
 // Se seteaza DUPA ce migrarea de numerotare atomica e aplicata si verificata. De atunci,
 // derivarea din blob (mai slaba) nu mai e acceptata ca rezerva.
 const REQUIRE_PG_ACT_NUMBERS =
@@ -1416,6 +1498,103 @@ const DOCUMENT_NUMBER_TYPES = {
   paymentOrder: { collection: "transactions", stampField: "paymentOrderNo", entityType: "transaction" }
 };
 
+// Tipizarea listei de acoperire la INTRARE. Acelasi tipar ca `idUri1cStrict`: `Number([7])`
+// e 7 si `Number(true)` e 1, deci fara verificare de tip un boolean ar bifa o receptie la
+// intimplare. Plafon de 200 — o plata care acopera mai mult inseamna ca s-a bifat tot din
+// greseala.
+function acoperireDinPayload(payload, state) {
+  const brute = Array.isArray((payload || {}).receiptIds) ? payload.receiptIds : [];
+  if (!brute.length) return [];
+  if (brute.length > 200) {
+    const e = new Error("Prea multe receptii pe o singura plata (max 200).");
+    e.statusCode = 400;
+    throw e;
+  }
+  if (brute.some((v) => typeof v !== "number" && typeof v !== "string")) {
+    const e = new Error("Lista de receptii acoperite e invalida.");
+    e.statusCode = 400;
+    throw e;
+  }
+  const idUri = [...new Set(brute.map((v) => Number(String(v).trim())))];
+  if (idUri.some((n) => !Number.isInteger(n) || n <= 0)) {
+    const e = new Error("Lista de receptii acoperite e invalida.");
+    e.statusCode = 400;
+    throw e;
+  }
+  if (!state) return idUri;
+
+  // COERENTA, verificata la SCRIERE. Alocarea de la citire filtreaza oricum receptiile
+  // straine sau care nu sint in stoc — dar le ignora TACIT: contabilul bifeaza receptia 13,
+  // primeste 201, si banii se duc FIFO in alta parte. Pentru o operatie cu efect financiar,
+  // o intrare inghitita in tacere e mai rea decat un refuz.
+  //
+  // In plus, trei consumatori citesc `receiptId` SINGULAR si ar deveni incoerenti: exportul
+  // 1C (care reconstituie impozitul din cota receptiei referite), ordinul de plata tiparit
+  // (care numeste o singura receptie) si garzile de corectare a sumei.
+  const partener = Number(payload.partnerId);
+  const peId = new Map((state.receipts || []).map((r) => [Number(r.id), r]));
+  const lipsa = [];
+  const straine = [];
+  const faraDatorie = [];
+  for (const id of idUri) {
+    const r = peId.get(id);
+    if (!r) { lipsa.push(id); continue; }
+    if (Number.isFinite(partener) && Number(r.supplierId) !== partener) { straine.push(id); continue; }
+    // „Proiect" si „Anulat" nu au datorie (regula 7): bifate, ar parea platite.
+    if (!isReceiptInStock(r)) faraDatorie.push(id);
+  }
+  const refuza = (mesaj) => {
+    const e = new Error(mesaj);
+    e.statusCode = 400;
+    throw e;
+  };
+  if (lipsa.length) refuza(`Receptii inexistente in lista acoperita: ${lipsa.join(", ")}.`);
+  if (straine.length) {
+    refuza(
+      `Receptiile ${straine.join(", ")} sint ale altui furnizor. ` +
+      "O plata nu poate stinge datoria altcuiva."
+    );
+  }
+  if (faraDatorie.length) {
+    refuza(
+      `Receptiile ${faraDatorie.join(", ")} nu sint in stoc (proiect sau anulate), ` +
+      "deci nu au datorie de achitat."
+    );
+  }
+  // Documentul pe care s-a inregistrat plata trebuie sa fie si acoperit de ea: altfel
+  // ordinul de plata tiparit numeste o receptie pe care banii n-o ating.
+  const singular = Number(payload.receiptId);
+  if (Number.isFinite(singular) && singular > 0 && !idUri.includes(singular)) {
+    refuza(
+      `Receptia #${singular}, pe care e inregistrata plata, lipseste din lista acoperita. ` +
+      "Bifeaz-o sau inregistreaza plata pe alta receptie."
+    );
+  }
+  return idUri;
+}
+
+// Receptiile pe care o plata le acopera EXPLICIT, alese de om la inregistrare.
+//
+// Lista goala = fara alegere: plata intra in oala partenerului si se distribuie FIFO, exact
+// ca inainte. Asa platile vechi (care n-au campul) se comporta neschimbat.
+//
+// `receiptId` (singular) ramane pentru compatibilitate — e documentul pe care a fost
+// inregistrata plata si pe care il citesc ordinul de plata tiparit si exportul 1C. NU se
+// deduce din el o acoperire: o plata veche inregistrata pe receptia 12 stingea FIFO si
+// receptia 7, iar transformarea lui in „acoperire" ar rescrie retroactiv istoricul.
+function acoperire1Plata(t) {
+  const brute = Array.isArray((t || {}).receiptIds) ? t.receiptIds : [];
+  const curate = [];
+  const vazute = new Set();
+  for (const v of brute) {
+    const n = Number(v);
+    if (!Number.isInteger(n) || n <= 0 || vazute.has(n)) continue;
+    vazute.add(n);
+    curate.push(n);
+  }
+  return curate;
+}
+
 function allocateDocumentNumber(docType, refId, companyId, changedBy) {
   const meta = DOCUMENT_NUMBER_TYPES[docType];
   if (!meta) {
@@ -1832,7 +2011,8 @@ function getReceiptRaw(id) {
   return (state.receipts || []).find((item) => item.id === Number(id)) || null;
 }
 
-// Urmatorul numar de act: max(atribuite) + 1, cu plafon inferior la ACT_NUMBER_START.
+// Urmatorul numar de act: max(atribuite pe aceeasi firma SI aceeasi serie) + 1, cu prag
+// inferior pe serie (vezi `PRAGURI_SERIE`).
 // Derivat din date, nu dintr-un contor separat — un contor se poate desincroniza de la
 // documentele reale (restaurare din backup, scriere pierduta), iar un numar de act refolosit
 // inseamna doua acte cu acelasi numar in dosar.
@@ -1840,11 +2020,15 @@ function getReceiptRaw(id) {
 // global ar lasa gauri in registrul fiecareia: „PAT 915", „AGR 916", „PAT 917" — in dosarul
 // PAT lipseste 916, imposibil de explicat la control.
 // Se numara si receptiile ANULATE: numarul lor a fost tiparit si nu se refoloseste.
-function nextActNumber(state, companyId) {
+function nextActNumber(state, companyId, series) {
+  const serie = String(series || "").trim().toUpperCase();
   const maxim = (state.receipts || [])
     .filter((item) => Number(item.actCompanyId || 0) === Number(companyId || 0))
+    // Sir separat si pe SERIE: altfel trecerea la o serie noua ar continua de la 915, in loc
+    // sa porneasca de la 1, iar intoarcerea la seria veche ar lasa gauri in ea.
+    .filter((item) => String(item.actSeries || "").trim().toUpperCase() === serie)
     .reduce((max, item) => Math.max(max, Number(item.actNumber || 0)), 0);
-  return Math.max(maxim + 1, ACT_NUMBER_START);
+  return Math.max(maxim, pragSerie(serie)) + 1;
 }
 
 // Numarul NU se intoarce pana nu e DURABIL si purtat de EXACT receptiile actului.
@@ -2062,7 +2246,7 @@ async function assignActNumber(ids, options = {}) {
         "reincearca. Daca se repeta, verifica functia allocate_purchase_act_number."
       );
     }
-    numar = nextActNumber(state, companie);
+    numar = nextActNumber(state, companie, serie);
   }
 
   // Se ingheata RANDURILE, nu doar totalurile: randul se construia din receptie, deci dupa o
@@ -2077,7 +2261,10 @@ async function assignActNumber(ids, options = {}) {
     return {
       id: item.id,
       product: String(item.product || ""),
-      date: item.receivedAt || item.createdAt || "",
+      // Ziua LUCRATOARE, nu cea calendaristica: furnizorul ajunge la contabilitate luni.
+      // `receivedAt` de pe receptie ramine neatins — stocul si rapoartele pastreaza
+      // ziua reala; se schimba doar ce scrie pe hirtie.
+      date: ziLucratoare(item.receivedAt || item.createdAt || ""),
       netKg: Number(kg.toFixed(3)),
       value: Number(brut.toFixed(2)),
       netPay: Number(net.toFixed(2))
@@ -2178,8 +2365,20 @@ async function assignActNumber(ids, options = {}) {
   return receipt;
 }
 
-async function listReceipts() {
-  const state = readReceiptsState();
+// SURSA UNICA pentru „cit s-a achitat pe fiecare receptie".
+//
+// Era scrisa doar in `listReceipts`, deci orice alt cod care avea nevoie de suma achitata
+// citea `receipt.paidAmount` de pe document — un cimp scris DOAR pe receptia singulara pe
+// care s-a inregistrat plata. Cu stingere FIFO sau cu acoperire aleasa de om, o receptie
+// poate fi integral achitata printr-o plata inregistrata pe ALTA: pe document `paidAmount`
+// ramine 0, desi in evidenta e „Achitat".
+//
+// Garda din `correctReceiptTerms` („datoria nu poate cobori sub cit s-a achitat") citea exact
+// acel cimp, deci se putea ocoli tacit — scenariul pe care regula 9 din CLAUDE.md il
+// interzice explicit („storno de plata intai").
+//
+// Intoarce o harta id-receptie -> suma alocata si ultima data de plata per partener.
+function alocaPlatiPeReceptii(state) {
   const receiptById = new Map();
   for (const r of state.receipts || []) receiptById.set(Number(r.id), r);
 
@@ -2188,6 +2387,9 @@ async function listReceipts() {
   // indiferent de receptia pe care a fost inregistrata.
   const paidByPartner = new Map();
   const lastPaymentByPartner = new Map();
+  // Plati cu ACOPERIRE ALEASA de om (`receiptIds`): se aloca intai, si DOAR pe receptiile
+  // bifate. Vezi mai jos de ce exista.
+  const platiTintite = [];
   for (const t of state.transactions || []) {
     if (t.referenceType !== "receipt" || t.direction !== "payment") continue;
     if (t.stornata === true) continue; // storned payments don't count
@@ -2197,6 +2399,8 @@ async function listReceipts() {
     const partnerId = t.partnerId != null ? Number(t.partnerId) : (r ? Number(r.supplierId) : NaN);
     if (Number.isNaN(partnerId)) continue;
     paidByPartner.set(partnerId, (paidByPartner.get(partnerId) || 0) + Number(t.amount || 0));
+    const tinte = acoperire1Plata(t);
+    if (tinte.length) platiTintite.push({ partnerId, suma: Number(t.amount || 0), tinte });
     const when = t.createdAt || t.transactedAt || "";
     const prev = lastPaymentByPartner.get(partnerId);
     if (!prev || String(when) > String(prev)) lastPaymentByPartner.set(partnerId, when);
@@ -2212,20 +2416,88 @@ async function listReceipts() {
     if (!receiptsByPartner.has(pid)) receiptsByPartner.set(pid, []);
     receiptsByPartner.get(pid).push(r);
   }
-  for (const [pid, list] of receiptsByPartner) {
+  // ÎNTÂI platile cu acoperire ALEASA de om, si numai pe receptiile bifate.
+  //
+  // DE CE: fara ele, toti banii unui furnizor se imprastiau FIFO pe receptiile lui, de la cea
+  // mai veche. Era corect ca sold total, dar contabilul nu putea spune „plata asta acopera
+  // recepțiile 12, 14 si 15, nu si 13" — iar ordinul de plata si discutia cu furnizorul se
+  // poarta exact pe acele documente.
+  //
+  // Restul (surplusul si platile fara bifa) ramane in oala partenerului si se distribuie FIFO
+  // dedesubt — deci banii NU dispar niciodata, indiferent ce s-a bifat.
+  const ramasPartener = new Map();
+  for (const [pid, suma] of paidByPartner) ramasPartener.set(pid, suma);
+
+  // ORDINEA FIFO se calculeaza O SINGURA DATA, aici, si se retine ca RANG.
+  //
+  // Inainte, fiecare plata cu bife isi re-sorta propriile tinte, cu `new Date` in comparator.
+  // Aceleasi receptii se sortau de zeci de mii de ori: 87% din costul adaugat erau obiectele
+  // `Date` construite in comparator. La plafonul de 200 de bife, `listReceipts` ajungea la
+  // 12 secunde — pe cea mai apelata functie din aplicatie, intr-o functie serverless
+  // plafonata la 30.
+  // Cu rangul precalculat, comparatia devine o scadere de intregi, iar bucla FIFO de
+  // dedesubt foloseste aceeasi lista deja sortata.
+  const rangFifo = new Map();
+  for (const [, list] of receiptsByPartner) {
     // FIFO: cea mai veche recepție întâi; la timestamp egal, ordonăm după id (determinist).
     list.sort((a, b) =>
       (new Date(a.createdAt || a.receivedAt) - new Date(b.createdAt || b.receivedAt)) || (Number(a.id) - Number(b.id))
     );
-    let remaining = Number(paidByPartner.get(pid) || 0);
-    for (const r of list) {
+    list.forEach((r, i) => rangFifo.set(Number(r.id), i));
+  }
+
+  for (const plata of platiTintite) {
+    // In interiorul selectiei tot de la cea mai veche: daca suma nu ajunge pentru toate
+    // bifate, se sting in ordine, nu partial peste tot. Aceeasi ordine ca FIFO, citita din rang.
+    const tinte = plata.tinte
+      .map((id) => receiptById.get(Number(id)))
+      .filter((r) => r && isReceiptInStock(r) && Number(r.supplierId) === plata.partnerId)
+      .sort((a, b) => (rangFifo.get(Number(a.id)) || 0) - (rangFifo.get(Number(b.id)) || 0));
+    // Plafonat la cit mai e in potul partenerului. Potul poate fi mai mic decat plata
+    // (o ajustare NEGATIVA de reclamatie pe acelasi furnizor scade din el), iar fara
+    // plafon alocam mai multi bani decat s-au primit net — receptia aparea „Achitat"
+    // pe un sold zero.
+    let disponibil = Math.min(plata.suma, Math.max(0, Number(ramasPartener.get(plata.partnerId) || 0)));
+    for (const r of tinte) {
+      if (disponibil <= 0) break;
       const target = receiptPayableValue(r);
-      const applied = Math.max(0, Math.min(target, remaining));
-      paidByReceipt.set(Number(r.id), applied);
-      remaining -= applied;
+      const dejaPus = Number(paidByReceipt.get(Number(r.id)) || 0);
+      const aplicat = Math.max(0, Math.min(target - dejaPus, disponibil));
+      if (aplicat <= 0) continue;
+      paidByReceipt.set(Number(r.id), dejaPus + aplicat);
+      disponibil -= aplicat;
+      ramasPartener.set(
+        plata.partnerId,
+        Math.max(0, Number(ramasPartener.get(plata.partnerId) || 0) - aplicat)
+      );
     }
   }
 
+  // APOI restul, FIFO pe tot partenerul (comportamentul dinainte, neatins pentru platile
+  // vechi — care nu au `receiptIds` si deci cad integral aici).
+  for (const [pid, list] of receiptsByPartner) {
+    // Lista e DEJA sortata FIFO mai sus, cand s-a calculat rangul. Nu se re-sorteaza.
+    let remaining = Math.max(0, Number(ramasPartener.get(pid) || 0));
+    for (const r of list) {
+      const target = receiptPayableValue(r);
+      const dejaPus = Number(paidByReceipt.get(Number(r.id)) || 0);
+      const applied = Math.max(0, Math.min(target - dejaPus, remaining));
+      paidByReceipt.set(Number(r.id), dejaPus + applied);
+      remaining -= applied;
+    }
+  }
+  return { paidByReceipt, lastPaymentByPartner };
+}
+
+// Cit s-a achitat EFECTIV pe o receptie, din aceeasi sursa ca ecranele. Nu `receipt.paidAmount`.
+function sumaAchitataPeReceptie(state, receiptId) {
+  const { paidByReceipt } = alocaPlatiPeReceptii(state);
+  return Number(paidByReceipt.get(Number(receiptId)) || 0);
+}
+
+async function listReceipts() {
+  const state = readReceiptsState();
+  const { paidByReceipt, lastPaymentByPartner } = alocaPlatiPeReceptii(state);
   const enriched = (state.receipts || []).map((r) => {
     const target = receiptPayableValue(r);
     const paid = Number(paidByReceipt.get(Number(r.id)) || 0);
@@ -2951,8 +3223,47 @@ async function createProcessing(payload) {
   return processing;
 }
 
+// Cit mai datoreaza partenerul, ACUM, inainte de plata curenta.
+//
+// Se calculeaza din aceeasi alocare pe care o folosesc ecranele (`alocaPlatiPeReceptii`),
+// excluzand tranzactia in curs — altfel si-ar plafona propriul avans cu ea insasi.
+// Fara acoperire aleasa se iau toate receptiile in stoc ale partenerului; cu acoperire, doar
+// cele bifate, fiindca doar ele vor primi banii in alocarea tintita.
+function datorieRamasaPartener(state, transaction, receipt) {
+  const fara = {
+    ...state,
+    transactions: (state.transactions || []).filter((t) => Number(t.id) !== Number(transaction.id))
+  };
+  const { paidByReceipt } = alocaPlatiPeReceptii(fara);
+
+  const partenerId = transaction.partnerId != null
+    ? Number(transaction.partnerId)
+    : Number(receipt.supplierId);
+
+  // TOATE receptiile partenerului, indiferent de bife.
+  //
+  // Bifele hotarasc ORDINEA in care se sting, nu CIT se datoreaza: surplusul peste
+  // receptiile bifate se revarsa oricum pe celelalte (vezi alocarea din
+  // `alocaPlatiPeReceptii`). Masurind doar pe cele bifate, acelasi ban aparea de doua ori —
+  // o data ca datorie stinsa, o data ca avans disponibil de reaplicat.
+  const candidate = (state.receipts || []).filter((r) => Number(r.supplierId) === partenerId);
+
+  let datorie = 0;
+  for (const r of candidate) {
+    if (!isReceiptInStock(r)) continue;
+    if (Number(r.supplierId) !== partenerId) continue;
+    const tinta = receiptPayableValue(r);
+    const platit = Number(paidByReceipt.get(Number(r.id)) || 0);
+    datorie += Math.max(tinta - platit, 0);
+  }
+  return datorie;
+}
+
 async function createTransaction(payload) {
   const state = readReceiptsState();
+  // O SINGURA data: functia construieste o harta peste toate receptiile (~2 ms la 3 ani)
+  // si face validarea de coerenta. Iesirea timpurie pe lista goala e inauntru.
+  const acoperire = acoperireDinPayload(payload, state);
   const transaction = {
     id: nextId(state.transactions),
     referenceType:
@@ -2962,6 +3273,15 @@ async function createTransaction(payload) {
           ? "opening-debt"
           : "receipt",
     receiptId: payload.receiptId ? Number(payload.receiptId) : null,
+    // Receptiile pe care plata le acopera EXPLICIT, bifate de contabil. Gol = fara alegere,
+    // deci banii se distribuie FIFO pe tot partenerul, ca pina acum.
+    // Se tipizeaza AICI, la intrare: `acoperire1Plata` arunca tot ce nu e intreg pozitiv,
+    // iar o lista invalida n-are voie sa ajunga pe document.
+    // Se scrie DOAR cand exista bife. `"receiptIds":[]` pe fiecare tranzactie insemna 16
+    // octeti x 30.000 de documente = ~470 KB de greutate moarta in blobul descarcat la
+    // FIECARE cerere. Cititorul (`acoperire1Plata`) trateaza oricum campul absent ca lista
+    // goala, deci omiterea nu costa nimic.
+    ...(acoperire.length ? { receiptIds: acoperire } : {}),
     deliveryId: payload.deliveryId ? Number(payload.deliveryId) : null,
     openingDebtId: payload.openingDebtId || "",
     partnerId: Number(payload.partnerId),
@@ -2971,6 +3291,10 @@ async function createTransaction(payload) {
     amount: sanitizeNumber(payload.amount),
     appliedAmount: 0,
     advanceAmount: 0,
+    // Data de pe DOCUMENTUL tiparit, inghetata la creare — ca la actul de achizitie
+    // (regula 10). Derivata la fiecare tipărire, s-ar rescrie retroactiv la orice schimbare
+    // viitoare a regulii, iar hirtia din dosar n-ar mai corespunde cu ce scoate aplicatia.
+    documentDate: ziLucratoare(new Date().toISOString()),
     source: payload.source || "direct",
     complaintId: payload.complaintId ? Number(payload.complaintId) : null,
     paymentType: payload.paymentType || "",
@@ -3015,10 +3339,26 @@ async function createTransaction(payload) {
         0
       );
       const targetAmount = Number(receipt.preliminaryPayableAmount || 0);
-      const outstanding = Math.max(targetAmount - previouslyPaid, 0);
       const rawAmount = Number(transaction.amount || 0);
 
-      if (rawAmount >= 0 && targetAmount > 0 && rawAmount > outstanding) {
+      // AVANSUL se masoara fata de CIT DATOREAZA PARTENERUL, nu fata de o singura receptie.
+      //
+      // Inainte, `outstanding` se calcula doar pe `receiptId` singular, iar tot restul
+      // devenea avans — in timp ce alocarea de la citire imprastia suma INTREAGA pe
+      // receptiile partenerului. Aceiasi bani apareau de doua ori: o data ca datorii stinse,
+      // o data ca avans disponibil de reaplicat. Masurat: 16.920 lei platiti produceau
+      // 16.920 alocati PLUS 11.280 lei de avans.
+      //
+      // Defectul era vechi (aparea la fel si fara bife), dar plata pe mai multe receptii il
+      // muta din caz rar in flux normal. Avans inseamna „bani peste cit se datoreaza", si
+      // atit.
+      const datoriiPartener = datorieRamasaPartener(state, transaction, receipt);
+      const outstanding = Math.max(datoriiPartener, 0);
+
+      // Poarta pe datoria PARTENERULUI, nu pe cea a receptiei de referinta. Cu o receptie
+      // fara pret (datorie 0), poarta veche cadea si surplusul nu mai devenea avans — banii
+      // nu apareau nici ca datorie stinsa, nici ca avans. Dispareau.
+      if (rawAmount >= 0 && outstanding > 0 && rawAmount > outstanding) {
         transaction.appliedAmount = outstanding;
         transaction.advanceAmount = rawAmount - outstanding;
 
@@ -3047,9 +3387,47 @@ async function createTransaction(payload) {
             newValue: { partnerId: transaction.partnerId, amount: transaction.advanceAmount }
           });
         }
+      } else if (rawAmount > 0 && outstanding <= 0) {
+        // Partenerul nu mai datoreaza nimic, dar a primit bani: TOT e avans. Fara ramura
+        // asta, `appliedAmount` lua suma intreaga pe o datorie inexistenta si banii
+        // dispareau din evidenta.
+        transaction.appliedAmount = 0;
+        transaction.advanceAmount = rawAmount;
+        if (!Array.isArray(state.partnerAdvances)) state.partnerAdvances = [];
+        const advanceId = nextId(state.partnerAdvances);
+        state.partnerAdvances.push({
+          id: advanceId,
+          partnerId: transaction.partnerId,
+          partner: transaction.partner,
+          transactionId: transaction.id,
+          amount: rawAmount,
+          remainingAmount: rawAmount,
+          source: "overpayment",
+          note: `Plata fara datorie deschisa, din tranzactia #${transaction.id}`,
+          createdAt: new Date().toISOString()
+        });
+        createAuditEntry(state, {
+          entityType: "partner-advance",
+          entityId: advanceId,
+          action: "create",
+          reason: `Avans creat: plata #${transaction.id} fara datorie deschisa`,
+          user: payload.createdBy || "dashboard",
+          newValue: { partnerId: transaction.partnerId, amount: rawAmount }
+        });
       } else {
         transaction.appliedAmount = rawAmount;
         transaction.advanceAmount = 0;
+      }
+
+      // INVARIANTA: fiecare leu primit e ori atribuit unei datorii, ori pus deoparte ca
+      // avans. Nici pierdut, nici numarat de doua ori. Cade ZGOMOTOS daca se rupe — e
+      // singura verificare care prinde o viitoare rescriere a ramurilor de mai sus.
+      const impartit = Number(transaction.appliedAmount || 0) + Number(transaction.advanceAmount || 0);
+      if (rawAmount > 0 && Math.abs(impartit - rawAmount) > 0.005) {
+        throw new Error(
+          `Eroare interna la impartirea platii: ${impartit.toFixed(2)} lei repartizati din ` +
+          `${rawAmount.toFixed(2)} lei primiti. Plata nu a fost inregistrata.`
+        );
       }
 
       const totalApplied =
@@ -4604,7 +4982,10 @@ async function correctReceiptTerms(id, payload = {}) {
   // Datoria nu poate cobori sub cat s-a achitat deja: restul ar deveni 0, receptia ar aparea
   // „Achitat", iar banii dati in plus ar disparea din evidenta. Ordinea corecta e storno de
   // plata intai, corectare dupa — acelasi precedent ca la retur pe livrare cu incasari.
-  const dejaAchitat = Number(receipt.paidAmount || 0);
+  // Suma DERIVATA, din aceeasi sursa ca ecranele — nu `receipt.paidAmount`, care e scris
+  // doar pe receptia pe care s-a inregistrat plata. O receptie stinsa printr-o plata
+  // facuta pe alta (FIFO sau acoperire aleasa) avea 0 acolo si ocolea garda.
+  const dejaAchitat = sumaAchitataPeReceptie(state, receipt.id);
   const sumaNoua = Number(estimate.preliminaryPayableAmount || 0);
   if (dejaAchitat > 0 && sumaNoua < dejaAchitat) {
     throw new Error(
@@ -6710,7 +7091,10 @@ async function exportSuppliersFor1c(options = {}) {
       "Cod fiscal / IDNP": cod,
       Denumire: String(p.name || "").trim(),
       "Denumire completa": String(p.name || "").trim(),
-      "Tip contraparte": persoanaFizica ? "ЧастноеЛицо" : "ЮридическоеЛицо",
+      // Valorile enumerarii sint cele pe care le scrie 1C INSUSI (verificat in exportul
+      // real al utilizatorului: 2.491 x Организация, 763 x ЧастноеЛицо, zero ЮридическоеЛицо).
+      // Cu valoarea gresita, 1C nu recunoaste tipul si contraparte ramane neclasificata.
+      "Tip contraparte": persoanaFizica ? "ЧастноеЛицо" : "Организация",
       "Adresa juridica": String(p.address || "").trim(),
       Telefon: String(p.phone || "").trim(),
       Nerezident: "false",
@@ -6718,7 +7102,14 @@ async function exportSuppliersFor1c(options = {}) {
       IBAN: String(p.iban || "").trim(),
       "Profil fiscal": String(p.fiscalProfile || "").trim(),
       "Observatii export": avertismentModificat1c(p),
-      _id: p.id
+      _id: p.id,
+      // CHEI STRUCTURALE, pentru consumatorii care nu sint Excel (exportul XML).
+      // Denumirile de mai sus sint etichete PENTRU OM: se pot redenumi oricand, iar o
+      // redenumire ar face exportul XML sa scoata un fisier valid si GOL — masurat.
+      // Prefixul `_` le tine in afara CSV-ului (`trimiteCsv1c` le sterge pe toate).
+      _cod: cod,
+      _denumire: String(p.name || "").trim(),
+      _persoanaFizica: persoanaFizica
     });
   }
 
@@ -6823,6 +7214,30 @@ function brutDinNet1c(net, cota) {
   return Number(net) / (1 - c / 100);
 }
 
+// Receptiile pe care o plata le stinge IN REALITATE.
+//
+// Nu `receiptId` (acolo e doar inregistrata) si nu `receiptIds` (acolo e doar preferinta
+// omului): se citeste din aceeasi alocare pe care o folosesc ecranele, cu si fara aceasta
+// plata. Diferenta dintre cele doua e exact ce a stins ea.
+//
+// E singura sursa pe care se poate sprijini exportul fiscal: impozitul retinut depinde de
+// COTA receptiilor atinse, iar ele pot fi altele decat cea de pe document.
+function receptiiAtinseDePlata(state, tranzactie) {
+  const fara = {
+    ...state,
+    transactions: (state.transactions || []).filter(
+      (t) => Number(t.id) !== Number(tranzactie.id)
+    )
+  };
+  const inainte = alocaPlatiPeReceptii(fara).paidByReceipt;
+  const dupa = alocaPlatiPeReceptii(state).paidByReceipt;
+  const atinse = [];
+  for (const [id, suma] of dupa) {
+    if (Number(suma || 0) - Number(inainte.get(id) || 0) > 0.005) atinse.push(Number(id));
+  }
+  return atinse;
+}
+
 async function exportPaymentsFor1c(options = {}) {
   const state = readReceiptsState();
   const config = readConfigState();
@@ -6879,12 +7294,26 @@ async function exportPaymentsFor1c(options = {}) {
     const avertismente = [];
     const esteNumerar = /numerar/i.test(tipPlata);
     const cotaReceptie = Number((receptie || {}).withholdingPercent);
+    // Receptiile pe care plata le atinge EFECTIV, nu cea pe care a fost inregistrata.
+    // `appliedAmount` nu mai e un indiciu: de cand avansul se masoara pe tot partenerul,
+    // el e suma intreaga si pe o plata care stinge cinci receptii.
+    const atinse = receptiiAtinseDePlata(state, t);
+    const coteAtinse = new Set(
+      atinse.map((r) => Number(receptiiPeId.get(Number(r)) ? receptiiPeId.get(Number(r)).withholdingPercent : NaN))
+    );
+    const oSinguraCota = coteAtinse.size === 1 && Number.isFinite([...coteAtinse][0]);
+    const cotaFolosita = oSinguraCota ? [...coteAtinse][0] : cotaReceptie;
+
     const integralPeReceptie =
       Boolean(receptie) &&
       String(t.referenceType || "") === "receipt" &&
       avans <= 0 &&
-      Math.abs(atribuit - platit) < 0.005;
-    const brutPosibil = brutDinNet1c(platit, cotaReceptie);
+      atinse.length > 0 &&
+      // Toate receptiile atinse trebuie sa aiba ACEEASI cota inghetata. Cu cote diferite nu
+      // exista un singur brut din care sa iasa suma platita — orice cifra am scrie ar fi
+      // inventata. Regula 13: mai bine o celula goala decat un impozit care nu s-a retinut.
+      oSinguraCota;
+    const brutPosibil = brutDinNet1c(platit, cotaFolosita);
     const sigur = esteNumerar && integralPeReceptie && brutPosibil !== null;
 
     let brut = "";
@@ -6896,15 +7325,27 @@ async function exportPaymentsFor1c(options = {}) {
       impozit = (b - platit).toFixed(2);
       // Cota se afiseaza intreaga doar daca E intreaga: 6,5% rotunjit la „7" ar face ca 1C
       // sa recalculeze altceva decat brutul exportat.
-      cotaAfisata = Number.isInteger(cotaReceptie)
-        ? cotaReceptie.toFixed(0)
-        : String(cotaReceptie);
+      cotaAfisata = Number.isInteger(cotaFolosita)
+        ? cotaFolosita.toFixed(0)
+        : String(cotaFolosita);
     } else {
       if (!esteNumerar) {
         avertismente.push(
           tipPlata
             ? `plata e „${tipPlata}", nu numerar — nu intra pe contul de casa; verifica documentul si contul`
             : "plata nu are tip inregistrat — nu se poate sti daca a iesit din casa; verifica documentul si contul"
+        );
+      }
+      if (atinse.length > 1 && !oSinguraCota) {
+        avertismente.push(
+          `plata stinge ${atinse.length} receptii cu cote de retinere DIFERITE ` +
+          `(${[...coteAtinse].filter(Number.isFinite).map((c) => `${c}%`).join(", ")}) — ` +
+          "nu exista un singur brut din care sa iasa suma; completeaza manual"
+        );
+      } else if (atinse.length > 1) {
+        avertismente.push(
+          `plata stinge ${atinse.length} receptii — brutul e reconstituit pe cota comuna, ` +
+          "verifica pe actele acoperite"
         );
       }
       if (String(t.referenceType || "") !== "receipt") {
@@ -6947,7 +7388,13 @@ async function exportPaymentsFor1c(options = {}) {
 
     randuri.push({
       "Nr. plata": t.id,
-      Data: zi,
+      // Ziua LUCRATOARE, exact ca pe ordinul de plata tiparit. Platile se fac in zile
+      // lucratoare, iar exportul nu are voie sa contrazica hirtia semnata (regula 13):
+      // acelasi РКО iesea pe hirtie cu luni si in 1C cu simbata, pe contul 241.1.
+      // `zi` ramine criteriul de FILTRARE pe perioada, ca selectia sa nu se mute.
+      // Data INGHETATA pe document. Pentru platile dinaintea regulii campul lipseste, deci
+      // se deriva — asa istoricul nu se rescrie si nici nu ramine gol.
+      Data: String(t.documentDate || "").slice(0, 10) || ziLucratoare(zi),
       "Tip plata": tipPlata,
       Furnizor: String(t.partner || (partener || {}).name || "").trim(),
       "Cod fiscal / IDNP": cod,
@@ -7320,6 +7767,7 @@ module.exports = {
   applyAdvanceCredit,
   appendAuditLog,
   allocateDocumentNumber,
+  ziLucratoare,
   cancelDelivery,
   cancelReceipt,
   cancelTransfer,

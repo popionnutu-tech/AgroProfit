@@ -1,3 +1,5 @@
+const { construiesteXmlFurnizori } = require("./export-1c-xml");
+
 const {
   exportPaymentsFor1c,
   listPending1c,
@@ -107,9 +109,11 @@ function trimiteCsv1c(res, columns, rows, numeFisier) {
   // Antetul `X-Document-Ids` a fost SCOS: nimeni nu il citea (interfata are deja id-urile pe
   // care le-a trimis), se repeta per RAND la actele multi-linie, si neplafonat putea depasi
   // limita de antet a platformei — rupand descarcarea cu un 500 greu de explicat.
+  // Se sterg TOATE campurile interne (prefix `_`), nu doar `_id`: rindurile poarta acum si
+  // chei structurale pentru exportul XML, care n-au ce cauta in fisierul contabilului.
   rows = rows.map((r) => {
-    const copie = { ...r };
-    delete copie._id;
+    const copie = {};
+    for (const [k, v] of Object.entries(r)) if (!k.startsWith("_")) copie[k] = v;
     return copie;
   });
   // INJECTIE DE FORMULE: o celula care incepe cu `= + - @`, TAB sau CR e interpretata de
@@ -136,14 +140,57 @@ function trimiteCsv1c(res, columns, rows, numeFisier) {
   if (typeof res.setHeader === "function") {
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", `attachment; filename="${numeFisier}"`);
+    // ACELEASI date personale ca in XML — IDNP-uri, adrese, telefoane, IBAN-uri si sume
+    // pentru persoane fizice. Fara asta, fisierul ramane in cache-ul de disc al browserului
+    // de pe statia contabilului, mult dupa ce a fost sters din Descarcari.
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("X-Content-Type-Options", "nosniff");
   }
   if (typeof res.status === "function") res.status(200);
   else res.statusCode = 200;
   res.end("\ufeff" + csv);
 }
 
+// Formatul NATIV de schimb al lui 1C. Se incarca direct, fara potrivire de coloane.
+// Acelasi drum ca `trimiteCsv1c` — difera doar tipul de continut si corpul.
+function trimiteXml1c(res, xml, numeFisier) {
+  if (typeof res.setHeader === "function") {
+    res.setHeader("Content-Type", "application/xml; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${numeFisier}"`);
+    // Fisierul contine IDNP-uri, adrese si telefoane. Fara asta ramane in cache-ul de disc
+    // al browserului de pe statia contabilului.
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+  }
+  if (typeof res.status === "function") res.status(200);
+  else res.statusCode = 200;
+  // BOM-ul e pus de constructor, ca in exportul real al lui 1C.
+  res.end(xml);
+}
+
+// `?format=xml` -> formatul nativ 1C; orice altceva -> CSV.
+// CSV-ul ramane IMPLICIT deliberat: e verificat pe import real, XML-ul e optiunea noua.
+//
+// `suportaXml` spune daca RUTA stie sa scoata XML. Garda e AICI, pe server, nu doar in
+// interfata: altfel `?format=xml` pe acte sau plati intorcea 200 cu CSV inauntru si extensia
+// `.xml` pe fisier — iar contabilul ar fi dus in 1C un fisier care nu se poate importa,
+// convins ca e XML. Ceruta explicit si nesuportata => eroare, nu tacere.
+function formatCerut(req, suportaXml) {
+  const cerut = String((req.query || {}).format || "").trim().toLowerCase();
+  if (!cerut || cerut === "csv") return "csv";
+  if (cerut === "xml" && suportaXml) return "xml";
+  const e = new Error(
+    cerut === "xml"
+      ? "Formatul XML e disponibil deocamdata doar pentru furnizori. Pentru acte si plati, foloseste CSV."
+      : `Format necunoscut: ${cerut}. Foloseste csv sau xml.`
+  );
+  e.statusCode = 400;
+  throw e;
+}
+
 async function exportPurchaseActs1cHandler(req, res) {
   try {
+    formatCerut(req, false); // refuza `?format=xml`: ruta asta scoate doar CSV
     const q = req.query || {};
     const { columns, rows } = await exportPurchaseActsFor1c({
       from: q.from,
@@ -164,6 +211,7 @@ async function exportPurchaseActs1cHandler(req, res) {
 // contul contabil, iar actul justifica datoria.
 async function exportPayments1cHandler(req, res) {
   try {
+    formatCerut(req, false); // refuza `?format=xml`: ruta asta scoate doar CSV
     const q = req.query || {};
     const { columns, rows } = await exportPaymentsFor1c({
       from: q.from,
@@ -192,9 +240,38 @@ async function exportSuppliers1cHandler(req, res) {
       onlyNew: !["1", "true"].includes(String((req.query || {}).includeExported || "").toLowerCase()),
       partnerIds: idsDinCerere(req)
     });
-    trimiteCsv1c(res, columns, rows, `furnizori-1c-${new Date().toISOString().slice(0, 10)}.csv`);
+    const zi = new Date().toISOString().slice(0, 10);
+    if (formatCerut(req, true) === "xml") {
+      // Se citesc CHEILE STRUCTURALE (`_cod`, `_denumire`, `_persoanaFizica`), nu etichetele
+      // de coloana. Legat pe etichete, o redenumire facea exportul sa scoata un fisier valid
+      // si GOL, iar marcajul „am incarcat in 1C" scotea furnizorii definitiv din coada.
+      const { xml, scrise, sarite } = construiesteXmlFurnizori(
+        rows.map((r) => ({
+          cod: r._cod,
+          denumire: r._denumire,
+          persoanaFizica: r._persoanaFizica === true,
+          adresa: r["Adresa juridica"],
+          telefon: r.Telefon
+        }))
+      );
+      // Cati au intrat efectiv in fisier — citit de interfata, ca hint-ul sa nu raporteze
+      // selectia in locul rezultatului.
+      if (typeof res.setHeader === "function") {
+        res.setHeader("X-Export-Scrise", String(scrise));
+        res.setHeader("X-Export-Sarite", String(sarite));
+      }
+      return trimiteXml1c(res, xml, `furnizori-1c-${zi}.xml`);
+    }
+    trimiteCsv1c(res, columns, rows, `furnizori-1c-${zi}.csv`);
   } catch (error) {
     console.error("Failed to export suppliers for 1C:", error.message);
+    // Lipsa fisierului de reguli e o eroare de SERVER, nu de cerere, iar `error.message`
+    // contine calea absoluta de pe server. Calea ramane in log, nu pleaca la client.
+    if (error && error.code === "ENOENT") {
+      return sendJson(res, 500, {
+        error: "Regulile de conversie 1C lipsesc de pe server. Anunta administratorul."
+      });
+    }
     return sendJson(res, error.statusCode || 400, {
       error: error.message || "Nu am putut exporta furnizorii."
     });
@@ -290,6 +367,7 @@ module.exports = {
   exportPurchaseActs1cHandler,
   exportSuppliers1cHandler,
   trimiteCsv1c,
+  trimiteXml1c,
   exportResourceHandler,
   getDashboardHandler,
   getDeliveryDefaultsHandler,

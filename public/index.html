@@ -1179,6 +1179,27 @@
               <select name="referenceId" id="transaction-reference-select" required></select>
             </label>
 
+            <div id="transaction-coverage" hidden>
+              <span class="field-hint" style="display:block;margin-bottom:4px">
+                <b>Ce acoperă plata.</b> Bifează recepțiile pe care le stinge. Dacă nu bifezi
+                nimic, banii se duc automat pe cele mai vechi neachitate ale furnizorului.
+              </span>
+              <div class="table-wrap" style="max-height:200px;overflow:auto">
+                <table id="transaction-coverage-table">
+                  <thead>
+                    <tr>
+                      <th style="width:28px"><input type="checkbox" id="transaction-coverage-all" title="Bifează tot" /></th>
+                      <th>Recepție</th>
+                      <th>Data</th>
+                      <th style="text-align:right">Rest de plată</th>
+                    </tr>
+                  </thead>
+                  <tbody id="transaction-coverage-body"></tbody>
+                </table>
+              </div>
+              <span class="field-hint" id="transaction-coverage-hint"></span>
+            </div>
+
             <div class="split">
               <label>
                 Tip operatie
@@ -2074,7 +2095,19 @@
               </div>
 
               <div class="report-actions" style="margin:6px 0">
+                <label class="inline-check" style="padding:4px 8px" id="export-1c-format-wrap">
+                  <span>Format</span>
+                  <select id="export-1c-format" style="margin-left:6px">
+                    <option value="csv">CSV (pentru Excel)</option>
+                    <option value="xml">XML nativ 1C (de verificat la primul import)</option>
+                  </select>
+                </label>
                 <button type="button" id="export-1c-download-btn" class="cell-btn cell-btn-primary">⬇ Descarcă selecția</button>
+                <span class="field-hint" id="export-1c-xml-nota" hidden>
+                  Formatul XML e nou. Încearcă-l întâi pe <b>un furnizor sau doi</b> și
+                  verifică în 1C că au intrat cu adresa și tipul corect. CSV-ul rămâne
+                  varianta verificată.
+                </span>
                 <button type="button" id="export-1c-mark-btn" class="cell-btn">✓ Am încărcat în 1C</button>
                 <button type="button" id="export-1c-unmark-btn" class="cell-btn">↺ Anulează marcajul</button>
                 <span class="field-hint" id="export-1c-hint"></span>

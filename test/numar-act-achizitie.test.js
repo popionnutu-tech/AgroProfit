@@ -129,10 +129,13 @@ test("fiecare firma are propriul sir — fara gauri in registrul niciuneia", asy
     const b = await receptie(storage, "F2");
     const c = await receptie(storage, "F3");
 
+    // „PAT" e o serie ISTORICA: are pe hirtie numerele 1-913, scrise de mina, deci sirul ei
+    // porneste de la 914. Pragul e in `PRAGURI_SERIE`.
     assert.equal((await storage.assignActNumber([a.id], PAT)).actNumber, START);
-    // Alta firma porneste propriul sir, nu continua pe al primei.
-    assert.equal((await storage.assignActNumber([b.id], AGR)).actNumber, START);
-    // Prima firma continua de unde a ramas: fara gaura.
+    // „AGR" e serie proprie, FARA istorie pe hirtie: porneste curat de la 1. Nu continua
+    // sirul celeilalte — altfel in registrul fiecareia ar ramine gauri.
+    assert.equal((await storage.assignActNumber([b.id], AGR)).actNumber, 1);
+    // Prima continua de unde a ramas: fara gaura.
     assert.equal((await storage.assignActNumber([c.id], PAT)).actNumber, START + 1);
   });
 });

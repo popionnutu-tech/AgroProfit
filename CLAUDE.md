@@ -597,6 +597,68 @@ produse duplicate** la fiecare import.
   iar cele k lipsă nu mai apăreau niciodată în export.
 - Neutralizarea de formule testează **ambele condiții pe valoarea trimuită**, în
   `trimiteCsv1c` ȘI în `toCsvField`: `" =1+1"` nu era nici număr, nici periculos, și scăpa.
+### 13b. Export 1C în XML nativ (`ФайлОбмена`) — doar FURNIZORI deocamdată
+CSV-ul se încarcă manual, coloană cu coloană. XML-ul e formatul pe care 1C îl citește direct.
+Ambele pleacă din `exportSuppliersFor1c`; CSV rămâne **implicit**, XML e opt-in (`?format=xml`).
+
+- **Se poate doar la contragenți, și de-asta:** în formatul de schimb 1C potrivește obiectele
+  după cheia din `<Ссылка>`. Pentru majoritatea tipurilor cheia e GUID-ul, iar un GUID
+  inventat de noi ar CREA obiecte noi la fiecare import. Regula `Контрагенты` **nu** are
+  `СинхронизироватьПоИдентификатору`, deci potrivirea e pe cheia naturală
+  `(ФискКод, Наименование)` — verificat pe toți cei 763 de contragenți persoane fizice din
+  exportul real. Plus `НеЗамещать=true`: ce există deja în 1C nu se suprascrie.
+- **Cheia e PERECHEA.** O diferență de scriere în denumire („Scripniciuc Oleg" cu un spațiu
+  vs. două, cum chiar apare în nomenclatorul real) face ca 1C să nu găsească furnizorul și să
+  creeze unul nou. Apărarea e că se exportă doar furnizorii NEMARCAȚI.
+- **Actele și plățile NU pot ieși în XML** încă: documentul se leagă prin GUID de produs,
+  depozit și firmă, iar acele GUID-uri există doar în 1C. Se pot capta o singură dată, ca la
+  potrivirea furnizorilor. Până atunci `formatCerut(req, false)` **refuză** explicit
+  `?format=xml` pe acele rute — servit tăcut ca CSV, contabilul ducea în 1C un fișier cu
+  extensia `.xml` și conținut CSV.
+- **Valorile de enumerare sînt cele pe care le scrie 1C ÎNSUȘI**: `Организация` /
+  `ЧастноеЛицо`. `ЮридическоеЛицо` **nu există** în 1C (verificat: 2.491 / 763 / 0) — scrisă
+  aşa, contrapartea rămâne neclasificată, fără nicio eroare la import. Era un bug și în CSV.
+- **Traducerea rând → XML citește CHEI STRUCTURALE** (`_cod`, `_denumire`,
+  `_persoanaFizica`), nu etichetele de coloană. Legat pe etichete, o redenumire a coloanei
+  dădea **200 OK cu un fișier XML valid și ZERO obiecte** — măsurat, nu presupus: 1C îl
+  importă fără să se plângă, omul apasă „Am încărcat în 1C", iar furnizorii ies DEFINITIV din
+  coadă fără să fi ajuns acolo. Prefixul `_` ține câmpurile în afara CSV-ului
+  (`trimiteCsv1c` șterge tot ce începe cu `_`).
+- **Invarianta care închide clasa asta de bug:** `lista.length > 0 && obiecte.length === 0`
+  → **aruncă**. Un fișier valid și gol e cel mai periculos rezultat posibil. Lista goală de
+  la început e altceva — e „nu e nimic de încărcat", caz normal.
+- Constructorul întoarce `{ xml, scrise, sarite }`, iar interfața raportează **ce s-a scris**,
+  nu ce s-a bifat (anteturile `X-Export-Scrise` / `X-Export-Sarite`). Același precedent ca
+  `skipped` de la curățarea resturilor de stoc.
+- **Numele și tipurile de proprietăți NU se escapează** (sînt literali; escaparea lor însemna
+  140.000 de `replace()` la 500 de furnizori, 41% din timpul de construcție). În locul ei,
+  `verificaNumeLiteral` **aruncă** dacă vreunul conține `& < > " '` — prima proprietate
+  dinamică ar deschide injecție directă în atribut. Valorile, în schimb, trec mereu prin
+  `esc()`.
+- **Caracterele pe care XML 1.0 nu le admite se SCOT**, nu se escapează: `&#1;` și `&#xFFFF;`
+  sînt la fel de invalide ca octetul brut, iar parserul respinge **fișierul întreg**, nu
+  rândul. Se scot controalele C0, DEL, U+FFFE, U+FFFF și surogatele **nepereche**; perechile
+  valide (emoji) se păstrează.
+- **Plafon de 500 pe fișier.** Măsurat ~3.400 octeți per furnizor, deci limita de 4,5 MB a
+  răspunsului serverless se atinge pe la 1.330. `GET ?all=1&format=xml` ocolea `MAX_IDS_1C`
+  (`idsDinCerere` întoarce listă goală, iar atunci exportul scoate tot). **Nu ridica pragul** —
+  se lucrează în tranșe.
+- **Regulile de conversie** (`src/1c/reguli-schimb.xml`, 186 KiB) călătoresc în fișier: fără
+  ele, 1C nu știe să interpreteze obiectele, iar `ИдПравилКонвертации` din antet trebuie să
+  coincidă cu `<Ид>` din ele. Stau ca **fișier în repo**, nu în `systemSettings`: blobul
+  `config` se recitește la fiecare cerere, deci cei 186 KiB s-ar plăti pe fiecare request al
+  fiecărui utilizator, pentru ceva folosit de câteva ori pe lună. Sînt declarate în
+  `vercel.json` (`includeFiles`) — altfel riscul era ENOENT **doar în producție**.
+- XML-ul **nu poartă banca și IBAN-ul**, deși CSV-ul le are: în 1C contul bancar e un obiect
+  SEPARAT (`РасчетныеСчета`), referit prin `ОснРасчСчет`. Trimis ca text, ar fi ignorat tăcut.
+- ⚠️ **Nimic din repo nu dovedește că 1C acceptă fișierul.** Regulile livrate nu conțin reguli
+  de conversie de PROPRIETĂȚI, deci nu știm dacă încărcătorul aplică `ВидКонтрагента`,
+  `ЮрАдрес`, `Телефоны`. Până la un import de probă reușit, eticheta din interfață spune „de
+  verificat la primul import", nu „se încarcă direct".
+- ⚠️ **Ce a intrat deja greșit în 1C nu se repară prin reimport.** Din cauza `НеЗамещать=true`,
+  contrapărțile create cu tipul greșit rămân aşa oricât ai reexporta, inclusiv după
+  `reset: true` pe marcaj. Corectarea e **manuală, în 1C**.
+
 - **Date reale de persoane nu intră în repo** — nici în teste, nici în placeholder-e, nici în
   comentarii. Repo-ul e PUBLIC: o pereche nume + IDNP publicată acolo nu se mai poate retrage
   (clone, cache, indexare), iar un commit ulterior nu o șterge. Fixture-ele folosesc date
