@@ -2128,11 +2128,16 @@
                 <button type="button" id="export-1c-unmark-btn" class="cell-btn">↺ Anulează marcajul</button>
                 <span class="field-hint" id="export-1c-hint"></span>
               </div>
-              <p class="field-hint" style="margin:2px 0 6px">
-                <b>Potrivire de pornire:</b> lipește aici codurile fiscale ale furnizorilor
-                care există deja în 1C (din exportul nomenclatorului) și apasă „Potrivește".
-                Se face <b>o singură dată</b> — de atunci marcajul zilnic funcționează singur.
-              </p>
+              <details style="margin:8px 0">
+                <summary style="cursor:pointer;color:var(--muted,#666)">
+                  Potrivire de pornire cu 1C <b>(s-a făcut deja)</b>
+                </summary>
+                <p class="field-hint" style="margin:6px 0">
+                  Pasul care marchează furnizorii existenți deja în 1C, ca primul export să nu-i
+                  scoată și pe ei. Se face <b>o singură dată</b>, iar de atunci marcajul zilnic
+                  funcționează singur — <b>nu mai ai nevoie de el</b>.
+                  Rămâne aici doar pentru cazul în care baza 1C se reconstruiește.
+                </p>
               <div class="split">
                 <label>Fișierul exportat din 1C (nomenclatorul de contragenți)
                   <input type="file" id="export-1c-file" accept=".xml,.txt,.csv" />
@@ -2147,6 +2152,7 @@
               <div class="report-actions" style="margin:6px 0">
                 <button type="button" id="export-1c-match-btn" class="cell-btn">Potrivește cu 1C</button>
               </div>
+              </details>
               <p class="field-hint" style="margin:2px 0 6px">
                 <b>Ordinea contează.</b> „Furnizori noi" scoate doar furnizorii care nu au
                 fost încă încărcați în 1C. După ce îi importezi acolo, apasă
@@ -2369,6 +2375,13 @@
                   <option value="false">Inactiv</option>
                 </select>
               </div>
+              <label>Identificator 1C (opțional)
+                <input name="guid1c" placeholder="c136b69a-13bf-11ed-811f-2cfda1bbfecf" />
+                <span class="field-hint">
+                  Produsul corespunzător din nomenclatorul 1C. Fără el, actele cu acest produs
+                  nu se pot exporta în XML — se copiază din 1C. Cerealele obișnuite sunt deja legate.
+                </span>
+              </label>
               <button type="submit">Adauga produs</button>
             </form>
             <div class="list-block" id="products-list"></div>

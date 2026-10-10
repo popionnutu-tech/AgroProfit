@@ -40,8 +40,10 @@ const NPP_PAS = 100;
 const NPP_SLOTURI = 60;
 const MAX_ACTE_XML = 120;
 const MAX_RANDURI_XML = 300;
-// Ordinul de casa e mult mai mic decat actul (~6,7 KB fata de ~15 KB), deci incape mai mult.
-const MAX_PLATI_XML = 400;
+// Masurat, nu estimat: 11.013 octeti per ordin (sablonul e chirilic, deci 2 octeti pe
+// caracter). La 400 ieseau 4,39 MB — 97,6% din plafonul de 4,5 MB al platformei, adica
+// fara nicio marja. La 250 raman 2,75 MB, cu aceeasi rezerva ca la acte si furnizori.
+const MAX_PLATI_XML = 250;
 
 let sablonCache = null;
 let sablonPlataCache = null;
@@ -73,9 +75,22 @@ function sablon() {
 }
 
 let idCache = null;
+
+// Identificatorii instalarii 1C. SABLONUL e sursa pentru GUID-urile din document (conturi,
+// taxe, cota TVA, utilizator) — ele sint literale acolo, asa cum le-a scris 1C. Fisierul
+// asta tine ce NU e in sablon.
+//
+// ⚠️ Nu duplica aici un GUID care e deja in sablon: ar fi doua surse pentru aceeasi
+// constanta, iar cine o corecteaza intr-un loc n-ar schimba nimic in fisierul generat.
 function identificatori() {
   if (idCache === null) idCache = JSON.parse(fs.readFileSync(CALE_ID, "utf8"));
   return idCache;
+}
+
+// Firma pe care o poarta sablonul, ca id din nomenclatorul AgroProfit. Actele altei firme
+// nu se pot exporta in XML: sablonul are persoana juridica fixata.
+function identificatoriFirma() {
+  return Number(identificatori().firmaIdAgroProfit || 0);
 }
 
 // Totul ce vine din date trece pe aici: sablonul se completeaza prin inlocuire de siruri,
@@ -394,8 +409,7 @@ function construiesteXmlOrdinePlata(plati, optiuni = {}) {
   const acum = optiuni.acum instanceof Date ? optiuni.acum : new Date();
   const reguli = String(optiuni.reguli || "").trim();
 
-  // Acelasi rationament ca la acte, alt bloc: ordinul e ~6,7 KB, deci plafonul e mai larg.
-  // 190.995 + 6.700 x 400 = 2,87 MB, adica 64% din limita de 4,5 MB a platformei.
+  // 190.995 + 11.013 x 250 = 2,75 MB, adica 61% din limita de 4,5 MB a platformei.
   if (lista.length > MAX_PLATI_XML) {
     const e = new Error(
       `Prea multe ordine de plata intr-un singur fisier XML (${lista.length}, maxim ` +
@@ -466,6 +480,7 @@ function construiesteXmlOrdinePlata(plati, optiuni = {}) {
 
 module.exports = {
   construiesteXmlActe,
+  identificatoriFirma,
   construiesteXmlOrdinePlata,
   MAX_PLATI_XML,
   MAX_ACTE_XML,

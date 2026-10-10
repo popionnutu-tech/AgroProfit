@@ -78,7 +78,10 @@ declare
   -- Praguri inferioare PE SERIE, oglinda lui `PRAGURI_SERIE` din `src/local-storage.js`.
   -- „PAT" are pe hartie 1-913 scrise de mana, deci sirul ei porneste de la 914. O serie
   -- noua n-are istorie pe hartie si porneste curat de la 1.
-  v_prag integer := case when v_series = 'PAT' then 913 else 0 end;
+  -- OGLINDA lui `PRAGURI_SERIE` din `src/local-storage.js`. Ambele serii istorice, nu doar
+  -- una: seria de pe hirtiile semnate e „AP", iar un prag lipsa acolo ar aloca numarul 1
+  -- peste actele 1-913 scrise de mina. Se schimba in AMBELE locuri.
+  v_prag integer := case when v_series in ('AP', 'PAT') then 913 else 0 end;
 begin
   if p_company_id is null then
     raise exception 'Firma emitenta e obligatorie';

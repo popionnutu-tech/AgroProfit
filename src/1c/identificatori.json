@@ -7,7 +7,8 @@
     "Se schimba doar daca se reconstruieste baza 1C. Produsele NU sint aici: ele se adauga des",
     "si se leaga din nomenclator, pe fiecare produs (campul `guid1c`).",
     "",
-    "Fisierul e inclus in bundle prin `includeFiles` din vercel.json."
+    "Fisierul e inclus in bundle prin `includeFiles` din vercel.json.",
+    "firmaIdAgroProfit = id-ul firmei din nomenclatorul AgroProfit care corespunde persoanei juridice fixate in sablon. Actele altei firme nu se exporta in XML."
   ],
   "firma": "599e7f3a-877f-11e4-9285-70f395a1a7ca",
   "firmaDenumire": "PAT-9 SRL",
@@ -24,5 +25,6 @@
   "inspectoratFiscalCod": "32",
   "valuta": "LEI",
   "valutaCod": "498",
-  "unitateMasuraCod": "005"
+  "unitateMasuraCod": "005",
+  "firmaIdAgroProfit": 1
 }

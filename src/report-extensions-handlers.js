@@ -1,5 +1,8 @@
 const { construiesteXmlFurnizori, reguliSchimb } = require("./export-1c-xml");
-const { construiesteXmlActe, construiesteXmlOrdinePlata } = require("./export-1c-acte");
+const {
+  construiesteXmlActe, construiesteXmlOrdinePlata, identificatoriFirma,
+  MAX_ACTE_XML, MAX_PLATI_XML
+} = require("./export-1c-acte");
 
 const {
   exportPaymentsFor1c,
@@ -64,6 +67,9 @@ async function getDashboardHandler(req, res) {
 // Acelasi plafon ca la marcare (`idUri1c`): altfel se descarca 600, se importa 600, iar
 // marcarea cade cu „prea multe documente" -> re-descarcare -> DUBLU import in 1C.
 const MAX_IDS_1C = 500;
+// Plafon pe randurile unui CSV de acte. 20.000 de randuri = 3,3 MB si creste cu
+// istoricul; limita de raspuns a platformei e 4,5 MB.
+const MAX_RANDURI_CSV = 10000;
 
 // Ids-urile vin din CORPUL cererii (POST) sau din query (GET, pentru compatibilitate).
 // In URL, „bifeaza tot" pe mii de documente depasea limita de antet a platformei si
@@ -191,6 +197,14 @@ function formatCerut(req, suportaXml) {
 
 async function exportPurchaseActs1cHandler(req, res) {
   try {
+    // Acelasi motiv ca la plati: mai bine un refuz imediat decat calcul irosit.
+    const ceruteActe = idsDinCerere(req);
+    if (ceruteActe.length > MAX_ACTE_XML && formatCerut(req, true) === "xml") {
+      return sendJson(res, 400, {
+        error: `Prea multe acte pentru un fisier XML (${ceruteActe.length}, ` +
+          `maxim ${MAX_ACTE_XML}). Descarca in transe mai mici sau foloseste formatul CSV.`
+      });
+    }
     const q = req.query || {};
     const { columns, rows } = await exportPurchaseActsFor1c({
       from: q.from,
@@ -198,6 +212,9 @@ async function exportPurchaseActs1cHandler(req, res) {
       // `?includeUnissued=1` -> si receptiile fara act emis din aplicatie (perioada veche,
       // unde numerele sint scrise de mina si 1C numeroteaza singur).
       includeUnissued: ["1", "true"].includes(String(q.includeUnissued || "").toLowerCase()),
+      // Plafon si pe CSV: cu „perioada veche" bifata, tot istoricul da 3,3 MB si creste cu
+      // fiecare an. Fara el, descarcarea cade cu o eroare opaca de platforma.
+      maxRanduri: MAX_RANDURI_CSV,
       onlyNew: !["1", "true"].includes(String(q.includeExported || "").toLowerCase()),
       receiptIds: idsDinCerere(req)
     });
@@ -227,7 +244,9 @@ async function exportPurchaseActs1cHandler(req, res) {
           });
         }
         const act = peAct.get(cheie);
-        act.temeiuri.push(`Recepția #${r["Nr. recepție"]} · ${r.Produs || ""}`.trim());
+        // Chei structurale, nu etichete pentru om: o redenumire de coloana ar fi pus
+        // un `undefined` pe documentul fiscal.
+        act.temeiuri.push(`Recepția #${r._receptieId} · ${r._produs || ""}`.trim());
         act.total += Number(r._valoare || 0);
         act.net += Number(r._net || 0);
         act.randuri.push({
@@ -242,7 +261,12 @@ async function exportPurchaseActs1cHandler(req, res) {
         // `Сумма` e BRUTUL, `СуммаПН` impozitul retinut din el — ca in exportul real al 1C.
         impozit: Math.max(a.total - a.net, 0)
       }));
-      const r = construiesteXmlActe(acte, { reguli: reguliSchimb() });
+      // Firma din sablon: actele emise pe ALTA firma nu se pot exporta in XML, fiindca
+      // sablonul poarta persoana juridica a uneia singure.
+      const r = construiesteXmlActe(acte, {
+        reguli: reguliSchimb(),
+        companyId: identificatoriFirma()
+      });
       if (typeof res.setHeader === "function") {
         res.setHeader("X-Export-Scrise", String(r.scrise));
         res.setHeader("X-Export-Sarite", String(r.sarite));
@@ -265,6 +289,16 @@ async function exportPurchaseActs1cHandler(req, res) {
 // contul contabil, iar actul justifica datoria.
 async function exportPayments1cHandler(req, res) {
   try {
+    // Plafonul se verifica INAINTE de a atinge magazia. Verificat dupa, o selectie prea mare
+    // ardea secunde bune de calcul si abia apoi primea „prea multe" — iar pe platforma
+    // functia cadea de timeout inainte sa ajunga la mesaj.
+    const cerutePlati = idsDinCerere(req);
+    if (cerutePlati.length > MAX_PLATI_XML && formatCerut(req, true) === "xml") {
+      return sendJson(res, 400, {
+        error: `Prea multe ordine de plata pentru un fisier XML (${cerutePlati.length}, ` +
+          `maxim ${MAX_PLATI_XML}). Descarca in transe mai mici sau foloseste formatul CSV.`
+      });
+    }
     const q = req.query || {};
     const { columns, rows } = await exportPaymentsFor1c({
       from: q.from,

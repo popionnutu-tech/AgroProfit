@@ -61,11 +61,30 @@ test("`$` din date NU mai evadeaza din document", () => {
   }
 });
 
-test("un marcaj ajuns in date NU inlocuieste alt cimp", () => {
-  // Cu inlocuiri secventiale, un furnizor numit `{{TOTAL}}` aparea in act cu numele
-  // inlocuit de suma, fara nicio eroare. Acum cade zgomotos.
-  assert.throws(() => fa([act({ furnizor: "{{TOTAL}}" })]), /marcaje necompletate/);
-  assert.throws(() => fa([act({ temei: "{{NPP+5}}" })]), /marcaje necompletate/);
+test("un marcaj ajuns in date ramane TEXT, nu inlocuieste alt cimp", () => {
+  // Doua etape de aparare.
+  //
+  // Intai: acoladele se neutralizeaza la SURSA. Nota unei receptii e scrisa de OPERATOR, iar
+  // inainte un singur `{{TOTAL}}` acolo omora TOT lotul de acte, cu un mesaj care trimitea
+  // contabilul sa caute in sablon. Acum textul se vede literal in 1C si nu se mai poate
+  // transforma in marcaj.
+  for (const rau of ["{{TOTAL}}", "{{NPP+5}}", "{{RANDURI}}"]) {
+    const xml = fa([act({ furnizor: rau, temei: rau })]).xml;
+    parseaza(xml);
+    assert.ok(!/\{\{\w/.test(xml), `„${rau}" a format un marcaj`);
+    // Escapate, nu sterse: in 1C nota se vede exact cum a scris-o omul.
+    assert.match(xml, /&#123;&#123;/);
+  }
+});
+
+test("garda finala ramane, pentru derivele sablonului", () => {
+  // Daca vreodata sablonul capata un marcaj pe care codul nu-l completeaza, fisierul NU
+  // pleaca. E ultima aparare, iar un document fiscal cu marcaje in el n-are voie sa ajunga
+  // la contabilitate.
+  const sursa = fs.readFileSync(
+    path.join(__dirname, "..", "src", "export-1c-acte.js"), "utf8"
+  );
+  assert.match(sursa, /marcaje necompletate/, "garda finala a disparut");
 });
 
 test("data stricata nu rupe fisierul", () => {
@@ -103,12 +122,30 @@ test("numerele de ordine sint UNICE pe fisier", () => {
   assert.deepEqual(prod, [GRAU, PORUMB, PORUMB, GRAU]);
 });
 
+test("un act cu UN SINGUR produs nelegat se sare INTREG", () => {
+  // Filtrand doar randul fara produs, actul pleca cu 2 randuri de 1000 lei sub un total de
+  // 3000, iar impozitul calculat pe 3000. Document care se contrazice pe el insusi — exact
+  // precedentul regulii 10, de data asta in fisierul care intra in contabilitate.
+  const r = fa([act({
+    numar: 7,
+    total: 3000,
+    randuri: [
+      { guidProdus: GRAU, cantitateKg: 10, suma: 1000 },
+      { guidProdus: "", cantitateKg: 10, suma: 1000 },
+      { guidProdus: PORUMB, cantitateKg: 10, suma: 1000 }
+    ]
+  }), act({ numar: 8 })]);
+  assert.equal(r.scrise, 1, "actul incomplet nu are voie sa plece partial");
+  assert.equal(r.sarite, 1);
+  assert.match(r.motive[0], /nelegate de nomenclatorul 1C/);
+});
+
 test("un produs nelegat de 1C sare actul, cu motiv", () => {
   // Un GUID inventat ar CREA un produs nou in 1C la fiecare import.
   const r = fa([act({ numar: 1 }), act({ numar: 2, randuri: [{ guidProdus: "", cantitateKg: 1, suma: 1 }] })]);
   assert.equal(r.scrise, 1);
   assert.equal(r.sarite, 1);
-  assert.match(r.motive[0], /nu e legat de nomenclatorul 1C/);
+  assert.match(r.motive[0], /nelegate de nomenclatorul 1C/);
 });
 
 test("un fisier VALID SI GOL e refuzat", () => {

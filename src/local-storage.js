@@ -6985,6 +6985,10 @@ async function exportPurchaseActsFor1c(options = {}) {
   const config = readConfigState();
   // `faraActEmis` = si receptiile carora nu li s-a emis act din aplicatie (perioada veche).
   const faraActEmis = options.includeUnissued === true;
+  // Plafon pe randuri, inclusiv pe calea CSV: cu „perioada veche" bifata, tot istoricul da
+  // 3,3 MB si creste cu fiecare an, iar limita de raspuns a platformei e 4,5 MB. Fara el,
+  // descarcarea cade cu o eroare pe care omul n-o poate interpreta.
+  const maxRanduri = Math.max(Number(options.maxRanduri) || 0, 0);
   const from = String(options.from || "").trim();
   const to = String(options.to || "").trim();
   // Implicit: DOAR actele neincarcate in 1C, indiferent de data — altfel un act facut de
@@ -7072,6 +7076,14 @@ async function exportPurchaseActsFor1c(options = {}) {
     const avertisment = motive.join("; ");
 
     for (const rand of cifre.rows || []) {
+      if (maxRanduri && randuri.length >= maxRanduri) {
+        const e = new Error(
+          `Prea multe randuri intr-un singur fisier (peste ${maxRanduri}). ` +
+          "Restrange perioada sau descarca in transe."
+        );
+        e.statusCode = 400;
+        throw e;
+      }
       const sursa = receptiiPeId.get(Number(rand.id)) || receipt;
       const kg = Number(rand.netKg || 0);
       const valoare = Number(rand.value || 0);
@@ -7109,6 +7121,8 @@ async function exportPurchaseActsFor1c(options = {}) {
         _furnizor: cifre.supplierName || receipt.supplier || "",
         _codFiscal: codCurent || codInghetat,
         _temei: sursa.note || rand.product || "",
+        _receptieId: rand.id,
+        _produs: rand.product || sursa.product || "",
         // Cifrele INGHETATE la emitere: brutul e `value`, iar impozitul diferenta pina la net.
         _valoare: Number(rand.value || 0),
         _net: Number(rand.netPay || 0),
@@ -7347,28 +7361,29 @@ function brutDinNet1c(net, cota) {
   return Number(net) / (1 - c / 100);
 }
 
-// Receptiile pe care o plata le stinge IN REALITATE.
+// Receptiile pe care o plata le stinge, citite DE PE DOCUMENT.
 //
-// Nu `receiptId` (acolo e doar inregistrata) si nu `receiptIds` (acolo e doar preferinta
-// omului): se citeste din aceeasi alocare pe care o folosesc ecranele, cu si fara aceasta
-// plata. Diferenta dintre cele doua e exact ce a stins ea.
+// Versiunea anterioara deducea asta comparand alocarea cu si fara plata — doua treceri
+// complete peste tot registrul, pentru FIECARE plata. Masurat: 25 de secunde la 500 de
+// plati, peste limita de 30 a platformei, pe o ruta care produce documente fiscale.
 //
-// E singura sursa pe care se poate sprijini exportul fiscal: impozitul retinut depinde de
-// COTA receptiilor atinse, iar ele pot fi altele decat cea de pe document.
+// Nu e nevoie: cand contabilul a bifat receptiile, scrie pe document; cand nu, plata e
+// legata de una singura si atribuita integral ei. Orice alt caz (stingere FIFO pe mai multe,
+// avans, barter) ramane NESIGUR — adica exact ce voiam oricum: coloane goale si avertisment,
+// in loc de un impozit reconstituit pe o baza presupusa.
 function receptiiAtinseDePlata(state, tranzactie) {
-  const fara = {
-    ...state,
-    transactions: (state.transactions || []).filter(
-      (t) => Number(t.id) !== Number(tranzactie.id)
-    )
-  };
-  const inainte = alocaPlatiPeReceptii(fara).paidByReceipt;
-  const dupa = alocaPlatiPeReceptii(state).paidByReceipt;
-  const atinse = [];
-  for (const [id, suma] of dupa) {
-    if (Number(suma || 0) - Number(inainte.get(id) || 0) > 0.005) atinse.push(Number(id));
-  }
-  return atinse;
+  const alese = acoperire1Plata(tranzactie);
+  if (alese.length) return alese;
+
+  // Fara bife: o singura receptie, si numai daca toti banii au mers pe ea.
+  const unaSingura = Number(tranzactie.receiptId || 0);
+  if (!unaSingura) return [];
+  if (String(tranzactie.referenceType || "") !== "receipt") return [];
+  if (Number(tranzactie.advanceAmount || 0) > 0) return [];
+  const platit = Number(tranzactie.amount || 0);
+  const atribuit = Number(tranzactie.appliedAmount || 0);
+  if (Math.abs(atribuit - platit) >= 0.005) return [];
+  return [unaSingura];
 }
 
 async function exportPaymentsFor1c(options = {}) {
@@ -7549,7 +7564,9 @@ async function exportPaymentsFor1c(options = {}) {
       _companyId: Number(t.companyId || 0),
       _furnizor: (partener && partener.name) || t.partner || "",
       _codFiscal: String((partener && partener.idno) || "").trim(),
-      _temei: t.note || "",
+      // Plafonata: nota e scrisa liber, iar 400 de ordine cu note lungi treceau de
+      // limita de raspuns a platformei.
+      _temei: String(t.note || "").slice(0, 200),
       _brut: brut === "" ? null : Number(brut),
       _impozit: impozit === "" ? null : Number(impozit),
       _id: t.id
