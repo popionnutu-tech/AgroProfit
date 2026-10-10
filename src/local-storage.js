@@ -33,7 +33,7 @@ let receiptsCache = null;
 let configCache = null;
 let initPromise = null;
 
-const CURRENT_MIGRATION_VERSION = "tranșa-a-b-v1";
+const CURRENT_MIGRATION_VERSION = "serie-acte-aa-v1";
 
 const defaultReceiptsState = {
   openingDocuments: [],
@@ -7780,10 +7780,42 @@ function runMigrationIfNeeded() {
     }
     writeReceiptsState(state);
 
+    // ---------------------------------------------------------------- seria actelor -> AA
+    //
+    // Trecerea la o serie noua, ceruta de utilizator (10.10.2026). Seria veche „AP" are pe
+    // hirtie numerele 1-913 scrise de mina si 914+ emise din aplicatie; „AA" porneste curat
+    // de la 1, fiindca numerotarea e per (firma, serie) — vezi `PRAGURI_SERIE`.
+    //
+    // DE CE prin migrare si nu din Setari: utilizatorul a cerut explicit sa nu fie nevoit
+    // s-o faca manual. Se face o SINGURA data, marcata prin versiune, si DOAR pe firma care
+    // chiar are seria veche — nu pe toate, ca sa nu atingem o firma care isi are propriul sir.
+    //
+    // Actele DEJA emise nu se ating: seria e inghetata pe fiecare document (`actSeries`,
+    // `actFigures.series`). Hirtiile semnate raman cum sint.
+    let serieSchimbata = 0;
+    for (const firma of config.companies || []) {
+      if (String(firma.series || "").trim().toUpperCase() !== "AP") continue;
+      firma.series = "AA";
+      serieSchimbata += 1;
+    }
+    if (serieSchimbata) {
+      const stare = readReceiptsState();
+      createAuditEntry(stare, {
+        entityType: "migration",
+        entityId: null,
+        action: "config-update",
+        reason: `${CURRENT_MIGRATION_VERSION}: seria actelor de achizitie AP -> AA`,
+        user: "sistem",
+        oldValue: { series: "AP" },
+        newValue: { series: "AA", firme: serieSchimbata }
+      });
+      writeReceiptsState(stare);
+    }
+
     config.systemSettings.migrationVersion = CURRENT_MIGRATION_VERSION;
     writeConfigState(config);
 
-    return { migrated: true, version: CURRENT_MIGRATION_VERSION };
+    return { migrated: true, version: CURRENT_MIGRATION_VERSION, serieSchimbata };
   } catch (error) {
     console.error("Migration failed:", error.message);
     return { migrated: false, error: error.message };
