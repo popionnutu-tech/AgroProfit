@@ -209,7 +209,7 @@ function guidCont(cod, iban) {
 
 // Contul bancar al unui furnizor, ca obiect 1C separat.
 // Intoarce "" daca nu exista IBAN — atunci contrapartea pleaca fara cont, ca pina acum.
-function obiectContBancar(nrq, rand) {
+function obiectContBancar(nrq, nrqProprietar, rand) {
   const iban = curataControl(rand.iban).trim().toUpperCase();
   if (!iban) return "";
   const cod = curataControl(rand.cod).trim();
@@ -218,7 +218,10 @@ function obiectContBancar(nrq, rand) {
     `<Объект Нпп="${nrq}" Тип="СправочникСсылка.РасчетныеСчета" ` +
     `ИмяПравила="РасчетныеСчета" НеЗамещать="true"><Ссылка Нпп="${nrq}">\n` +
     proprietate("{УникальныйИдентификатор}", "Строка", guidCont(cod, iban)) +
-    `\t<Свойство Имя="Владелец" Тип="СправочникСсылка.Контрагенты"><Ссылка Нпп="${nrq + 1}">\n` +
+    // `Нпп` al PROPRIETARULUI, nu unul inventat: in formatul de schimb `Нпп` e numarul de
+    // ordine al obiectului in fisier si prin el se rezolva referintele. Un numar care se
+    // repeta sau care arata spre alt obiect leaga contul de alt furnizor.
+    `\t<Свойство Имя="Владелец" Тип="СправочникСсылка.Контрагенты"><Ссылка Нпп="${nrqProprietar}">\n` +
     proprietate("ФискКод", "Строка", cod) +
     proprietate("Наименование", "Строка", denumire) +
     `</Ссылка>\n\t</Свойство>\n` +
@@ -277,6 +280,9 @@ function construiesteXmlFurnizori(randuri, optiuni = {}) {
   const obiecte = [];
   let nrq = 0;
   let sarite = 0;
+  // Se numara CONTRAPARTILE, nu obiectele: un cont bancar nu e un furnizor in plus, iar
+  // interfata raporteaza cati furnizori au intrat in fisier.
+  let contraparti = 0;
   for (const rand of lista) {
     const cod = curataControl((rand || {}).cod).trim();
     const denumire = curataControl((rand || {}).denumire).trim();
@@ -287,11 +293,17 @@ function construiesteXmlFurnizori(randuri, optiuni = {}) {
       continue;
     }
     nrq += 1;
-    obiecte.push(obiectContragent(nrq, rand));
+    const nrqContraparte = nrq;
+    obiecte.push(obiectContragent(nrqContraparte, rand));
+    contraparti += 1;
     // Contul bancar vine DUPA contraparte: `Владелец` o refera, deci ea trebuie sa existe
-    // deja cand 1C ajunge la cont.
-    const cont = obiectContBancar(nrq + 1000000, rand);
-    if (cont) obiecte.push(cont);
+    // deja cand 1C ajunge la cont. Primeste urmatorul `Нпп` din acelasi contor — numerele
+    // de ordine sint UNICE pe fisier, nu per tip de obiect.
+    const cont = obiectContBancar(nrq + 1, nrqContraparte, rand);
+    if (cont) {
+      nrq += 1;
+      obiecte.push(cont);
+    }
   }
 
   // INVARIANTA. Un fisier valid si GOL e cel mai periculos rezultat posibil: 1C il importa
@@ -326,7 +338,7 @@ function construiesteXmlFurnizori(randuri, optiuni = {}) {
   // `scrise`/`sarite`, nu doar XML-ul: interfata raporta cate documente au fost BIFATE, nu
   // cate au intrat efectiv in fisier. Acelasi precedent ca `skipped` de la curatarea
   // resturilor de stoc (CLAUDE.md, regula 8).
-  return { xml, scrise: obiecte.length, sarite };
+  return { xml, scrise: contraparti, sarite };
 }
 
 module.exports = {
