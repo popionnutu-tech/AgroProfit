@@ -96,8 +96,10 @@ const defaultConfigState = {
     }
   ],
   products: [
-    { id: 1, name: "Grau", code: "GRAU", unit: "tone", humidityNorm: 14, impurityNorm: 2, active: true },
-    { id: 2, name: "Porumb", code: "PORUMB", unit: "tone", humidityNorm: 14, impurityNorm: 2, active: true }
+    // `guid1c` = produsul corespunzator din nomenclatorul 1C. Valorile de mai jos sint CITITE
+    // din exportul real al utilizatorului (`Nomenclator.xml`), nu inventate.
+    { id: 1, name: "Grau", code: "GRAU", unit: "tone", humidityNorm: 14, impurityNorm: 2, guid1c: "c136b69a-13bf-11ed-811f-2cfda1bbfecf", active: true },
+    { id: 2, name: "Porumb", code: "PORUMB", unit: "tone", humidityNorm: 14, impurityNorm: 2, guid1c: "c4fe64ee-a3fc-11eb-8111-2cfda1bbfecf", active: true }
   ],
   storageLocations: [
     { id: 1, name: "Cilindru 1", type: "cilindru", capacity: 2000000, capacitySunflower: 1100000, costCategory: "procesat", active: true },
@@ -1808,6 +1810,26 @@ function createDailyReport(dateValue, receipts, processings, transactions, stock
   };
 }
 
+// GUID-ul unui obiect din 1C: 8-4-4-4-12 cifre hexazecimale.
+//
+// Se valideaza FORMA, nu existenta — aceea se vede abia la import. Dar o valoare stricata
+// (copiata cu spatii, taiata, cu ghilimele) ar produce un fisier pe care 1C il refuza fara
+// sa spuna pe ce rind, asa ca se respinge la scriere.
+// Gol e permis: un produs nelegat inca nu e o eroare, doar nu se poate exporta in XML.
+function guid1cValid(valoare) {
+  const t = String(valoare === null || valoare === undefined ? "" : valoare).trim().toLowerCase();
+  if (!t) return "";
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(t)) {
+    const e = new Error(
+      "Identificatorul 1C are forma gresita. Se asteapta ceva de felul " +
+      "`c136b69a-13bf-11ed-811f-2cfda1bbfecf`, copiat din nomenclatorul 1C."
+    );
+    e.statusCode = 400;
+    throw e;
+  }
+  return t;
+}
+
 function normalizeEntityPayload(entity, payload) {
   switch (entity) {
     case "partners":
@@ -1890,6 +1912,15 @@ function normalizeEntityPayload(entity, payload) {
         impurityNorm: sanitizeNumber(payload.impurityNorm),
         cmrDescription: String(payload.cmrDescription || "").trim(),
         invoiceName: String(payload.invoiceName || "").trim().slice(0, 200),
+        // Produsul corespunzator din nomenclatorul 1C, ca GUID.
+        //
+        // In formatul de schimb, 1C potriveste nomenclatura dupa identificator, nu dupa
+        // denumire: fara el, fiecare import ar CREA un produs nou. Se ia din exportul
+        // nomenclatorului din 1C si se scrie o data, aici — nu in cod, fiindca produsele se
+        // adauga des (orz, ovaz) si trebuie legate fara modificare de program.
+        //
+        // Gol = produsul nu se poate exporta in XML catre 1C; CSV-ul merge mai departe.
+        guid1c: guid1cValid(payload.guid1c),
         active: sanitizeBoolean(payload.active ?? true)
       };
     case "storageLocations":
