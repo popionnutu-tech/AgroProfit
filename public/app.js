@@ -1849,6 +1849,10 @@ function renderUserActivity() {
   const LOW = 5; // prag pentru „activitate redusă"
   const users = (currentConfig?.users || []).slice();
   const logs = Array.isArray(auditLogsCache) ? auditLogsCache : [];
+  // Cifrele de mai jos se calculeaza pe ce a intors serverul, nu pe tot istoricul: la volum
+  // mare, jurnalul e plafonat. Se spune omului, ca sa nu citeasca „fara activitate" ca pe un
+  // fapt despre toata viata contului.
+  const peEsantion = logs.length >= 500;
 
   // Un singur pass peste jurnal: grupăm pe autor (normalizat) → {total, logins, ultimele date}.
   // Astfel randarea e O(loguri + utilizatori), nu O(utilizatori × loguri).
@@ -5819,7 +5823,12 @@ async function loadAuditLogs() {
     renderDashFeed();
     return;
   }
-  const response = await fetch("/api/audit-logs");
+  // Plafonul serverului e pentru ECRANUL de audit. Dar acelasi cache alimenteaza raportul
+  // „Activitate utilizatori", care numara autentificari si actiuni pe TOT istoricul: cu doar
+  // ultimele 500 de intrari, un utilizator activ aparea cu zero actiuni, iar adminul putea
+  // dezactiva un cont pe baza unei cifre false.
+  // Se cere maximul; pentru numaratoare e suficient, iar ecranul filtreaza oricum pe server.
+  const response = await fetch("/api/audit-logs?limit=500");
   const data = await response.json();
   auditLogsCache = data.auditLogs;
   renderAuditLogs(data.auditLogs);

@@ -2550,10 +2550,6 @@ function alocaPlatiPeReceptii(state) {
   // Restul se distribuie FIFO, dar PLATA CU PLATA, in ordine cronologica — nu dintr-o oala
   // anonima. Totalurile ies identic; diferenta e ca acum se stie ce receptii a atins fiecare
   // plata, iar exportul fiscal se poate sprijini pe asta.
-  const libereRamase = new Map();
-  for (const plata of platiLibere) {
-    libereRamase.set(plata.partnerId, (libereRamase.get(plata.partnerId) || 0));
-  }
   const platiPePartener = new Map();
   for (const plata of platiLibere) {
     if (!platiPePartener.has(plata.partnerId)) platiPePartener.set(plata.partnerId, []);
@@ -2580,7 +2576,10 @@ function alocaPlatiPeReceptii(state) {
       if (deAcoperit <= 0) continue;
 
       // Se consuma din platile libere, in ordine, ca sa stim CINE a atins receptia.
-      while (deAcoperit > 0 && idx < platile.length) {
+      // Epsilonul folosit peste tot in cod: fara el, un rest flotant de ordinul 1e-12
+      // lega plata de inca o receptie, iar daca aceea avea alta cota, exportul golea
+      // coloanele pentru o firimitura de sub un ban.
+      while (deAcoperit > 0.005 && idx < platile.length) {
         if (dinPlata <= 0) {
           idx += 1;
           if (idx >= platile.length) break;
@@ -7391,7 +7390,13 @@ function esteActExportabil1c(r, incluneNeemise) {
   if (areNumar) {
     // Fara cifrele inghetate la emitere nu avem ce exporta: recalculul ar putea contrazice
     // hartia semnata (CLAUDE.md, regula 10).
-    return Boolean(r.actFigures);
+    //
+    // Si fara RANDURI, la fel: `actFigures` a existat o perioada doar cu totalurile, inainte
+    // sa se inghete si randurile. Un asemenea act aparea in lista, iesea din CSV cu ZERO
+    // randuri si era sarit din XML cu motivul „0 produse nelegate" — care trimite contabilul
+    // exact unde nu e problema. Apoi „Am incarcat in 1C" il scotea definitiv din coada.
+    // Mai bine lipseste din lista decat sa para incarcabil.
+    return Array.isArray(r.actFigures.rows) && r.actFigures.rows.length > 0;
   }
   // PERIOADA VECHE: receptii fara act emis din aplicatie. Actele lor au numere scrise de
   // mina pe hirtie, iar utilizatorul a ales ca 1C sa numeroteze singur (decizia din

@@ -219,14 +219,17 @@ function obiectAct(act, nppBaza) {
     NPP: nppBaza,
     // Fara numar de act, identificatorul se deriva din RECEPTIA purtatoare: tot stabil
     // pentru acelasi document, deci un reimport il recunoaste in loc sa-l dubleze.
-    // Derivat MEREU din RECEPTIA purtatoare, nu din numarul actului.
+    // Derivat DOAR din recepția purtatoare. Nici numar, nici firma.
     //
     // Cand erau doua formule — una pe numar, alta pe receptie — aceeasi marfa capata doua
     // identitati: incarcata intai fara act, apoi cu actul emis, intra in 1C ca DOUA
-    // documente, cu achizitia si impozitul retinut numarate de doua ori. Marcajul
-    // `exported1cAt` nu apara: reincarcarea deliberata si actele pe mai multe receptii il
-    // ocolesc. Cu un singur identificator, reimportul ACTUALIZEAZA documentul.
-    GUID_DOC: guidDocument("act", act.companyId, "", act.receiptId),
+    // documente, cu achizitia si impozitul retinut numarate de doua ori.
+    //
+    // A doua oara, acelasi lucru prin `companyId`: o receptie fara act emis are
+    // `actCompanyId` inexistent (0), iar dupa emitere devine 1 — deci tot doua identitati,
+    // tot dublare, pe exact fluxul proiectat („incarc perioada veche, apoi emit actul").
+    // `receiptId` e unic pe toata baza: firma nu adauga unicitate, doar instabilitate.
+    GUID_DOC: guidDocument("act", 0, "", act.receiptId),
     DATA_ORA: `${zi}T12:00:00`,
     DATA: zi,
     // Numarul si seria LIPSESC pentru perioada veche: actele de atunci au numere scrise de
