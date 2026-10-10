@@ -6937,6 +6937,8 @@ const EXPORT_1C_COLUMNS = [
 async function exportPurchaseActsFor1c(options = {}) {
   const state = readReceiptsState();
   const config = readConfigState();
+  // `faraActEmis` = si receptiile carora nu li s-a emis act din aplicatie (perioada veche).
+  const faraActEmis = options.includeUnissued === true;
   const from = String(options.from || "").trim();
   const to = String(options.to || "").trim();
   // Implicit: DOAR actele neincarcate in 1C, indiferent de data — altfel un act facut de
@@ -6969,7 +6971,7 @@ async function exportPurchaseActsFor1c(options = {}) {
 
   const randuri = [];
   for (const receipt of state.receipts || []) {
-    if (!esteActExportabil1c(receipt)) continue;
+    if (!esteActExportabil1c(receipt, faraActEmis)) continue;
     if (selectie) {
       if (!selectie.has(Number(receipt.id))) continue;
     } else {
@@ -6977,7 +6979,22 @@ async function exportPurchaseActsFor1c(options = {}) {
       if (!inInterval(dataAct1c(receipt))) continue;
     }
 
-    const cifre = receipt.actFigures;
+    // Fara act emis nu exista captura inghetata: cifrele se iau de pe receptie. E corect
+    // aici si doar aici — pentru actele EMISE, recalculul ar contrazice hirtia semnata.
+    const cifre = receipt.actFigures || {
+      series: "",
+      supplierName: receipt.supplier || "",
+      supplierIdno: "",
+      supplierId: receipt.supplierId,
+      rows: [{
+        id: receipt.id,
+        product: receipt.product || "",
+        date: ziLucratoare(receipt.receivedAt || receipt.createdAt || ""),
+        netKg: Number(receiptPayableTonnes(receipt) * 1000),
+        value: Number(receipt.preliminaryMerchandiseValue || 0),
+        netPay: Number(receipt.amountToPay ?? receipt.preliminaryPayableAmount ?? 0)
+      }]
+    };
 
     const partener = parteneriPeId.get(Number(cifre.supplierId || receipt.supplierId));
     const cota = Number(receipt.withholdingPercent || 0);
@@ -7230,18 +7247,28 @@ function estePlataExportabila1c(t) {
   return true;
 }
 
-function esteActExportabil1c(r) {
+function esteActExportabil1c(r, incluneEmise) {
   if (!r) return false;
-  // Doar acte EMISE: un act neemis nu are numar, deci nu are ce cauta in contabilitate.
-  if (!(Number(r.actNumber || 0) > 0)) return false;
   if (!isReceiptInStock(r)) return false;
   // Captura sta pe PURTATOR; celelalte receptii ale actului au doar referinta. Se exporta
   // o data per act — altfel acelasi act ar aparea de N ori.
   if (Number(r.actCarrierId || 0) > 0) return false;
-  // Fara cifrele inghetate la emitere nu avem ce exporta: recalculul ar putea contrazice
-  // hartia semnata (CLAUDE.md, regula 10).
-  if (!r.actFigures) return false;
-  return true;
+
+  const areNumar = Number(r.actNumber || 0) > 0;
+  if (areNumar) {
+    // Fara cifrele inghetate la emitere nu avem ce exporta: recalculul ar putea contrazice
+    // hartia semnata (CLAUDE.md, regula 10).
+    return Boolean(r.actFigures);
+  }
+  // PERIOADA VECHE: receptii fara act emis din aplicatie. Actele lor au numere scrise de
+  // mina pe hirtie, iar utilizatorul a ales ca 1C sa numeroteze singur (decizia din
+  // 10.10.2026). Nu intra in exportul obisnuit — doar cand se cere explicit, altfel fiecare
+  // export ar scoate si tot ce n-a fost niciodata formalizat ca act.
+  //
+  // ⚠️ O receptie incarcata asa primeste un document in 1C. Daca i se emite ULTERIOR un act
+  // din aplicatie, ar fi al doilea document pentru aceeasi marfa — de-asta marcajul
+  // `exported1cAt` e singura aparare: odata incarcata, iese din coada.
+  return incluneEmise === true;
 }
 
 // Data dupa care se filtreaza un act. Aceeasi in lista si in export: altfel descarcarea pe
@@ -7585,6 +7612,7 @@ async function setExported1c(payload = {}) {
 // (`includeExported`), ca sa se poata reincarca un document corectat.
 async function listPending1c(options = {}) {
   const tip = options.kind;
+  const faraActEmis = options.includeUnissued === true;
   const from = String(options.from || "").trim();
   const to = String(options.to || "").trim();
   const includeMarcate = options.includeExported === true;
@@ -7616,12 +7644,15 @@ async function listPending1c(options = {}) {
       // ACELASI predicat ca exportul (`esteActExportabil1c`) si aceeasi data (`dataAct1c`):
       // cand divergeau, un act aparea in lista, se bifa, nu intra in CSV, iar „Am incarcat
       // in 1C" il marca — document scos din coada fara sa fi ajuns vreodata in 1C.
-      .filter(esteActExportabil1c)
+      .filter((r) => esteActExportabil1c(r, faraActEmis))
       .filter((r) => includeMarcate || !String(r.exported1cAt || "").trim())
       .filter((r) => (from || to ? inInterval(dataAct1c(r)) : true))
       .map((r) => ({
         id: r.id,
-        label: `${r.actSeries || ""} ${r.actNumber} · ${r.supplier || ""}`.trim(),
+        label: Number(r.actNumber || 0) > 0
+          ? `${r.actSeries || ""} ${r.actNumber} · ${r.supplier || ""}`.trim()
+          // Fara act emis: se arata recepția, ca omul sa stie ce incarca.
+          : `Recepția #${r.id} · ${r.supplier || ""} (1C va numerota)`.trim(),
         extra: currencyLike(Number(r.amountToPay ?? r.preliminaryPayableAmount ?? 0)),
         date: String(dataAct1c(r) || "").slice(0, 10),
         exported1cAt: r.exported1cAt || null
