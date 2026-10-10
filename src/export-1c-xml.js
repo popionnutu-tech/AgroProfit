@@ -276,6 +276,9 @@ function construiesteXmlFurnizori(randuri, optiuni = {}) {
 
 module.exports = {
   construiesteXmlFurnizori,
+  // Expus ca sa NU existe un al doilea cache al aceluiasi fisier de 186 KB: modulul de
+  // acte are nevoie de aceleasi reguli in fisierul lui.
+  reguliSchimb,
   MAX_FURNIZORI_XML,
   // exportate pentru teste
   verificaNumeLiteral,

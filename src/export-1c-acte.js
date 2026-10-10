@@ -30,6 +30,10 @@ const path = require("node:path");
 const CALE_SABLON = path.join(__dirname, "1c", "sablon-act.xml");
 const CALE_ID = path.join(__dirname, "1c", "identificatori.json");
 
+// Plafoane masurate, nu alese din burta: vezi comentariul din `construiesteXmlActe`.
+const MAX_ACTE_XML = 120;
+const MAX_RANDURI_XML = 300;
+
 let sablonCache = null;
 
 function sablon() {
@@ -74,6 +78,20 @@ function curat(valoare) {
 }
 
 const txt = (v) => esc(curat(v).trim());
+
+// Inlocuire prin FUNCTIE, nu prin sir.
+//
+// `String.replace` cu un sir interpreteaza `$&`, `` $` ``, `$'`, `$1` din INLOCUITOR. Un
+// furnizor numit `` $` `` umfla fisierul (masurat: 16x pe un singur act), iar `$&` scrie
+// literal marcajul nesubstituit in document. Escaparea XML nu are cum sa prinda asta,
+// fiindca `$` e un caracter XML perfect legal.
+// Cu o functie, textul se pune asa cum e.
+function pune(text, marcaj, valoare, peste_tot = false) {
+  const v = String(valoare);
+  return peste_tot
+    ? text.split(marcaj).join(v)
+    : text.replace(marcaj, () => v);
+}
 
 // GUID DETERMINIST pentru document, derivat din firma + serie + numar.
 //
@@ -122,28 +140,30 @@ function obiectAct(act) {
   const { rand, doc } = sablon();
 
   const randuri = act.randuri
-    .map((r) =>
-      rand
-        .replace("{{CANTITATE}}", nr(r.cantitateKg, 3))
-        .replace("{{SUMA}}", nr(r.suma))
-        .replace("{{SUMA}}", nr(r.suma))
-        .replace("{{GUID_PRODUS}}", txt(r.guidProdus))
-    )
+    .map((r) => {
+      let t = rand;
+      t = pune(t, "{{CANTITATE}}", nr(r.cantitateKg, 3));
+      t = pune(t, "{{SUMA}}", nr(r.suma), true);
+      t = pune(t, "{{GUID_PRODUS}}", txt(r.guidProdus));
+      return t;
+    })
     .join("\n");
 
   const zi = String(act.data || "").slice(0, 10);
-  return doc
-    .replace("{{GUID_DOC}}", guidDocument("act", act.companyId, act.serie, act.numar))
-    .replace("{{DATA_ORA}}", `${zi}T12:00:00`)
-    .replace("{{DATA}}", zi)
-    .replace("{{NUMAR}}", txt(act.numar))
-    .replace("{{SERIE}}", txt(act.serie))
-    .replace("{{TEMEI}}", txt(act.temei))
-    .replace(/\{\{FURNIZOR\}\}/g, txt(act.furnizor))
-    .replace("{{COD_FISCAL}}", txt(act.codFiscal))
-    .replace(/\{\{TOTAL\}\}/g, nr(act.total))
-    .replace("{{IMPOZIT}}", nr(act.impozit))
-    .replace("{{RANDURI}}", randuri);
+  let t = doc;
+  t = pune(t, "{{GUID_DOC}}", guidDocument("act", act.companyId, act.serie, act.numar));
+  t = pune(t, "{{DATA_ORA}}", `${zi}T12:00:00`);
+  t = pune(t, "{{DATA}}", zi);
+  t = pune(t, "{{NUMAR}}", txt(act.numar));
+  t = pune(t, "{{SERIE}}", txt(act.serie));
+  t = pune(t, "{{TEMEI}}", txt(act.temei));
+  t = pune(t, "{{FURNIZOR}}", txt(act.furnizor), true);
+  t = pune(t, "{{COD_FISCAL}}", txt(act.codFiscal));
+  t = pune(t, "{{TOTAL}}", nr(act.total), true);
+  t = pune(t, "{{IMPOZIT}}", nr(act.impozit));
+  // RANDURILE la final: ele contin deja valori substituite, deci nu mai pot fi atinse.
+  t = pune(t, "{{RANDURI}}", randuri);
+  return t;
 }
 
 /**
@@ -153,6 +173,37 @@ function obiectAct(act) {
  */
 function construiesteXmlActe(acte, optiuni = {}) {
   const lista = Array.isArray(acte) ? acte : [];
+
+  // PLAFON DUBLU, verificat INAINTE de constructie.
+  //
+  // Masurat: 190.995 octeti (reguli + antet, o data) + 14.967 per act + 3.462 per rind.
+  // Plafonul de 4,5 MB al raspunsului serverless se atinge la ~244 de acte cu un rind sau
+  // ~140 cu cinci. `MAX_IDS_1C = 500` NU acopera cazul: 500 de receptii pot fi 500 de acte
+  // separate (fluxul normal — un furnizor, o receptie) = 9,4 MB.
+  //
+  // Un plafon doar pe ACTE e insuficient (120 x 50 de rinduri = 20,8 MB); unul doar pe
+  // RINDURI, la fel. Ambele: 190.995 + 14.967x120 + 3.462x300 = 2,89 MB, adica 64% din
+  // limita in cel mai rau caz admis.
+  //
+  // XML-ul e de ~109x mai mare decat CSV-ul pe cazul normal, de-asta plafonul difera atit
+  // de mult fata de cel de la furnizori.
+  const randuriTotal = lista.reduce(
+    (s, a) => s + (Array.isArray((a || {}).randuri) ? a.randuri.length : 0), 0
+  );
+  const preaMult = (mesaj) => {
+    const e = new Error(`${mesaj} Descarca in transe mai mici sau foloseste formatul CSV.`);
+    e.statusCode = 400;
+    throw e;
+  };
+  if (lista.length > MAX_ACTE_XML) {
+    preaMult(`Prea multe acte intr-un singur fisier XML (${lista.length}, maxim ${MAX_ACTE_XML}).`);
+  }
+  if (randuriTotal > MAX_RANDURI_XML) {
+    preaMult(
+      `Prea multe rinduri de marfa intr-un singur fisier XML ` +
+      `(${randuriTotal}, maxim ${MAX_RANDURI_XML}).`
+    );
+  }
   const acum = optiuni.acum instanceof Date ? optiuni.acum : new Date();
   const reguli = String(optiuni.reguli || "").trim();
   const stampila = dataLocala(acum);
@@ -204,6 +255,8 @@ function construiesteXmlActe(acte, optiuni = {}) {
 
 module.exports = {
   construiesteXmlActe,
+  MAX_ACTE_XML,
+  MAX_RANDURI_XML,
   identificatori,
   // exportate pentru teste
   guidDocument,
