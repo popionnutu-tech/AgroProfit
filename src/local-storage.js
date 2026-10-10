@@ -2936,6 +2936,44 @@ async function listAuditLogs() {
   return (state.auditLogs || []).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 }
 
+// Jurnalul de modificari, CAUTAT si FILTRAT PE SERVER.
+//
+// Separata de `listAuditLogs`, care intoarce o LISTA si e folosita de inchiderea de zi, de
+// alerte, de bot si de tabloul de bord. Schimbandu-i forma, toate patru s-ar fi rupt tacit.
+//
+// Ecranul de audit intorcea tot jurnalul — la 3 ani, zeci de MB catre browser — iar
+// interfata afisa 20 de randuri. Restul se descarca degeaba.
+//
+// Filtrarea pe perioada merge pe `createdAt`, care e ISO: comparatia de siruri e suficienta
+// si evita construirea a zeci de mii de obiecte `Date`.
+const AUDIT_MAX = 500;
+
+async function cautaAuditLogs(options = {}) {
+  const state = readReceiptsState();
+  const from = String(options.from || "").trim().slice(0, 10);
+  const to = String(options.to || "").trim().slice(0, 10);
+  const cautat = String(options.q || "").trim().toLowerCase().slice(0, 100);
+  const limita = Math.min(Math.max(Number(options.limit) || AUDIT_MAX, 1), AUDIT_MAX);
+
+  const potrivite = [];
+  for (const item of state.auditLogs || []) {
+    const zi = String(item.createdAt || "").slice(0, 10);
+    if (from && zi < from) continue;
+    if (to && zi > to) continue;
+    if (cautat) {
+      const text = `${item.entityType || ""} ${item.entityId || ""} ${item.action || ""} ` +
+        `${item.user || ""} ${item.reason || ""}`.toLowerCase();
+      if (!text.includes(cautat)) continue;
+    }
+    potrivite.push(item);
+  }
+
+  potrivite.sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+  // `total` separat de randurile intoarse: omul trebuie sa stie cate sint, chiar daca vede
+  // doar primele. Acelasi tipar ca la lista de export 1C.
+  return { auditLogs: potrivite.slice(0, limita), total: potrivite.length, limita };
+}
+
 // Act de verificare: full statement for one supplier (Etapa 7)
 async function getSupplierStatement(partnerId, fromDate, toDate) {
   const state = readReceiptsState();
@@ -7955,6 +7993,7 @@ module.exports = {
   getStockSummary,
   getSupplierStatement,
   listAuditLogs,
+  cautaAuditLogs,
   listComplaints,
   listDeliveries,
   listOpeningDebtItems,
