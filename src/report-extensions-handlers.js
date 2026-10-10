@@ -330,7 +330,10 @@ async function exportSuppliers1cHandler(req, res) {
           denumire: r._denumire,
           persoanaFizica: r._persoanaFizica === true,
           adresa: r["Adresa juridica"],
-          telefon: r.Telefon
+          telefon: r.Telefon,
+          // IBAN-ul pleaca intr-un obiect SEPARAT (`РасчетныеСчета`), emis imediat dupa
+          // contraparte. Fara linia asta, functia exista dar nu primea niciodata nimic.
+          iban: r.IBAN
         }))
       );
       // Cati au intrat efectiv in fisier — citit de interfata, ca hint-ul sa nu raporteze

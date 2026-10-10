@@ -35,6 +35,9 @@ const CALE_ID = path.join(__dirname, "1c", "identificatori.json");
 // Cite numere de ordine consuma un bloc din sablon. Cu marja: numerele trebuie doar sa
 // fie unice pe fisier, nu compacte.
 const NPP_PAS = 100;
+// Cite sloturi de numerotare primeste un act. Randul N consuma slotul N, deci numarul de
+// randuri trebuie sa ramina sub asta.
+const NPP_SLOTURI = 60;
 const MAX_ACTE_XML = 120;
 const MAX_RANDURI_XML = 300;
 // Ordinul de casa e mult mai mic decat actul (~6,7 KB fata de ~15 KB), deci incape mai mult.
@@ -80,6 +83,16 @@ function identificatori() {
 function esc(valoare) {
   return String(valoare === null || valoare === undefined ? "" : valoare)
     .replace(/&/g, "&amp;")
+    // ACOLADELE se neutralizeaza la SURSA, nu se lasa sa ajunga marcaje.
+    //
+    // Garda finala prinde un `{{TOTAL}}` venit din date si refuza sa genereze fisierul —
+    // fail-closed, corect. Dar efectul era disproportionat: nota unei receptii e scrisa de
+    // OPERATOR, iar un singur rand rau omora TOT lotul de acte, cu un mesaj care trimitea
+    // contabilul sa caute in sablon, nu in date.
+    // Escapate, acoladele se reparseaza identic in 1C (nota se vede literal), dar nu mai pot
+    // forma un marcaj. Garda ramane, pentru derivele sablonului.
+    .replace(/\{/g, "&#123;")
+    .replace(/\}/g, "&#125;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
@@ -272,6 +285,18 @@ function construiesteXmlActe(acte, optiuni = {}) {
     // numeroteze. Pentru actele emise din aplicatie, numarul ajunge pe hirtia semnata si
     // pleaca aici asa cum e.
     const randuri = Array.isArray(act.randuri) ? act.randuri.filter((r) => r && r.guidProdus) : [];
+    // Fiecare act primeste 60 de sloturi de numerotare; al 61-lea rand ar intra peste
+    // intervalul actului urmator, iar `Нпп` e identitatea obiectului in fisier — o coliziune
+    // ar lega un rand de produsul altui act. Azi un act acopera maximum 50 de receptii, deci
+    // marja e de 10; garda face imposibil ce acum e doar improbabil.
+    if (randuri.length >= NPP_SLOTURI - 1) {
+      const e = new Error(
+        `Actul ${act.serie || ""} ${act.numar || ""} are ${randuri.length} randuri, ` +
+        `peste limita de ${NPP_SLOTURI - 2} pe un singur act. Imparte-l in acte mai mici.`
+      );
+      e.statusCode = 400;
+      throw e;
+    }
     if (!randuri.length) {
       // Fara GUID de produs n-avem ce exporta: 1C ar crea un produs nou la fiecare import.
       // Se raporteaza, nu se trece tacit.
@@ -284,7 +309,7 @@ function construiesteXmlActe(acte, optiuni = {}) {
     // Fiecare act isi primeste propriul interval de numere de ordine: in formatul de
     // schimb, `Нпп` e numarul obiectului in FISIER si prin el se rezolva referintele.
     // Repetand numerele din sablon, al doilea produs al unui act putea deveni primul.
-    obiecte.push(obiectAct({ ...act, randuri }, (obiecte.length + 1) * NPP_PAS * 60));
+    obiecte.push(obiectAct({ ...act, randuri }, (obiecte.length + 1) * NPP_PAS * NPP_SLOTURI));
   }
 
   // Aceeasi invarianta ca la furnizori: un fisier VALID SI GOL e cel mai periculos rezultat —
@@ -375,7 +400,7 @@ function construiesteXmlOrdinePlata(plati, optiuni = {}) {
     const zi = txt(String(plata.data || "").slice(0, 10));
     obiecte.push(
       completeaza(sablonPlata(), {
-        NPP: (obiecte.length + 1) * NPP_PAS * 60,
+        NPP: (obiecte.length + 1) * NPP_PAS * NPP_SLOTURI,
         GUID_DOC: guidDocument("plata", plata.companyId, "", plata.id),
         DATA_ORA: `${zi}T12:00:00`,
         FURNIZOR: txt(plata.furnizor),
