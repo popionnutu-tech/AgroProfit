@@ -1,0 +1,28 @@
+{
+  "_comentariu": [
+    "Identificatorii FICSI ai instalarii 1C, cititi din exporturile REALE ale utilizatorului",
+    "(Акт закупки.xml si РКО.xml), nu inventati. In formatul de schimb, 1C potriveste aceste",
+    "obiecte dupa GUID: o valoare inventata ar CREA obiecte noi la fiecare import.",
+    "",
+    "Se schimba doar daca se reconstruieste baza 1C. Produsele NU sint aici: ele se adauga des",
+    "si se leaga din nomenclator, pe fiecare produs (campul `guid1c`).",
+    "",
+    "Fisierul e inclus in bundle prin `includeFiles` din vercel.json."
+  ],
+  "firma": "599e7f3a-877f-11e4-9285-70f395a1a7ca",
+  "firmaDenumire": "PAT-9 SRL",
+  "depozit": "13651e1f-8809-11e4-9285-70f395a1a7ca",
+  "depozitDenumire": "Основной склад",
+  "activitate": "599e7f3b-877f-11e4-9285-70f395a1a7ca",
+  "utilizator": "f9805566-4334-11ee-8135-2cfda1bbfecf",
+  "contBancarFirma": "98dfad8a-9e2e-11e4-8388-001d7d7bc145",
+  "impozitVenit": "90eb3469-0d5f-481f-a98e-d24f59e14efa",
+  "contImpozitVenit": "46c38095-21b1-4ff8-bfae-6021c30177ef",
+  "cotaTva": "a1f41ca4-96b9-4393-a76b-ee6ab7aee11f",
+  "cotaTvaNume": "Ставка8",
+  "inspectoratFiscal": "Briceni",
+  "inspectoratFiscalCod": "32",
+  "valuta": "LEI",
+  "valutaCod": "498",
+  "unitateMasuraCod": "005"
+}
