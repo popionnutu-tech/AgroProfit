@@ -1,4 +1,5 @@
-const { construiesteXmlFurnizori } = require("./export-1c-xml");
+const { construiesteXmlFurnizori, reguliSchimb } = require("./export-1c-xml");
+const { construiesteXmlActe, construiesteXmlOrdinePlata } = require("./export-1c-acte");
 
 const {
   exportPaymentsFor1c,
@@ -190,15 +191,68 @@ function formatCerut(req, suportaXml) {
 
 async function exportPurchaseActs1cHandler(req, res) {
   try {
-    formatCerut(req, false); // refuza `?format=xml`: ruta asta scoate doar CSV
     const q = req.query || {};
     const { columns, rows } = await exportPurchaseActsFor1c({
       from: q.from,
       to: q.to,
+      // `?includeUnissued=1` -> si receptiile fara act emis din aplicatie (perioada veche,
+      // unde numerele sint scrise de mina si 1C numeroteaza singur).
+      includeUnissued: ["1", "true"].includes(String(q.includeUnissued || "").toLowerCase()),
       onlyNew: !["1", "true"].includes(String(q.includeExported || "").toLowerCase()),
       receiptIds: idsDinCerere(req)
     });
-    trimiteCsv1c(res, columns, rows, `acte-achizitie-1c-${new Date().toISOString().slice(0, 10)}.csv`);
+    const zi = new Date().toISOString().slice(0, 10);
+    if (formatCerut(req, true) === "xml") {
+      // Randurile CSV sint PER RECEPTIE; un act poate acoperi mai multe. Se grupeaza dupa
+      // receptia PURTATOARE (`_id`), ca actul sa plece cu toate randurile lui — altfel in 1C
+      // ar intra tot atitea acte cite receptii, fiecare cu totalul intreg.
+      const peAct = new Map();
+      for (const r of rows) {
+        const cheie = Number(r._id);
+        if (!peAct.has(cheie)) {
+          peAct.set(cheie, {
+            receiptId: cheie,
+            numar: Number(r._numar || 0),
+            serie: r._serie,
+            data: r._data,
+            companyId: r._companyId,
+            furnizor: r._furnizor,
+            codFiscal: r._codFiscal,
+            // Numarul recepției in „Temei": 1C arata rubrica asta in lista de documente,
+            // deci actul se poate confrunta cu recepția dintr-o privire.
+            temeiuri: [],
+            total: 0,
+            net: 0,
+            randuri: []
+          });
+        }
+        const act = peAct.get(cheie);
+        act.temeiuri.push(`Recepția #${r["Nr. recepție"]} · ${r.Produs || ""}`.trim());
+        act.total += Number(r._valoare || 0);
+        act.net += Number(r._net || 0);
+        act.randuri.push({
+          guidProdus: r._guidProdus,
+          cantitateKg: Number(r._kg || 0),
+          suma: Number(r._valoare || 0)
+        });
+      }
+      const acte = [...peAct.values()].map((a) => ({
+        ...a,
+        temei: a.temeiuri.join("; ").slice(0, 200),
+        // `Сумма` e BRUTUL, `СуммаПН` impozitul retinut din el — ca in exportul real al 1C.
+        impozit: Math.max(a.total - a.net, 0)
+      }));
+      const r = construiesteXmlActe(acte, { reguli: reguliSchimb() });
+      if (typeof res.setHeader === "function") {
+        res.setHeader("X-Export-Scrise", String(r.scrise));
+        res.setHeader("X-Export-Sarite", String(r.sarite));
+        if (r.motive.length) {
+          res.setHeader("X-Export-Motiv", encodeURIComponent(r.motive[0].slice(0, 300)));
+        }
+      }
+      return trimiteXml1c(res, r.xml, `acte-achizitie-1c-${zi}.xml`);
+    }
+    trimiteCsv1c(res, columns, rows, `acte-achizitie-1c-${zi}.csv`);
   } catch (error) {
     console.error("Failed to export purchase acts for 1C:", error.message);
     return sendJson(res, error.statusCode || 400, {
@@ -211,7 +265,6 @@ async function exportPurchaseActs1cHandler(req, res) {
 // contul contabil, iar actul justifica datoria.
 async function exportPayments1cHandler(req, res) {
   try {
-    formatCerut(req, false); // refuza `?format=xml`: ruta asta scoate doar CSV
     const q = req.query || {};
     const { columns, rows } = await exportPaymentsFor1c({
       from: q.from,
@@ -219,7 +272,33 @@ async function exportPayments1cHandler(req, res) {
       onlyNew: !["1", "true"].includes(String(q.includeExported || "").toLowerCase()),
       transactionIds: idsDinCerere(req)
     });
-    trimiteCsv1c(res, columns, rows, `ordine-plata-1c-${new Date().toISOString().slice(0, 10)}.csv`);
+    const zi = new Date().toISOString().slice(0, 10);
+    if (formatCerut(req, true) === "xml") {
+      const r = construiesteXmlOrdinePlata(
+        rows.map((x) => ({
+          id: x._id,
+          data: x._data,
+          companyId: x._companyId,
+          furnizor: x._furnizor,
+          codFiscal: x._codFiscal,
+          temei: x._temei,
+          // Goale cind reconstituirea NU e sigura (cote de retinere diferite): atunci plata
+          // se sare, cu motiv, in loc sa plece cu un impozit inventat.
+          brut: x._brut,
+          impozit: x._impozit
+        })),
+        { reguli: reguliSchimb() }
+      );
+      if (typeof res.setHeader === "function") {
+        res.setHeader("X-Export-Scrise", String(r.scrise));
+        res.setHeader("X-Export-Sarite", String(r.sarite));
+        if (r.motive.length) {
+          res.setHeader("X-Export-Motiv", encodeURIComponent(r.motive[0].slice(0, 300)));
+        }
+      }
+      return trimiteXml1c(res, r.xml, `ordine-plata-1c-${zi}.xml`);
+    }
+    trimiteCsv1c(res, columns, rows, `ordine-plata-1c-${zi}.csv`);
   } catch (error) {
     console.error("Failed to export payments for 1C:", error.message);
     return sendJson(res, error.statusCode || 400, {
@@ -306,6 +385,7 @@ async function listPending1cHandler(req, res) {
       kind: q.kind,
       from: q.from,
       to: q.to,
+      includeUnissued: ["1", "true"].includes(String(q.includeUnissued || "").toLowerCase()),
       includeExported: ["1", "true"].includes(String(q.includeExported || "").toLowerCase())
     });
     // PLAFON PE SERVER, nu doar la randare. Descarcarea si marcarea accepta oricum maximum

@@ -137,14 +137,13 @@ const stockDustHintEl = document.getElementById("stock-dust-hint");
 // Criteriul de „de incarcat" NU e data, e MARCAJUL: un act facut de depozitar dupa ora 17
 // apare la urmatorul export, fara sa fie incarcat de doua ori si fara sa se piarda intre
 // intervale de date. Marcajul il pune omul, dupa un import reusit.
-// `xml: true` = tipul are si formatul nativ de schimb 1C. Deocamdata doar furnizorii:
-// actele si platile se leaga prin GUID de produs, depozit si firma, iar acele GUID-uri
-// exista numai in 1C si inca nu sint captate in nomenclator. Pana atunci, selectorul se
-// ascunde pe acele taburi — altfel omul ar cere XML si ar primi CSV, fara sa afle.
+// `xml: true` = tipul are si formatul nativ de schimb 1C. Toate trei il au: produsele se
+// leaga prin identificatorul 1C din nomenclator, iar restul referintelor sint in sablonul
+// construit din documentele reale.
 const EXPORT_1C_TIPURI = {
   suppliers: { ruta: "/api/exports/suppliers-1c", eticheta: "Furnizori", fisier: "furnizori", xml: true },
-  receipts: { ruta: "/api/exports/purchase-acts-1c", eticheta: "Acte de achiziție", fisier: "acte-achizitie" },
-  payments: { ruta: "/api/exports/payments-1c", eticheta: "Ordine de plată", fisier: "ordine-plata" }
+  receipts: { ruta: "/api/exports/purchase-acts-1c", eticheta: "Acte de achiziție", fisier: "acte-achizitie", xml: true },
+  payments: { ruta: "/api/exports/payments-1c", eticheta: "Ordine de plată", fisier: "ordine-plata", xml: true }
 };
 
 // Formatul cerut, mărginit la ce suporta tipul curent.
@@ -156,6 +155,9 @@ function export1cFormat() {
 }
 
 function actualizeazaSelectorFormat1c() {
+  // Recepțiile fara act emis se incarca doar de pe tabul de acte: acolo au sens.
+  const vechi = document.getElementById("export-1c-unissued-wrap");
+  if (vechi) vechi.hidden = export1cTip !== "receipts";
   const wrap = document.getElementById("export-1c-format-wrap");
   const def = EXPORT_1C_TIPURI[export1cTip] || {};
   if (wrap) wrap.hidden = !def.xml;
@@ -220,6 +222,8 @@ async function incarcaLista1c() {
   if (from) q.set("from", from);
   if (to) q.set("to", to);
   if (include) q.set("includeExported", "1");
+  const vechi = document.getElementById("export-1c-unissued");
+  if (vechi && vechi.checked && export1cTip === "receipts") q.set("includeUnissued", "1");
   try {
     const res = await fetch(`/api/exports/1c/pending?${q}`);
     const data = await res.json().catch(() => ({}));
@@ -259,7 +263,7 @@ if (document.getElementById("export-1c-body")) {
       });
     }
   }
-  for (const id of ["export-1c-from", "export-1c-to", "export-1c-include"]) {
+  for (const id of ["export-1c-from", "export-1c-to", "export-1c-include", "export-1c-unissued"]) {
     const el = document.getElementById(id);
     if (el) el.addEventListener("change", incarcaLista1c);
   }
@@ -291,7 +295,9 @@ if (document.getElementById("export-1c-body")) {
       descarca.disabled = true;
       try {
         const format = export1cFormat();
-        const res = await fetch(`${def.ruta}?includeExported=1&format=${format}`, {
+        const vechi = document.getElementById("export-1c-unissued");
+        const faraAct = vechi && vechi.checked && export1cTip === "receipts" ? "&includeUnissued=1" : "";
+        const res = await fetch(`${def.ruta}?includeExported=1&format=${format}${faraAct}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ ids })
@@ -316,11 +322,14 @@ if (document.getElementById("export-1c-body")) {
         // un furnizor care nu ajunsese niciodata in 1C.
         const scrise = Number(res.headers.get("X-Export-Scrise"));
         const sarite = Number(res.headers.get("X-Export-Sarite"));
+        // Primul motiv, decodat: altfel omul vede „3 sarite" si nu stie de ce.
+        let motiv = "";
+        try { motiv = decodeURIComponent(res.headers.get("X-Export-Motiv") || ""); } catch (e) { motiv = ""; }
         const n = Number.isFinite(scrise) && scrise >= 0 ? scrise : ids.length;
         export1cHint(
           `${n} ${n === 1 ? "document" : "documente"} în fișier` +
             (Number.isFinite(sarite) && sarite > 0
-              ? `, ${sarite} sărite (fără cod fiscal sau fără denumire)`
+              ? `, ${sarite} sărite${motiv ? ` — ${motiv}` : ""}`
               : "") +
             ". După importul în 1C, apasă „Am încărcat în 1C”."
         );

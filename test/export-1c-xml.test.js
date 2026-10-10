@@ -389,21 +389,43 @@ test("handlerul scoate CSV cand nu se cere alt format, fara campuri interne", as
   });
 });
 
-test("`format=xml` pe acte si plati e REFUZAT, nu servit tacut ca CSV", async () => {
+test("`format=xml` merge acum pe TOATE trei tipurile", async () => {
   await withIsolatedWorkspace(async ({ load }) => {
     const storage = load("src/local-storage.js");
     await receptieEmisa(storage);
     const handlers = load("src/report-extensions-handlers.js");
-    for (const h of ["exportPurchaseActs1cHandler", "exportPayments1cHandler"]) {
+
+    // Actul se poate exporta in XML doar daca produsul e legat de nomenclatorul 1C.
+    await storage.updateConfigEntry("products", 1, {
+      name: "Floarea soarelui", code: "FS", unit: "tone", humidityNorm: 14, impurityNorm: 2,
+      guid1c: "c4fe64ec-a3fc-11eb-8111-2cfda1bbfecf",
+      changeReason: "test", changedBy: "admin"
+    });
+
+    for (const h of ["exportSuppliers1cHandler", "exportPurchaseActs1cHandler"]) {
       const res = raspunsFals();
       await handlers[h](
-        { query: { format: "xml" }, body: {}, currentUser: { roleCode: "admin" } },
+        { query: { format: "xml", all: "1" }, body: {}, currentUser: { roleCode: "admin" } },
         res
       );
-      // Fara garda, raspunsul era 200 cu CSV inauntru si extensia `.xml` pe fisier — iar
-      // contabilul ducea in 1C un fisier care nu se poate importa, convins ca e XML.
-      assert.equal(res.cod, 400, `${h} trebuia sa refuze formatul`);
-      assert.match(res.corp, /doar pentru furnizori/);
+      assert.equal(res.statusCode, 200, `${h}: ${res.corp.slice(0, 160)}`);
+      assert.match(res.antete["Content-Type"] || "", /xml/, h);
+      assert.match(res.corp, /<ФайлОбмена/, `${h} nu a scos un fisier de schimb`);
     }
+  });
+});
+
+test("un format necunoscut e REFUZAT, nu servit tacut ca CSV", async () => {
+  await withIsolatedWorkspace(async ({ load }) => {
+    const storage = load("src/local-storage.js");
+    await receptieEmisa(storage);
+    const handlers = load("src/report-extensions-handlers.js");
+    const res = raspunsFals();
+    await handlers.exportSuppliers1cHandler(
+      { query: { format: "pdf" }, body: {}, currentUser: { roleCode: "admin" } },
+      res
+    );
+    assert.equal(res.statusCode, 400);
+    assert.match(res.corp, /Format necunoscut/);
   });
 });

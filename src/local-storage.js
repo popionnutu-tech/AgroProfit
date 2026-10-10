@@ -7845,6 +7845,32 @@ function runMigrationIfNeeded() {
     }
     writeReceiptsState(state);
 
+    // ------------------------------------------------- produsele -> nomenclatorul 1C
+    //
+    // In formatul de schimb, 1C potriveste nomenclatura dupa GUID: fara el, fiecare import
+    // ar CREA un produs nou. GUID-urile de mai jos sint CITITE din exportul real al
+    // utilizatorului (`Nomenclator.xml`), nu inventate.
+    //
+    // Se completeaza doar unde lipseste: un produs legat deja de om nu se atinge. Potrivirea
+    // e pe denumire normalizata — cerealele au denumiri stabile.
+    const GUID_PRODUSE_1C = Object.assign(Object.create(null), {
+      grau: "c136b69a-13bf-11ed-811f-2cfda1bbfecf",         // „Griu alimentar" in 1C
+      griu: "c136b69a-13bf-11ed-811f-2cfda1bbfecf",
+      porumb: "c4fe64ee-a3fc-11eb-8111-2cfda1bbfecf",       // „01.11.13 Porumb"
+      "floarea soarelui": "c4fe64ec-a3fc-11eb-8111-2cfda1bbfecf",
+      soia: "033ad034-cbb1-11ec-811b-2cfda1bbfecf",         // „01.11.81 Soia boabe"
+      rapita: "97fbb511-adab-11f1-8176-2cfda1bbfecf",
+      "rapiță": "97fbb511-adab-11f1-8176-2cfda1bbfecf"
+    });
+    let produseLegate = 0;
+    for (const produs of config.products || []) {
+      if (String(produs.guid1c || "").trim()) continue;
+      const cheie = String(produs.name || "").trim().toLowerCase();
+      if (!Object.prototype.hasOwnProperty.call(GUID_PRODUSE_1C, cheie)) continue;
+      produs.guid1c = GUID_PRODUSE_1C[cheie];
+      produseLegate += 1;
+    }
+
     // ---------------------------------------------------------------- seria actelor -> AA
     //
     // Trecerea la o serie noua, ceruta de utilizator (10.10.2026). Seria veche „AP" are pe
@@ -7880,7 +7906,7 @@ function runMigrationIfNeeded() {
     config.systemSettings.migrationVersion = CURRENT_MIGRATION_VERSION;
     writeConfigState(config);
 
-    return { migrated: true, version: CURRENT_MIGRATION_VERSION, serieSchimbata };
+    return { migrated: true, version: CURRENT_MIGRATION_VERSION, serieSchimbata, produseLegate };
   } catch (error) {
     console.error("Migration failed:", error.message);
     return { migrated: false, error: error.message };
