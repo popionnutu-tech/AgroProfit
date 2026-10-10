@@ -6961,6 +6961,11 @@ async function exportPurchaseActsFor1c(options = {}) {
   // acte si 3.000 de parteneri, iar cazul rau (furnizor scos din nomenclator) scana toata
   // lista la fiecare act. Acelasi tipar ca mai sus.
   const parteneriPeId = new Map((config.partners || []).map((x) => [Number(x.id), x]));
+  // Produsele pe DENUMIRE normalizata: randul actului poarta denumirea inghetata la emitere,
+  // nu id-ul, fiindca nomenclatorul se poate redenumi dupa aceea.
+  const produsePeNume = new Map(
+    (config.products || []).map((x) => [String(x.name || "").trim().toLowerCase(), x])
+  );
 
   const randuri = [];
   for (const receipt of state.receipts || []) {
@@ -7030,7 +7035,25 @@ async function exportPurchaseActsFor1c(options = {}) {
         Temei: sursa.note || "",
         "Nr. recepție": rand.id,
         "Observatii export": avertisment,
-        _id: receipt.id
+        _id: receipt.id,
+        // CHEI STRUCTURALE, pentru exportul XML. Denumirile de mai sus sint etichete PENTRU
+        // OM si se pot redenumi oricind — legat de ele, XML-ul ar scoate tacit un fisier gol
+        // (masurat, la furnizori). Prefixul `_` le tine in afara CSV-ului.
+        _serie: cifre.series || receipt.actSeries || "",
+        _numar: Number(receipt.actNumber || 0),
+        _data: String(rand.date || receipt.actIssuedAt || "").slice(0, 10),
+        _companyId: Number(receipt.actCompanyId || 0),
+        _furnizor: cifre.supplierName || receipt.supplier || "",
+        _codFiscal: codCurent || codInghetat,
+        _temei: sursa.note || rand.product || "",
+        // Cifrele INGHETATE la emitere: brutul e `value`, iar impozitul diferenta pina la net.
+        _valoare: Number(rand.value || 0),
+        _net: Number(rand.netPay || 0),
+        _kg: kg,
+        // Produsul din nomenclatorul 1C. Gol = actul nu se poate exporta in XML.
+        _guidProdus: String((produsePeNume.get(
+          String(rand.product || sursa.product || "").trim().toLowerCase()
+        ) || {}).guid1c || "")
       });
     }
   }
@@ -7439,6 +7462,17 @@ async function exportPaymentsFor1c(options = {}) {
       Temei: String(t.note || "plata cereale").trim(),
       "Acte acoperite": acte,
       "Observatii export": avertismente.join("; "),
+      // CHEI STRUCTURALE pentru XML (vezi acelasi tipar la acte si la furnizori).
+      // `brut`/`impozit` sint goale cind reconstituirea NU e sigura — atunci plata se sare
+      // la export, cu motiv, in loc sa plece cu un impozit inventat.
+      _id: t.id,
+      _data: String(t.documentDate || "").slice(0, 10) || ziLucratoare(zi),
+      _companyId: Number(t.companyId || 0),
+      _furnizor: (partener && partener.name) || t.partner || "",
+      _codFiscal: String((partener && partener.idno) || "").trim(),
+      _temei: t.note || "",
+      _brut: brut === "" ? null : Number(brut),
+      _impozit: impozit === "" ? null : Number(impozit),
       _id: t.id
     });
   }
