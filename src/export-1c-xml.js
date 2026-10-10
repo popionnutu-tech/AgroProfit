@@ -182,6 +182,57 @@ function obiectContragent(nrq, rand) {
   );
 }
 
+// GUID DETERMINIST pentru contul bancar.
+//
+// `РасчетныеСчета` se potriveste in 1C dupa identificator, nu dupa IBAN. Unul aleator ar crea
+// un cont NOU la fiecare import al aceluiasi furnizor; unul derivat din (cod fiscal + IBAN)
+// face reimportul idempotent.
+// Nu e UUID criptografic si nu trebuie sa fie: conteaza sa fie stabil si distinct.
+function guidCont(cod, iban) {
+  const samanta = `cont|${String(cod || "")}|${String(iban || "").toUpperCase()}`;
+  let h1 = 0x811c9dc5;
+  let h2 = 0x01000193;
+  for (let i = 0; i < samanta.length; i += 1) {
+    const c = samanta.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 0x01000193) >>> 0;
+    h2 = Math.imul(h2 + c + i, 0x85ebca6b) >>> 0;
+  }
+  const hex = (n, lung) => (n >>> 0).toString(16).padStart(8, "0").slice(0, lung);
+  return [
+    hex(h1, 8),
+    hex(h2, 4),
+    `4${hex(Math.imul(h1 ^ h2, 0xc2b2ae35), 3)}`,
+    `${"89ab"[(h2 >>> 30) & 3]}${hex(Math.imul(h2 ^ 0x9e3779b9, 0x27d4eb2f), 3)}`,
+    `${hex(Math.imul(h1 + h2, 0x165667b1), 8)}${hex(Math.imul(h1 ^ 0x5bf03635, 0x9e3779b1), 4)}`
+  ].join("-");
+}
+
+// Contul bancar al unui furnizor, ca obiect 1C separat.
+// Intoarce "" daca nu exista IBAN — atunci contrapartea pleaca fara cont, ca pina acum.
+function obiectContBancar(nrq, rand) {
+  const iban = curataControl(rand.iban).trim().toUpperCase();
+  if (!iban) return "";
+  const cod = curataControl(rand.cod).trim();
+  const denumire = curataControl(rand.denumire).trim();
+  return (
+    `<Объект Нпп="${nrq}" Тип="СправочникСсылка.РасчетныеСчета" ` +
+    `ИмяПравила="РасчетныеСчета" НеЗамещать="true"><Ссылка Нпп="${nrq}">\n` +
+    proprietate("{УникальныйИдентификатор}", "Строка", guidCont(cod, iban)) +
+    `\t<Свойство Имя="Владелец" Тип="СправочникСсылка.Контрагенты"><Ссылка Нпп="${nrq + 1}">\n` +
+    proprietate("ФискКод", "Строка", cod) +
+    proprietate("Наименование", "Строка", denumire) +
+    `</Ссылка>\n\t</Свойство>\n` +
+    `</Ссылка>` +
+    // Banca se lasa GOALA: vezi comentariul de la `guidCont`.
+    referintaGoala("Банк", "СправочникСсылка.Банки") +
+    proprietate("Наименование", "Строка", "principal") +
+    proprietate("ПометкаУдаления", "Булево", "false") +
+    proprietate("РасчетныйСчет1", "Строка", iban) +
+    proprietate("РасчетныйСчет2", "Строка", "") +
+    `</Объект>`
+  );
+}
+
 // 1C scrie data fara fus orar, in ora locala. `toISOString()` ar da UTC, deci in Moldova
 // documentele ar aparea cu 2-3 ore inapoi — iar o exportare de la 01:00 ar cadea in ziua
 // precedenta. Se formateaza componentele locale.
@@ -196,7 +247,7 @@ function dataLocala1c(d) {
 /**
  * Construieste fisierul de schimb pentru FURNIZORI.
  *
- * @param {Array} randuri  obiecte { cod, denumire, persoanaFizica, adresa, telefon }
+ * @param {Array} randuri  obiecte { cod, denumire, persoanaFizica, adresa, telefon, iban }
  *
  * NU poarta banca si IBAN-ul, desi CSV-ul le are: in 1C contul bancar e un obiect
  * SEPARAT (`СправочникСсылка.РасчетныеСчета`), referit prin `ОснРасчСчет`. Trimis ca text
@@ -237,6 +288,10 @@ function construiesteXmlFurnizori(randuri, optiuni = {}) {
     }
     nrq += 1;
     obiecte.push(obiectContragent(nrq, rand));
+    // Contul bancar vine DUPA contraparte: `Владелец` o refera, deci ea trebuie sa existe
+    // deja cand 1C ajunge la cont.
+    const cont = obiectContBancar(nrq + 1000000, rand);
+    if (cont) obiecte.push(cont);
   }
 
   // INVARIANTA. Un fisier valid si GOL e cel mai periculos rezultat posibil: 1C il importa
