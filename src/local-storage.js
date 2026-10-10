@@ -2429,6 +2429,7 @@ function alocaPlatiPeReceptii(state) {
   // Plati cu ACOPERIRE ALEASA de om (`receiptIds`): se aloca intai, si DOAR pe receptiile
   // bifate. Vezi mai jos de ce exista.
   const platiTintite = [];
+  const platiLibere = [];
   for (const t of state.transactions || []) {
     if (t.referenceType !== "receipt" || t.direction !== "payment") continue;
     if (t.stornata === true) continue; // storned payments don't count
@@ -2438,9 +2439,15 @@ function alocaPlatiPeReceptii(state) {
     const partnerId = t.partnerId != null ? Number(t.partnerId) : (r ? Number(r.supplierId) : NaN);
     if (Number.isNaN(partnerId)) continue;
     paidByPartner.set(partnerId, (paidByPartner.get(partnerId) || 0) + Number(t.amount || 0));
-    const tinte = acoperire1Plata(t);
-    if (tinte.length) platiTintite.push({ partnerId, suma: Number(t.amount || 0), tinte });
     const when = t.createdAt || t.transactedAt || "";
+    const tinte = acoperire1Plata(t);
+    if (tinte.length) {
+      platiTintite.push({ id: Number(t.id), partnerId, suma: Number(t.amount || 0), tinte });
+    } else {
+      // Platile FARA bife se distribuie FIFO, dar tot trebuie sa stim ce au atins:
+      // se pastreaza in ordine cronologica, ca alocarea sa poata atribui corect.
+      platiLibere.push({ id: Number(t.id), partnerId, suma: Number(t.amount || 0), cand: String(when || "") });
+    }
     const prev = lastPaymentByPartner.get(partnerId);
     if (!prev || String(when) > String(prev)) lastPaymentByPartner.set(partnerId, when);
   }
@@ -2448,6 +2455,16 @@ function alocaPlatiPeReceptii(state) {
   // Distribuie plata fiecarui partener FIFO (cea mai veche receptie intai) pe receptiile lui.
   // O plata integrala catre furnizor stinge automat toate receptiile neachitate.
   const paidByReceipt = new Map();
+  // CINE pe CE: id de plata -> multimea receptiilor pe care le-a atins efectiv.
+  // Singura sursa pe care se poate sprijini exportul fiscal (cotele de retinere difera
+  // de la receptie la receptie), si se obtine fara cost: alocarea oricum trece pe aici.
+  const atinseDePlata = new Map();
+  const noteaza = (idPlata, idReceptie) => {
+    const cheie = Number(idPlata);
+    if (!Number.isFinite(cheie)) return;
+    if (!atinseDePlata.has(cheie)) atinseDePlata.set(cheie, new Set());
+    atinseDePlata.get(cheie).add(Number(idReceptie));
+  };
   const receiptsByPartner = new Map();
   for (const r of state.receipts || []) {
     if (!isReceiptInStock(r)) continue; // proiectul/receptia necantarita nu au inca datorie
@@ -2504,6 +2521,7 @@ function alocaPlatiPeReceptii(state) {
       const aplicat = Math.max(0, Math.min(target - dejaPus, disponibil));
       if (aplicat <= 0) continue;
       paidByReceipt.set(Number(r.id), dejaPus + aplicat);
+      noteaza(plata.id, r.id);
       disponibil -= aplicat;
       ramasPartener.set(
         plata.partnerId,
@@ -2514,18 +2532,58 @@ function alocaPlatiPeReceptii(state) {
 
   // APOI restul, FIFO pe tot partenerul (comportamentul dinainte, neatins pentru platile
   // vechi — care nu au `receiptIds` si deci cad integral aici).
+  // Restul se distribuie FIFO, dar PLATA CU PLATA, in ordine cronologica — nu dintr-o oala
+  // anonima. Totalurile ies identic; diferenta e ca acum se stie ce receptii a atins fiecare
+  // plata, iar exportul fiscal se poate sprijini pe asta.
+  const libereRamase = new Map();
+  for (const plata of platiLibere) {
+    libereRamase.set(plata.partnerId, (libereRamase.get(plata.partnerId) || 0));
+  }
+  const platiPePartener = new Map();
+  for (const plata of platiLibere) {
+    if (!platiPePartener.has(plata.partnerId)) platiPePartener.set(plata.partnerId, []);
+    platiPePartener.get(plata.partnerId).push(plata);
+  }
+  for (const [, lista] of platiPePartener) {
+    lista.sort((a, b) => String(a.cand).localeCompare(String(b.cand)) || a.id - b.id);
+  }
+
   for (const [pid, list] of receiptsByPartner) {
     // Lista e DEJA sortata FIFO mai sus, cand s-a calculat rangul. Nu se re-sorteaza.
-    let remaining = Math.max(0, Number(ramasPartener.get(pid) || 0));
+    // Potul partenerului ramine plafonul: o ajustare NEGATIVA de reclamatie il poate reduce
+    // sub suma platilor, iar alocarea nu are voie sa-l depaseasca.
+    let potul = Math.max(0, Number(ramasPartener.get(pid) || 0));
+    const platile = platiPePartener.get(pid) || [];
+    let idx = 0;
+    let dinPlata = platile.length ? platile[0].suma : 0;
+
     for (const r of list) {
+      if (potul <= 0) break;
       const target = receiptPayableValue(r);
       const dejaPus = Number(paidByReceipt.get(Number(r.id)) || 0);
-      const applied = Math.max(0, Math.min(target - dejaPus, remaining));
-      paidByReceipt.set(Number(r.id), dejaPus + applied);
-      remaining -= applied;
+      let deAcoperit = Math.max(0, Math.min(target - dejaPus, potul));
+      if (deAcoperit <= 0) continue;
+
+      // Se consuma din platile libere, in ordine, ca sa stim CINE a atins receptia.
+      while (deAcoperit > 0 && idx < platile.length) {
+        if (dinPlata <= 0) {
+          idx += 1;
+          if (idx >= platile.length) break;
+          dinPlata = platile[idx].suma;
+          continue;
+        }
+        const bucata = Math.min(dinPlata, deAcoperit);
+        noteaza(platile[idx].id, r.id);
+        dinPlata -= bucata;
+        deAcoperit -= bucata;
+      }
+
+      const aplicat = Math.max(0, Math.min(target - dejaPus, potul));
+      paidByReceipt.set(Number(r.id), dejaPus + aplicat);
+      potul -= aplicat;
     }
   }
-  return { paidByReceipt, lastPaymentByPartner };
+  return { paidByReceipt, lastPaymentByPartner, atinseDePlata };
 }
 
 // Cit s-a achitat EFECTIV pe o receptie, din aceeasi sursa ca ecranele. Nu `receipt.paidAmount`.
@@ -7361,33 +7419,28 @@ function brutDinNet1c(net, cota) {
   return Number(net) / (1 - c / 100);
 }
 
-// Receptiile pe care o plata le stinge, citite DE PE DOCUMENT.
+// Receptiile pe care o plata le stinge IN REALITATE, din alocarea efectiva.
 //
-// Versiunea anterioara deducea asta comparand alocarea cu si fara plata — doua treceri
-// complete peste tot registrul, pentru FIECARE plata. Masurat: 25 de secunde la 500 de
-// plati, peste limita de 30 a platformei, pe o ruta care produce documente fiscale.
+// Doua incercari gresite inainte:
+//  1. recalcularea alocarii per plata — corecta, dar patratica (25 s la 500 de plati);
+//  2. citirea de pe document — rapida, dar GRESITA: `appliedAmount === amount` e adevarat si
+//     cand banii s-au varsat FIFO pe alte receptii, cu alte cote. Masurat: o plata bifata pe
+//     o receptie cu 6% varsa 5.000 lei pe una cu 20%, iar exportul scria 679,15 lei impozit
+//     in loc de 1.610. Cifra aia ajunge in declaratie.
 //
-// Nu e nevoie: cand contabilul a bifat receptiile, scrie pe document; cand nu, plata e
-// legata de una singura si atribuita integral ei. Orice alt caz (stingere FIFO pe mai multe,
-// avans, barter) ramane NESIGUR — adica exact ce voiam oricum: coloane goale si avertisment,
-// in loc de un impozit reconstituit pe o baza presupusa.
-function receptiiAtinseDePlata(state, tranzactie) {
-  const alese = acoperire1Plata(tranzactie);
-  if (alese.length) return alese;
-
-  // Fara bife: o singura receptie, si numai daca toti banii au mers pe ea.
-  const unaSingura = Number(tranzactie.receiptId || 0);
-  if (!unaSingura) return [];
-  if (String(tranzactie.referenceType || "") !== "receipt") return [];
-  if (Number(tranzactie.advanceAmount || 0) > 0) return [];
-  const platit = Number(tranzactie.amount || 0);
-  const atribuit = Number(tranzactie.appliedAmount || 0);
-  if (Math.abs(atribuit - platit) >= 0.005) return [];
-  return [unaSingura];
+// Acum alocarea retine singura cine pe ce (`atinseDePlata`), intr-o singura trecere.
+function receptiiAtinseDePlata(alocare, tranzactie) {
+  const set = alocare && alocare.atinseDePlata
+    ? alocare.atinseDePlata.get(Number(tranzactie.id))
+    : null;
+  return set ? [...set] : [];
 }
 
 async function exportPaymentsFor1c(options = {}) {
   const state = readReceiptsState();
+  // O SINGURA alocare pentru tot exportul. Calculata per plata, costa 25 de secunde la 500
+  // de documente — peste limita platformei.
+  const alocareExport = alocaPlatiPeReceptii(state);
   const config = readConfigState();
   const conturi = conturi1c();
   const from = String(options.from || "").trim();
@@ -7445,7 +7498,7 @@ async function exportPaymentsFor1c(options = {}) {
     // Receptiile pe care plata le atinge EFECTIV, nu cea pe care a fost inregistrata.
     // `appliedAmount` nu mai e un indiciu: de cand avansul se masoara pe tot partenerul,
     // el e suma intreaga si pe o plata care stinge cinci receptii.
-    const atinse = receptiiAtinseDePlata(state, t);
+    const atinse = receptiiAtinseDePlata(alocareExport, t);
     const coteAtinse = new Set(
       atinse.map((r) => Number(receptiiPeId.get(Number(r)) ? receptiiPeId.get(Number(r)).withholdingPercent : NaN))
     );
