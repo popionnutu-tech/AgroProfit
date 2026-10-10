@@ -28,6 +28,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const CALE_SABLON = path.join(__dirname, "1c", "sablon-act.xml");
+const CALE_SABLON_PLATA = path.join(__dirname, "1c", "sablon-ordin-plata.xml");
 const CALE_ID = path.join(__dirname, "1c", "identificatori.json");
 
 // Plafoane masurate, nu alese din burta: vezi comentariul din `construiesteXmlActe`.
@@ -36,8 +37,24 @@ const CALE_ID = path.join(__dirname, "1c", "identificatori.json");
 const NPP_PAS = 100;
 const MAX_ACTE_XML = 120;
 const MAX_RANDURI_XML = 300;
+// Ordinul de casa e mult mai mic decat actul (~6,7 KB fata de ~15 KB), deci incape mai mult.
+const MAX_PLATI_XML = 400;
 
 let sablonCache = null;
+let sablonPlataCache = null;
+
+// Ordinul de casa n-are parte tabelara: un singur bloc DOC.
+function sablonPlata() {
+  if (sablonPlataCache === null) {
+    const text = fs.readFileSync(CALE_SABLON_PLATA, "utf8");
+    const doc = text.match(/<!--DOC-->\n([\s\S]*?)\n<!--\/DOC-->/);
+    if (!doc) {
+      throw new Error("Sablonul ordinului de plata 1C e stricat (lipseste marcajul DOC).");
+    }
+    sablonPlataCache = doc[1];
+  }
+  return sablonPlataCache;
+}
 
 function sablon() {
   if (sablonCache === null) {
@@ -287,8 +304,104 @@ function construiesteXmlActe(acte, optiuni = {}) {
   return { xml, scrise: obiecte.length, sarite: lista.length - obiecte.length, motive };
 }
 
+/**
+ * Ordinele de plata (`ДокументСсылка.РасходныйКассовый`) in formatul nativ 1C.
+ *
+ * ⚠️ `Сумма` e BRUTUL, iar `Нал05` impozitul retinut DIN el — verificat pe exportul real
+ * (`Сумма 8090.43`, `Нал05 485.43`, din casa ies 7.605,00). Registrul nostru tine suma NETA,
+ * deci brutul se reconstituie.
+ *
+ * Reconstituirea se face DOAR cand e sigura: toate receptiile stinse de plata au aceeasi
+ * cota inghetata. Cu cote diferite nu exista un singur brut din care sa iasa suma platita —
+ * orice cifra am scrie ar fi inventata, iar ea ajunge in `Нал05` si de acolo in declaratie.
+ * In acel caz plata se SARE, cu motiv (regula 13: mai bine lipsa decat gresit).
+ *
+ * Numarul documentului NU se trimite: 1C il genereaza singur
+ * (`ГенерироватьНовыйНомерИлиКодЕслиНеУказан`), spre deosebire de actul de achizitie, unde
+ * numarul e al nostru si ajunge pe hirtia semnata.
+ *
+ * @param {Array} plati  { id, data, companyId, furnizor, codFiscal, temei, brut, impozit }
+ * @returns {{xml: string, scrise: number, sarite: number, motive: string[]}}
+ */
+function construiesteXmlOrdinePlata(plati, optiuni = {}) {
+  const lista = Array.isArray(plati) ? plati : [];
+  const acum = optiuni.acum instanceof Date ? optiuni.acum : new Date();
+  const reguli = String(optiuni.reguli || "").trim();
+
+  // Acelasi rationament ca la acte, alt bloc: ordinul e ~6,7 KB, deci plafonul e mai larg.
+  // 190.995 + 6.700 x 400 = 2,87 MB, adica 64% din limita de 4,5 MB a platformei.
+  if (lista.length > MAX_PLATI_XML) {
+    const e = new Error(
+      `Prea multe ordine de plata intr-un singur fisier XML (${lista.length}, maxim ` +
+      `${MAX_PLATI_XML}). Descarca in transe mai mici sau foloseste formatul CSV.`
+    );
+    e.statusCode = 400;
+    throw e;
+  }
+
+  const obiecte = [];
+  const motive = [];
+  for (const plata of lista) {
+    const brut = Number((plata || {}).brut);
+    const impozit = Number((plata || {}).impozit);
+    if (!Number.isFinite(brut) || brut <= 0) {
+      // Fara brut sigur nu se poate intocmi ordinul: `Сумма` ar fi gresita, iar `Нал05`
+      // inventat. Se raporteaza, nu se trece tacit.
+      motive.push(
+        `plata #${(plata || {}).id || "?"}: suma bruta nu se poate stabili ` +
+        "(receptii cu cote de retinere diferite sau plata neatribuita) — completeaza in 1C"
+      );
+      continue;
+    }
+    const zi = txt(String(plata.data || "").slice(0, 10));
+    obiecte.push(
+      completeaza(sablonPlata(), {
+        NPP: (obiecte.length + 1) * NPP_PAS * 60,
+        GUID_DOC: guidDocument("plata", plata.companyId, "", plata.id),
+        DATA_ORA: `${zi}T12:00:00`,
+        FURNIZOR: txt(plata.furnizor),
+        COD_FISCAL: txt(plata.codFiscal),
+        TEMEI: txt(plata.temei),
+        BRUT: nr(brut),
+        IMPOZIT: nr(Number.isFinite(impozit) ? impozit : 0)
+      })
+    );
+  }
+
+  if (lista.length > 0 && obiecte.length === 0) {
+    throw new Error(
+      `Niciun ordin de plata nu a putut fi scris, desi au fost cerute ${lista.length}. ` +
+      (motive[0] || "Verifica platile.")
+    );
+  }
+
+  const idReguli = (reguli.match(/<Ид>([^<]+)<\/Ид>/) || [])[1] || "";
+  const stampila = dataLocala(acum);
+  const antet =
+    `<?xml version="1.0" encoding="UTF-8"?>\n` +
+    `<ФайлОбмена ВерсияФормата="2.0" ДатаВыгрузки="${esc(stampila)}" ` +
+    `НачалоПериодаВыгрузки="${esc(stampila)}" ОкончаниеПериодаВыгрузки="${esc(stampila)}" ` +
+    `ИмяКонфигурацииИсточника="БухгалтерияДляМолдовы" ` +
+    `ИмяКонфигурацииПриемника="БухгалтерияДляМолдовы" ` +
+    `ИдПравилКонвертации="${esc(idReguli)}" Комментарий="AgroProfit+">\n`;
+
+  const xml = "\ufeff" + antet + reguli + "\n" + obiecte.join("\n") + "\n</ФайлОбмена>\n";
+
+  const ramase = xml.match(/\{\{\w+(?:\+\d+)?\}\}/g);
+  if (ramase) {
+    throw new Error(
+      `Sablonul ordinului de plata a ramas cu marcaje necompletate: ` +
+      `${[...new Set(ramase)].join(", ")}. Nu s-a generat niciun fisier.`
+    );
+  }
+
+  return { xml, scrise: obiecte.length, sarite: lista.length - obiecte.length, motive };
+}
+
 module.exports = {
   construiesteXmlActe,
+  construiesteXmlOrdinePlata,
+  MAX_PLATI_XML,
   MAX_ACTE_XML,
   MAX_RANDURI_XML,
   identificatori,
