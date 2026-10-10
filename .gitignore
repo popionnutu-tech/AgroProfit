@@ -61,6 +61,12 @@ SECURITY-AUDIT-*.md
 # configurare (329 de reguli, zero coduri fiscale, zero nume) — verificat. Fara ele, fisierul
 # de schimb nu poate fi incarcat in 1C, deci trebuie sa calatoreasca impreuna cu codul.
 !src/1c/reguli-schimb.xml
+# Sabloanele de documente (actul si ordinul de plata), generate din exporturile reale cu
+# datele scoase — verificat independent: zero coduri fiscale, zero nume, zero IBAN-uri.
+# Fara ele modulul cade cu ENOENT in productie.
+# EXCEPTIE INGUSTA, pe prefix: `*.xml` TREBUIE sa ramina, altfel nomenclatorul de contragenti
+# descarcat din 1C ajunge publicat la prima modificare de cod.
+!src/1c/sablon-*.xml
 
 # Loc dedicat pentru documentele primite de la furnizori, daca e nevoie sa stea in folder.
 /scanuri/

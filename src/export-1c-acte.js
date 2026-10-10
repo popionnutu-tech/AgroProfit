@@ -31,6 +31,9 @@ const CALE_SABLON = path.join(__dirname, "1c", "sablon-act.xml");
 const CALE_ID = path.join(__dirname, "1c", "identificatori.json");
 
 // Plafoane masurate, nu alese din burta: vezi comentariul din `construiesteXmlActe`.
+// Cite numere de ordine consuma un bloc din sablon. Cu marja: numerele trebuie doar sa
+// fie unice pe fisier, nu compacte.
+const NPP_PAS = 100;
 const MAX_ACTE_XML = 120;
 const MAX_RANDURI_XML = 300;
 
@@ -79,18 +82,29 @@ function curat(valoare) {
 
 const txt = (v) => esc(curat(v).trim());
 
-// Inlocuire prin FUNCTIE, nu prin sir.
+// Substitutie intr-o SINGURA trecere.
 //
-// `String.replace` cu un sir interpreteaza `$&`, `` $` ``, `$'`, `$1` din INLOCUITOR. Un
-// furnizor numit `` $` `` umfla fisierul (masurat: 16x pe un singur act), iar `$&` scrie
-// literal marcajul nesubstituit in document. Escaparea XML nu are cum sa prinda asta,
-// fiindca `$` e un caracter XML perfect legal.
-// Cu o functie, textul se pune asa cum e.
-function pune(text, marcaj, valoare, peste_tot = false) {
-  const v = String(valoare);
-  return peste_tot
-    ? text.split(marcaj).join(v)
-    : text.replace(marcaj, () => v);
+// Doua capcane, amindoua gasite prin rulare, nu prin citire:
+//
+// 1. `String.replace` cu un SIR interpreteaza `$&`, `` $` ``, `$'`, `$1` din inlocuitor.
+//    Un furnizor numit `` $` `` insera prefixul real al sablonului — markup XML neescapat —
+//    in interiorul unui `<Значение>`, si rupea fisierul.
+// 2. Cu inlocuiri SECVENTIALE, o valoare substituita devreme poate contine ea insasi un
+//    marcaj. Un furnizor numit `{{TOTAL}}` aparea in act cu numele inlocuit de suma, fara
+//    nicio eroare.
+//
+// O singura trecere cu un inlocuitor-FUNCTIE le inchide pe amindoua: fiecare marcaj se
+// rezolva o data, din tabel, iar ce se pune nu mai e niciodata recitit.
+// Numele vine de la privilegiul cel mai mic — operatorul poate adauga un furnizor rapid,
+// cu nume la alegere (acelasi precedent ca injectia CSV din regula 13).
+function completeaza(text, valori) {
+  return text.replace(/\{\{(\w+)(?:\+(\d+))?\}\}/g, (potrivire, cheie, offset) => {
+    // `{{NPP+12}}`: numarul de ordine al obiectului in fisier. Sablonul poarta numerele din
+    // documentul original; aici se deplaseaza, ca obiectele sa fie unice pe tot fisierul.
+    if (cheie === "NPP") return String(Number(valori.NPP || 0) + Number(offset || 0));
+    if (!Object.prototype.hasOwnProperty.call(valori, cheie)) return potrivire;
+    return String(valori[cheie]);
+  });
 }
 
 // GUID DETERMINIST pentru document, derivat din firma + serie + numar.
@@ -103,7 +117,10 @@ function pune(text, marcaj, valoare, peste_tot = false) {
 // Nu e un UUID criptografic si nu trebuie sa fie: conteaza doar sa fie STABIL pentru acelasi
 // act si diferit intre acte. Se marcheaza ca versiunea 4, varianta RFC, ca 1C sa-l accepte.
 function guidDocument(prefix, companyId, serie, numar) {
-  const samanta = `${prefix}|${Number(companyId) || 0}|${String(serie || "").toUpperCase()}|${Number(numar) || 0}`;
+  // Samanta se normalizeaza EXACT ca valoarea tiparita (`txt` face trim): altfel seria
+  // „AP " si „AP" dadeau GUID-uri diferite pentru acelasi act, iar 1C crea un duplicat
+  // la reimport — exact ce mecanismul vrea sa evite.
+  const samanta = `${prefix}|${Number(companyId) || 0}|${String(serie || "").trim().toUpperCase()}|${Number(numar) || 0}`;
   let h1 = 0x811c9dc5;
   let h2 = 0x01000193;
   for (let i = 0; i < samanta.length; i += 1) {
@@ -136,34 +153,37 @@ function dataLocala(d) {
  * @param {Object} act  { numar, serie, data, companyId, furnizor, codFiscal, temei,
  *                        total, impozit, randuri: [{ guidProdus, cantitateKg, suma }] }
  */
-function obiectAct(act) {
+function obiectAct(act, nppBaza) {
   const { rand, doc } = sablon();
 
+  // Fiecare rind primeste propriul bloc de numere de ordine. Blocul din sablon foloseste
+  // numere pina la `NPP_PAS`; rindul N porneste de la baza + N * pas.
   const randuri = act.randuri
-    .map((r) => {
-      let t = rand;
-      t = pune(t, "{{CANTITATE}}", nr(r.cantitateKg, 3));
-      t = pune(t, "{{SUMA}}", nr(r.suma), true);
-      t = pune(t, "{{GUID_PRODUS}}", txt(r.guidProdus));
-      return t;
-    })
+    .map((r, i) =>
+      completeaza(rand, {
+        NPP: nppBaza + (i + 1) * NPP_PAS,
+        CANTITATE: nr(r.cantitateKg, 3),
+        SUMA: nr(r.suma),
+        GUID_PRODUS: txt(r.guidProdus)
+      })
+    )
     .join("\n");
 
-  const zi = String(act.data || "").slice(0, 10);
-  let t = doc;
-  t = pune(t, "{{GUID_DOC}}", guidDocument("act", act.companyId, act.serie, act.numar));
-  t = pune(t, "{{DATA_ORA}}", `${zi}T12:00:00`);
-  t = pune(t, "{{DATA}}", zi);
-  t = pune(t, "{{NUMAR}}", txt(act.numar));
-  t = pune(t, "{{SERIE}}", txt(act.serie));
-  t = pune(t, "{{TEMEI}}", txt(act.temei));
-  t = pune(t, "{{FURNIZOR}}", txt(act.furnizor), true);
-  t = pune(t, "{{COD_FISCAL}}", txt(act.codFiscal));
-  t = pune(t, "{{TOTAL}}", nr(act.total), true);
-  t = pune(t, "{{IMPOZIT}}", nr(act.impozit));
-  // RANDURILE la final: ele contin deja valori substituite, deci nu mai pot fi atinse.
-  t = pune(t, "{{RANDURI}}", randuri);
-  return t;
+  const zi = txt(String(act.data || "").slice(0, 10));
+  return completeaza(doc, {
+    NPP: nppBaza,
+    GUID_DOC: guidDocument("act", act.companyId, act.serie, act.numar),
+    DATA_ORA: `${zi}T12:00:00`,
+    DATA: zi,
+    NUMAR: txt(act.numar),
+    SERIE: txt(act.serie),
+    TEMEI: txt(act.temei),
+    FURNIZOR: txt(act.furnizor),
+    COD_FISCAL: txt(act.codFiscal),
+    TOTAL: nr(act.total),
+    IMPOZIT: nr(act.impozit),
+    RANDURI: randuri
+  });
 }
 
 /**
@@ -225,7 +245,10 @@ function construiesteXmlActe(acte, optiuni = {}) {
       );
       continue;
     }
-    obiecte.push(obiectAct({ ...act, randuri }));
+    // Fiecare act isi primeste propriul interval de numere de ordine: in formatul de
+    // schimb, `Нпп` e numarul obiectului in FISIER si prin el se rezolva referintele.
+    // Repetand numerele din sablon, al doilea produs al unui act putea deveni primul.
+    obiecte.push(obiectAct({ ...act, randuri }, (obiecte.length + 1) * NPP_PAS * 60));
   }
 
   // Aceeasi invarianta ca la furnizori: un fisier VALID SI GOL e cel mai periculos rezultat —
@@ -249,6 +272,17 @@ function construiesteXmlActe(acte, optiuni = {}) {
 
   const xml =
     "﻿" + antet + reguli + "\n" + obiecte.join("\n") + "\n</ФайлОбмена>\n";
+
+  // GARDA FINALA: un marcaj nesubstituit intr-un document FISCAL nu are voie sa plece.
+  // Prinde orice deriva viitoare a sablonului (un marcaj redenumit, unul nou uitat) si
+  // orice valoare care ar fi reusit sa strecoare acolade. Cade zgomotos, nu tacit.
+  const ramase = xml.match(/\{\{\w+(?:\+\d+)?\}\}/g);
+  if (ramase) {
+    throw new Error(
+      `Sablonul actului a ramas cu marcaje necompletate: ${[...new Set(ramase)].join(", ")}. ` +
+      "Nu s-a generat niciun fisier."
+    );
+  }
 
   return { xml, scrise: obiecte.length, sarite: lista.length - obiecte.length, motive };
 }
